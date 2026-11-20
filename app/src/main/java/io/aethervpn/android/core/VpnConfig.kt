@@ -1,0 +1,286 @@
+package io.aethervpn.android.core
+
+import android.content.Context
+import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
+
+enum class ProfileLevel(val label: String) {
+    BATTERY_EFFICIENT("Battery Efficient"),
+    BALANCED("Balanced"),
+    ADVANCED("Advanced")
+}
+
+enum class AetherProtocol(val cliProtocol: String, val label: String, val usesMasque: Boolean) {
+    MASQUE_H3("masque", "MASQUE (HTTP/3 QUIC)", true),
+    MASQUE_H2("masque", "MASQUE (HTTP/2 TCP)", true),
+    WIREGUARD("wg", "WireGuard (WARP)", false),
+    GOOL("gool", "GOOL (WireGuard over MASQUE)", true),
+    GOOL_CLASSIC("gool", "GOOL Classic (Nested WireGuard)", false),
+    MIM("mim", "MIM (Nested MASQUE)", true)
+}
+
+enum class ScanMode(val cliValue: String, val label: String) {
+    TURBO("turbo", "Turbo (Lowest battery)"),
+    BALANCED("balanced", "Balanced"),
+    THOROUGH("thorough", "Thorough"),
+    VERIFIED("verified", "Verified / Stealth"),
+    IRONCLAD("ironclad", "Ironclad (Deep verify)")
+}
+
+enum class IpFamily(val cliValue: String, val label: String) {
+    BOTH("both", "IPv4 + IPv6 (Dual-Stack)"),
+    IPV4("v4", "IPv4 Only"),
+    IPV6("v6", "IPv6 Only")
+}
+
+enum class NoizeProfile(val cliValue: String, val label: String) {
+    OFF("off", "Off (Best battery)"),
+    LIGHT("light", "Light"),
+    BALANCED("balanced", "Balanced"),
+    GFW("gfw", "Aggressive / GFW")
+}
+
+enum class SplitTunnelMode {
+    ALL_APPS,
+    EXCLUDE_SELECTED,
+    INCLUDE_ONLY_SELECTED
+}
+
+enum class AppThemeMode(val label: String) {
+    SYSTEM("System Default"),
+    DARK("Dark"),
+    LIGHT("Light")
+}
+
+/**
+ * Complete configuration model mapped 1:1 to verified CluvexStudio/Aether v2.4.0 capabilities.
+ * Local SOCKS5 endpoint is permanently locked to loopback (127.0.0.1).
+ */
+data class VpnConfig(
+    val profileLevel: ProfileLevel = ProfileLevel.BATTERY_EFFICIENT,
+    val protocol: AetherProtocol = AetherProtocol.MASQUE_H3,
+    val autoFallbackToH2: Boolean = true,
+    val quickReconnect: Boolean = true,
+    val scanMode: ScanMode = ScanMode.TURBO,
+    val manualPeer: String = "",
+    val ipFamily: IpFamily = IpFamily.BOTH,
+    val customDns: String = "",
+    val routeDirectRules: String = "",
+    val routeBlockRules: String = "",
+    val noizeProfile: NoizeProfile = NoizeProfile.OFF,
+    val tlsFragmentation: Boolean = false,
+    val tlsFragmentSize: Int = 64,
+    val tlsFragmentDelayMs: Int = 10,
+    val masqueSni: String = "",
+    val echEnabled: Boolean = false,
+    val tlsVerify: Boolean = false,
+    val disableQuicV2: Boolean = false,
+    val wgKeepaliveSecs: Int = 0,
+    val upstreamProxy: String = "",
+    val zeroTrustTeam: String = "",
+    val socksPort: Int = DEFAULT_SOCKS_PORT,
+    val tunMtu: Int = DEFAULT_TUN_MTU,
+    val splitTunnelMode: SplitTunnelMode = SplitTunnelMode.ALL_APPS,
+    val selectedPackages: Set<String> = emptySet(),
+    val statsRefreshIntervalMs: Long = 5_000L,
+    val themeMode: AppThemeMode = AppThemeMode.DARK,
+    val languageTag: String = "system"
+) {
+    val socksBindAddress: String
+        get() = "$LOOPBACK_HOST:$socksPort"
+
+    val ipv6Enabled: Boolean
+        get() = ipFamily == IpFamily.BOTH || ipFamily == IpFamily.IPV6
+
+    fun applyPreset(level: ProfileLevel): VpnConfig = when (level) {
+        ProfileLevel.BATTERY_EFFICIENT -> copy(
+            profileLevel = level,
+            protocol = AetherProtocol.MASQUE_H3,
+            autoFallbackToH2 = true,
+            quickReconnect = true,
+            scanMode = ScanMode.TURBO,
+            noizeProfile = NoizeProfile.OFF,
+            tlsFragmentation = false,
+            echEnabled = false,
+            statsRefreshIntervalMs = 5_000L
+        )
+
+        ProfileLevel.BALANCED -> copy(
+            profileLevel = level,
+            protocol = AetherProtocol.MASQUE_H3,
+            autoFallbackToH2 = true,
+            quickReconnect = true,
+            scanMode = ScanMode.BALANCED,
+            noizeProfile = NoizeProfile.OFF,
+            tlsFragmentation = false,
+            echEnabled = false,
+            statsRefreshIntervalMs = 3_000L
+        )
+
+        ProfileLevel.ADVANCED -> copy(
+            profileLevel = level,
+            statsRefreshIntervalMs = 3_000L
+        )
+    }
+
+    /**
+     * Exports non-confidential configuration to JSON for backup/restore.
+     * Deliberately excludes upstream proxy credentials and never touches private WARP keys.
+     */
+    fun toSafeBackupJson(): String {
+        val redactedUpstream = upstreamProxy.replace(Regex("://[^@]+@"), "://***@")
+        return JSONObject().apply {
+            put("schemaVersion", 1)
+            put("profileLevel", profileLevel.name)
+            put("protocol", protocol.name)
+            put("autoFallbackToH2", autoFallbackToH2)
+            put("quickReconnect", quickReconnect)
+            put("scanMode", scanMode.name)
+            put("manualPeer", manualPeer)
+            put("ipFamily", ipFamily.name)
+            put("customDns", customDns)
+            put("routeDirectRules", routeDirectRules)
+            put("routeBlockRules", routeBlockRules)
+            put("noizeProfile", noizeProfile.name)
+            put("tlsFragmentation", tlsFragmentation)
+            put("tlsFragmentSize", tlsFragmentSize)
+            put("tlsFragmentDelayMs", tlsFragmentDelayMs)
+            put("masqueSni", masqueSni)
+            put("echEnabled", echEnabled)
+            put("tlsVerify", tlsVerify)
+            put("disableQuicV2", disableQuicV2)
+            put("wgKeepaliveSecs", wgKeepaliveSecs)
+            put("upstreamProxy", if (redactedUpstream.contains("***@")) "" else redactedUpstream)
+            put("zeroTrustTeam", zeroTrustTeam)
+            put("splitTunnelMode", splitTunnelMode.name)
+            put("selectedPackages", JSONArray(selectedPackages.sorted()))
+            put("statsRefreshIntervalMs", statsRefreshIntervalMs)
+            put("themeMode", themeMode.name)
+            put("languageTag", languageTag)
+        }.toString(2)
+    }
+
+    companion object {
+        const val LOOPBACK_HOST = "127.0.0.1"
+        const val DEFAULT_SOCKS_PORT = 1819
+        const val DEFAULT_TUN_MTU = 1280
+        const val TUN_IPV4_ADDRESS = "198.18.0.1"
+        const val TUN_IPV4_PREFIX = 30
+        const val TUN_IPV6_ADDRESS = "fd00:ae7::1"
+        const val TUN_IPV6_PREFIX = 126
+        const val DNS_IPV4_PRIMARY = "1.1.1.1"
+        const val DNS_IPV4_SECONDARY = "1.0.0.1"
+        const val DNS_IPV6_PRIMARY = "2606:4700:4700::1111"
+
+        private const val PREFS_NAME = "aether_vpn_config"
+
+        fun fromBackupJson(rawJson: String): Result<VpnConfig> = runCatching {
+            val o = JSONObject(rawJson)
+            val pkgs = mutableSetOf<String>()
+            val arr = o.optJSONArray("selectedPackages")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let(pkgs::add)
+                }
+            }
+            VpnConfig(
+                profileLevel = enumOrDefault(o.optString("profileLevel"), ProfileLevel.BATTERY_EFFICIENT),
+                protocol = enumOrDefault(o.optString("protocol"), AetherProtocol.MASQUE_H3),
+                autoFallbackToH2 = o.optBoolean("autoFallbackToH2", true),
+                quickReconnect = o.optBoolean("quickReconnect", true),
+                scanMode = enumOrDefault(o.optString("scanMode"), ScanMode.TURBO),
+                manualPeer = o.optString("manualPeer", "").trim(),
+                ipFamily = enumOrDefault(o.optString("ipFamily"), IpFamily.BOTH),
+                customDns = o.optString("customDns", "").trim(),
+                routeDirectRules = o.optString("routeDirectRules", "").trim(),
+                routeBlockRules = o.optString("routeBlockRules", "").trim(),
+                noizeProfile = enumOrDefault(o.optString("noizeProfile"), NoizeProfile.OFF),
+                tlsFragmentation = o.optBoolean("tlsFragmentation", false),
+                tlsFragmentSize = o.optInt("tlsFragmentSize", 64).coerceIn(16, 1024),
+                tlsFragmentDelayMs = o.optInt("tlsFragmentDelayMs", 10).coerceIn(0, 200),
+                masqueSni = o.optString("masqueSni", "").trim(),
+                echEnabled = o.optBoolean("echEnabled", false),
+                tlsVerify = o.optBoolean("tlsVerify", false),
+                disableQuicV2 = o.optBoolean("disableQuicV2", false),
+                wgKeepaliveSecs = o.optInt("wgKeepaliveSecs", 0).coerceIn(0, 300),
+                upstreamProxy = o.optString("upstreamProxy", "").trim(),
+                zeroTrustTeam = o.optString("zeroTrustTeam", "").trim(),
+                splitTunnelMode = enumOrDefault(o.optString("splitTunnelMode"), SplitTunnelMode.ALL_APPS),
+                selectedPackages = pkgs,
+                statsRefreshIntervalMs = o.optLong("statsRefreshIntervalMs", 5_000L).coerceIn(2_000L, 15_000L),
+                themeMode = enumOrDefault(o.optString("themeMode"), AppThemeMode.DARK),
+                languageTag = o.optString("languageTag", "system")
+            )
+        }
+
+        fun load(context: Context): VpnConfig {
+            val p = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return VpnConfig(
+                profileLevel = enumOrDefault(p.getString("profile_level", null), ProfileLevel.BATTERY_EFFICIENT),
+                protocol = enumOrDefault(p.getString("protocol", null), AetherProtocol.MASQUE_H3),
+                autoFallbackToH2 = p.getBoolean("auto_fallback_h2", true),
+                quickReconnect = p.getBoolean("quick_reconnect", true),
+                scanMode = enumOrDefault(p.getString("scan_mode", null), ScanMode.TURBO),
+                manualPeer = p.getString("manual_peer", "").orEmpty(),
+                ipFamily = enumOrDefault(p.getString("ip_family", null), IpFamily.BOTH),
+                customDns = p.getString("custom_dns", "").orEmpty(),
+                routeDirectRules = p.getString("route_direct", "").orEmpty(),
+                routeBlockRules = p.getString("route_block", "").orEmpty(),
+                noizeProfile = enumOrDefault(p.getString("noize_profile", null), NoizeProfile.OFF),
+                tlsFragmentation = p.getBoolean("tls_fragmentation", false),
+                tlsFragmentSize = p.getInt("tls_fragment_size", 64),
+                tlsFragmentDelayMs = p.getInt("tls_fragment_delay", 10),
+                masqueSni = p.getString("masque_sni", "").orEmpty(),
+                echEnabled = p.getBoolean("ech_enabled", false),
+                tlsVerify = p.getBoolean("tls_verify", false),
+                disableQuicV2 = p.getBoolean("disable_quic_v2", false),
+                wgKeepaliveSecs = p.getInt("wg_keepalive", 0),
+                upstreamProxy = p.getString("upstream_proxy", "").orEmpty(),
+                zeroTrustTeam = p.getString("zerotrust_team", "").orEmpty(),
+                splitTunnelMode = enumOrDefault(p.getString("split_mode", null), SplitTunnelMode.ALL_APPS),
+                selectedPackages = p.getStringSet("selected_packages", emptySet())?.toSet() ?: emptySet(),
+                statsRefreshIntervalMs = p.getLong("stats_refresh_ms", 5_000L),
+                themeMode = enumOrDefault(p.getString("theme_mode", null), AppThemeMode.DARK),
+                languageTag = p.getString("language_tag", "system").orEmpty()
+            )
+        }
+
+        fun save(context: Context, config: VpnConfig) {
+            val p: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            p.edit()
+                .putString("profile_level", config.profileLevel.name)
+                .putString("protocol", config.protocol.name)
+                .putBoolean("auto_fallback_h2", config.autoFallbackToH2)
+                .putBoolean("quick_reconnect", config.quickReconnect)
+                .putString("scan_mode", config.scanMode.name)
+                .putString("manual_peer", config.manualPeer.trim())
+                .putString("ip_family", config.ipFamily.name)
+                .putString("custom_dns", config.customDns.trim())
+                .putString("route_direct", config.routeDirectRules.trim())
+                .putString("route_block", config.routeBlockRules.trim())
+                .putString("noize_profile", config.noizeProfile.name)
+                .putBoolean("tls_fragmentation", config.tlsFragmentation)
+                .putInt("tls_fragment_size", config.tlsFragmentSize)
+                .putInt("tls_fragment_delay", config.tlsFragmentDelayMs)
+                .putString("masque_sni", config.masqueSni.trim())
+                .putBoolean("ech_enabled", config.echEnabled)
+                .putBoolean("tls_verify", config.tlsVerify)
+                .putBoolean("disable_quic_v2", config.disableQuicV2)
+                .putInt("wg_keepalive", config.wgKeepaliveSecs)
+                .putString("upstream_proxy", config.upstreamProxy.trim())
+                .putString("zerotrust_team", config.zeroTrustTeam.trim())
+                .putString("split_mode", config.splitTunnelMode.name)
+                .putStringSet("selected_packages", config.selectedPackages)
+                .putLong("stats_refresh_ms", config.statsRefreshIntervalMs)
+                .putString("theme_mode", config.themeMode.name)
+                .putString("language_tag", config.languageTag)
+                .apply()
+        }
+
+        private inline fun <reified T : Enum<T>> enumOrDefault(raw: String?, fallback: T): T {
+            if (raw.isNullOrBlank()) return fallback
+            return runCatching { enumValueOf<T>(raw) }.getOrDefault(fallback)
+        }
+    }
+}

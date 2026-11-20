@@ -1,0 +1,24 @@
+[package]
+name = "aether-jni"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Minimal JNI bridge between Android VpnService and the CluvexStudio/Aether Rust engine"
+
+[lib]
+name = "aether_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Build Aether with default features only (no Tor/Arti, no Psiphon, no Xray) to minimize APK size & RAM.
+aether = { path = "../aether/aether", default-features = false }
+jni = "0.21"
+log = "0.4"
+android_logger = "0.14"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"

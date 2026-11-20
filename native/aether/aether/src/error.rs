@@ -1,0 +1,125 @@
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum AetherError {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("quic: {0}")]
+    Quic(#[from] quiche::Error),
+
+    #[error("h3: {0}")]
+    H3(#[from] quiche::h3::Error),
+
+    #[error("tls: {0}")]
+    Tls(String),
+
+    #[error("ech: {0}")]
+    Ech(String),
+
+    #[error("masque: {0}")]
+    Masque(String),
+
+    #[error("prober: no clean endpoint found")]
+    NoCleanEndpoint,
+
+    #[error("capsule: {0}")]
+    Capsule(String),
+
+    #[error("api: {0}")]
+    Api(String),
+
+    #[error("identity refused: {0}")]
+    IdentityRefused(String),
+
+    #[error("cancelled")]
+    Cancelled,
+
+    #[error(transparent)]
+    Psiphon(#[from] crate::psiphon::PsiphonError),
+
+    #[error(transparent)]
+    Tor(#[from] crate::tor::TorError),
+
+    #[error(transparent)]
+    Netstack(#[from] crate::netstack::NetstackError),
+
+    #[error(transparent)]
+    Socks(#[from] crate::socks::SocksError),
+
+    #[error(transparent)]
+    WireGuard(#[from] crate::wireguard::WireGuardError),
+
+    #[error(transparent)]
+    TunnelPing(#[from] crate::tunnelping::TunnelPingError),
+
+    #[error(transparent)]
+    ExitLocation(#[from] crate::exitloc::ExitLocationError),
+
+    #[error(transparent)]
+    Config(#[from] crate::config::ConfigError),
+
+    #[error(transparent)]
+    QuicSession(#[from] crate::quic::QuicError),
+
+    #[error(transparent)]
+    Upstream(#[from] crate::upstream::UpstreamError),
+
+    #[error(transparent)]
+    Identity(#[from] crate::account::IdentityError),
+
+    #[error(transparent)]
+    Cli(#[from] crate::cli::CliError),
+
+    #[error(transparent)]
+    Egress(#[from] crate::egress::EgressError),
+
+    #[error(transparent)]
+    Bridge(#[from] crate::bridges::BridgeError),
+
+    #[error(transparent)]
+    MasqueH2(#[from] crate::masque_h2::H2Error),
+
+    #[error(transparent)]
+    Tunnel(#[from] crate::modes::TunnelError),
+
+    #[error(transparent)]
+    Endpoint(#[from] crate::modes::endpoints::EndpointError),
+
+    #[error(transparent)]
+    Carrier(#[from] crate::carrier::CarrierError),
+
+    #[error(transparent)]
+    Task(#[from] crate::relay::TaskError),
+
+    #[error("other: {0}")]
+    Other(String),
+}
+
+impl AetherError {
+    /// The error's words for a message that wraps them in words of its own: without the label
+    /// "other: ", which says nothing there, and with every other kind's label, which does.
+    pub fn detail(&self) -> String {
+        match self {
+            AetherError::Other(message) => message.clone(),
+            other => other.to_string(),
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, AetherError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wrapped_error_keeps_its_words_and_the_label_of_its_kind_but_other() {
+        assert_eq!(AetherError::Other("no port".into()).detail(), "no port");
+        assert_eq!(
+            AetherError::Tls("bad cipher".into()).detail(),
+            "tls: bad cipher"
+        );
+        assert_eq!(AetherError::Cancelled.detail(), "cancelled");
+    }
+}

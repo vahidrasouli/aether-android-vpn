@@ -1,0 +1,161 @@
+name: Build Aether Android VPN (ARM64)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-arm64:
+    name: Build & Verify ARM64 APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ANDROID_COMPILE_SDK: "35"
+      ANDROID_BUILD_TOOLS: "35.0.0"
+      ANDROID_NDK_VERSION: "26.3.11579264"
+      GRADLE_VERSION: "8.9"
+      HEV_VERSION: "2.20.0"
+      BUILD_JOBS: "2"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK & pinned NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >
+            platforms;android-${{ env.ANDROID_COMPILE_SDK }}
+            build-tools;${{ env.ANDROID_BUILD_TOOLS }}
+            ndk;${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Set up Rust (aarch64-linux-android)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Generate Cargo lockfile for JNI crate
+        run: cargo generate-lockfile --manifest-path native/aether-jni/Cargo.toml
+
+      - name: Cache Rust & Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "native/aether-jni -> target"
+
+      - name: Cache pinned hev-socks5-tunnel source
+        uses: actions/cache@v4
+        with:
+          path: native/hev-socks5-tunnel
+          key: hev-socks5-tunnel-${{ env.HEV_VERSION }}
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+
+      - name: Build ARM64 native libraries (Aether + pinned HEV 2.20.0)
+        env:
+          ANDROID_NDK_HOME: "${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}"
+        run: bash scripts/build-natives.sh
+
+      - name: Verify ARM64 shared libraries exist and are ELF aarch64
+        run: |
+          test -s app/src/main/jniLibs/arm64-v8a/libaether_jni.so
+          test -s app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so
+          file app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep -E -i -q "aarch64"
+          file app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so | grep -E -i -q "aarch64"
+          echo "ARM64 shared libraries verified successfully."
+
+      - name: Set up pinned Gradle 8.9 with build cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-read-only: false
+
+      - name: Run unit tests & assemble ARM64 Debug APK (bounded workers)
+        run: gradle --max-workers=2 :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Assemble signed Release APK (only when keystore secrets are present)
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          cat <<EOF > keystore.properties
+          storeFile=../release.jks
+          storePassword=${KEYSTORE_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASSWORD}
+          EOF
+          gradle --max-workers=2 :app:assembleRelease
+          rm -f release.jks keystore.properties
+
+      - name: Verify APK structure and native libraries
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -l "$APK" | grep "lib/arm64-v8a/libaether_jni.so"
+          unzip -l "$APK" | grep "lib/arm64-v8a/libhev-socks5-tunnel.so"
+          if unzip -l "$APK" | grep -E "lib/(armeabi|x86|x86_64)/"; then
+            echo "ERROR: Unwanted ABIs packaged into APK"
+            exit 1
+          fi
+          echo "APK ARM64-v8a packaging verified successfully."
+
+      - name: Stage APK and generate SHA-256 checksums
+        run: |
+          mkdir -p release-artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk release-artifacts/aether-android-arm64-debug.apk
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk release-artifacts/aether-android-arm64-release.apk
+          fi
+          cd release-artifacts
+          sha256sum *.apk > SHA256SUMS.txt
+          echo "Generated SHA-256 Checksums:"
+          cat SHA256SUMS.txt
+
+      - name: Upload workflow APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-android-vpn-arm64
+          path: release-artifacts/*
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-arm64
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: aether-android-vpn-arm64
+          path: release-artifacts
+
+      - name: Publish Verified GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release-artifacts/*.apk
+            release-artifacts/SHA256SUMS.txt

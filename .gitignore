@@ -1,0 +1,37 @@
+# Built-in Gradle / Android build outputs
+.gradle/
+build/
+app/build/
+local.properties
+Captures/
+.externalNativeBuild/
+.cxx/
+
+# Keystores and private signing credentials
+*.jks
+*.keystore
+keystore.properties
+
+# Rust build outputs
+target/
+native/**/target/
+native/hev-socks5-tunnel/
+app/src/main/jniLibs/
+
+# Release and verification artifacts
+release-artifacts/
+*.apk
+*.aab
+SHA256SUMS.txt
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS temporary files
+.DS_Store
+Thumbs.db
+desktop.ini
