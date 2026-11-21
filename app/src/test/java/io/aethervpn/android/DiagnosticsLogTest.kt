@@ -57,7 +57,8 @@ class DiagnosticsLogTest {
         org.junit.Assert.assertNotNull("InetAddress must not be null", addr)
         assertFalse("Endpoint must not be unresolved", endpoint.isUnresolved)
         assertEquals("Host string must be 127.0.0.1", "127.0.0.1", endpoint.hostString)
-        assertEquals("Address toString must be /127.0.0.1 or 127.0.0.1", "/127.0.0.1", addr.toString())
+        assertEquals("127.0.0.1", addr.hostAddress)
+        assertTrue("Address toString must contain 127.0.0.1", addr.toString().contains("127.0.0.1"))
         assertEquals(1819, endpoint.port)
     }
 
