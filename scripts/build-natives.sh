@@ -22,17 +22,17 @@ command -v cargo-ndk >/dev/null 2>&1 || {
 
 mkdir -p "${JNILIBS_ARM64}"
 
-echo "[1/2] Building libaether_jni.so (arm64-v8a, default features only, -j ${BUILD_JOBS})..."
+echo "[1/3] Building libaether_jni.so (arm64-v8a, 16KB page-aligned, -j ${BUILD_JOBS})..."
 pushd "${ROOT_DIR}/native/aether-jni" >/dev/null
 rustup target add aarch64-linux-android >/dev/null 2>&1 || true
-cargo ndk \
+RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384 ${RUSTFLAGS:-}" cargo ndk \
   -t arm64-v8a \
   -p "${ANDROID_API}" \
   -o "${ROOT_DIR}/app/src/main/jniLibs" \
   build --release -j "${BUILD_JOBS}"
 popd >/dev/null
 
-echo "[2/2] Building libhev-socks5-tunnel.so (arm64-v8a, -j ${BUILD_JOBS})..."
+echo "[2/3] Building libhev-socks5-tunnel.so (arm64-v8a, -j ${BUILD_JOBS})..."
 if [ ! -d "${ROOT_DIR}/native/hev-socks5-tunnel/jni" ]; then
   bash "${ROOT_DIR}/scripts/fetch-hev.sh"
 fi
@@ -46,6 +46,24 @@ pushd "${ROOT_DIR}/native/hev-socks5-tunnel" >/dev/null
 cp -f libs/arm64-v8a/libhev-socks5-tunnel.so "${JNILIBS_ARM64}/libhev-socks5-tunnel.so"
 popd >/dev/null
 
+echo "[3/3] Staging NDK libc++_shared.so (arm64-v8a)..."
+LIBCXX_SO=""
+for candidate in "${ANDROID_NDK_HOME}"/toolchains/llvm/prebuilt/*/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so; do
+  if [ -f "${candidate}" ]; then
+    LIBCXX_SO="${candidate}"
+    break
+  fi
+done
+
+if [ -z "${LIBCXX_SO}" ] || [ ! -f "${LIBCXX_SO}" ]; then
+  echo "[!] FATAL: Could not locate libc++_shared.so for aarch64-linux-android under ${ANDROID_NDK_HOME}" >&2
+  exit 1
+fi
+
+echo "[*] Found NDK libc++_shared.so at: ${LIBCXX_SO}"
+cp -f "${LIBCXX_SO}" "${JNILIBS_ARM64}/libc++_shared.so"
+chmod 644 "${JNILIBS_ARM64}/libc++_shared.so"
+
 echo "[+] Verifying ARM64 shared libraries:"
-ls -lh "${JNILIBS_ARM64}/libaether_jni.so" "${JNILIBS_ARM64}/libhev-socks5-tunnel.so"
-file "${JNILIBS_ARM64}/libaether_jni.so" "${JNILIBS_ARM64}/libhev-socks5-tunnel.so" || true
+ls -lh "${JNILIBS_ARM64}/libaether_jni.so" "${JNILIBS_ARM64}/libhev-socks5-tunnel.so" "${JNILIBS_ARM64}/libc++_shared.so"
+file "${JNILIBS_ARM64}/libaether_jni.so" "${JNILIBS_ARM64}/libhev-socks5-tunnel.so" "${JNILIBS_ARM64}/libc++_shared.so" || true

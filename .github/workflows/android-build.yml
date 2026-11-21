@@ -75,9 +75,39 @@ jobs:
         run: |
           test -s app/src/main/jniLibs/arm64-v8a/libaether_jni.so
           test -s app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so
+          test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
           file app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so | grep -E -i -q "aarch64"
+          file app/src/main/jniLibs/arm64-v8a/libc++_shared.so | grep -E -i -q "aarch64"
           echo "ARM64 shared libraries verified successfully."
+
+      - name: Verify 16KB ELF alignment and DT_NEEDED dependency resolution
+        run: |
+          echo "=== 1. Checking 16KB PT_LOAD segment alignment for libaether_jni.so ==="
+          readelf -l app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep LOAD
+          if readelf -l app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep LOAD | grep -q "0x1000$"; then
+            echo "ERROR: libaether_jni.so has 4KB (0x1000) PT_LOAD alignment instead of 16KB" >&2
+            exit 1
+          fi
+          echo "16KB ELF segment alignment verified."
+
+          echo "=== 2. Verifying DT_NEEDED dependencies for all packaged shared libraries ==="
+          ALLOWED_SYSTEM_LIBS="libc.so libm.so libdl.so liblog.so libz.so libandroid.so libjnigraphics.so libEGL.so libGLESv2.so libOpenSLES.so libmediandk.so"
+          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so"
+          for so in app/src/main/jniLibs/arm64-v8a/*.so; do
+            echo "Checking dependencies of $(basename "$so")..."
+            NEEDED=$(readelf -d "$so" | grep "(NEEDED)" | sed -E 's/.*\[(.*)\]/\1/')
+            for dep in $NEEDED; do
+              echo "  -> depends on: $dep"
+              if echo "$ALLOWED_SYSTEM_LIBS $BUNDLED_LIBS" | grep -w -q "$dep"; then
+                echo "     [OK] resolved"
+              else
+                echo "     [ERROR] Unresolvable dynamic dependency: $dep" >&2
+                exit 1
+              fi
+            done
+          done
+          echo "All DT_NEEDED dynamic dependencies successfully resolved."
 
       - name: Set up pinned Gradle 8.9 with build cache
         uses: gradle/actions/setup-gradle@v4
@@ -115,6 +145,7 @@ jobs:
           test -s "$APK"
           unzip -l "$APK" | grep "lib/arm64-v8a/libaether_jni.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libhev-socks5-tunnel.so"
+          unzip -l "$APK" | grep "lib/arm64-v8a/libc++_shared.so"
           if unzip -l "$APK" | grep -E "lib/(armeabi|x86|x86_64)/"; then
             echo "ERROR: Unwanted ABIs packaged into APK"
             exit 1

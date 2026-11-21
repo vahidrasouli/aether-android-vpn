@@ -121,8 +121,11 @@ class AetherEngineManager(private val privateDataDir: File) {
         readinessTimeoutMs: Long = 20_000L
     ): Result<Long> {
         if (!AetherNative.ensureLoaded()) {
+            val errDetails = AetherNative.diagnosticInfo
+                ?: AetherNative.loadError?.message
+                ?: "Native library initialization failed"
             return Result.failure(
-                IllegalStateException("Native library libaether_jni.so is not present in this APK")
+                IllegalStateException("Native library loading failed: $errDetails")
             )
         }
 

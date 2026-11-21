@@ -48,8 +48,10 @@ class HevTunnelManager(private val cacheDir: File) {
 
     fun start(config: VpnConfig, tunFd: Int): Result<Unit> {
         if (!TProxyService.ensureLoaded()) {
+            val errDetails = TProxyService.loadError?.message
+                ?: "Native library libhev-socks5-tunnel.so initialization failed"
             return Result.failure(
-                IllegalStateException("Native library libhev-socks5-tunnel.so is not present in this APK")
+                IllegalStateException("HEV tunnel loading failed: $errDetails")
             )
         }
         stop()

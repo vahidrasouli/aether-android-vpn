@@ -11,6 +11,10 @@ object TProxyService {
     @Volatile
     private var loaded: Boolean = false
 
+    @Volatile
+    var loadError: Throwable? = null
+        private set
+
     fun ensureLoaded(): Boolean {
         if (loaded) return true
         return synchronized(this) {
@@ -18,8 +22,10 @@ object TProxyService {
                 try {
                     System.loadLibrary("hev-socks5-tunnel")
                     loaded = true
-                } catch (_: UnsatisfiedLinkError) {
+                    loadError = null
+                } catch (t: Throwable) {
                     loaded = false
+                    loadError = t
                 }
             }
             loaded
