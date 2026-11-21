@@ -129,7 +129,7 @@ data class VpnConfig(
      * Deliberately excludes upstream proxy credentials and never touches private WARP keys.
      */
     fun toSafeBackupJson(): String {
-        val redactedUpstream = upstreamProxy.replace(Regex("://[^@]+@"), "://***@")
+        val safeUpstream = if (upstreamProxy.contains("@")) "" else upstreamProxy.trim()
         return JSONObject().apply {
             put("schemaVersion", 1)
             put("profileLevel", profileLevel.name)
@@ -151,7 +151,7 @@ data class VpnConfig(
             put("tlsVerify", tlsVerify)
             put("disableQuicV2", disableQuicV2)
             put("wgKeepaliveSecs", wgKeepaliveSecs)
-            put("upstreamProxy", if (redactedUpstream.contains("***@")) "" else redactedUpstream)
+            put("upstreamProxy", safeUpstream)
             put("zeroTrustTeam", zeroTrustTeam)
             put("splitTunnelMode", splitTunnelMode.name)
             put("selectedPackages", JSONArray(selectedPackages.sorted()))

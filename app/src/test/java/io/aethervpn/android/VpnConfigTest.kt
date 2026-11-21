@@ -21,7 +21,7 @@ class VpnConfigTest {
 
     @Test
     fun batteryEfficientDefaultUsesMasqueH3QuickReconnectAndTurboScan() {
-        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir")))
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val args = mgr.buildCoreArguments(VpnConfig().applyPreset(ProfileLevel.BATTERY_EFFICIENT))
 
         assertTrue(args.contains("--protocol"))
@@ -35,7 +35,7 @@ class VpnConfigTest {
 
     @Test
     fun advancedProtocolAndRoutingOptionsMapToVerifiedCliFlags() {
-        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir")))
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val cfg = VpnConfig(
             protocol = AetherProtocol.MASQUE_H2,
             manualPeer = "162.159.198.1:443",
@@ -67,7 +67,7 @@ class VpnConfigTest {
 
     @Test
     fun goolClassicEmitsClassicFlag() {
-        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir")))
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val args = mgr.buildCoreArguments(VpnConfig(protocol = AetherProtocol.GOOL_CLASSIC))
         assertTrue(args.contains("--gool-classic"))
     }

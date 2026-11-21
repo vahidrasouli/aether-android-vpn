@@ -12,7 +12,7 @@ class HevConfigGeneratorTest {
 
     @Test
     fun generatesBoundedLoopbackDualStackYaml() {
-        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir")))
+        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val yaml = manager.generateYamlConfig(VpnConfig(ipFamily = IpFamily.BOTH))
 
         assertTrue(yaml.contains("address: '127.0.0.1'"))
@@ -28,7 +28,7 @@ class HevConfigGeneratorTest {
 
     @Test
     fun omitsIpv6AddressWhenIpv4Only() {
-        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir")))
+        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val yaml = manager.generateYamlConfig(VpnConfig(ipFamily = IpFamily.IPV4))
 
         assertFalse(yaml.contains("ipv6:"))
