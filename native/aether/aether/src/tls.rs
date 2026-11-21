@@ -36,8 +36,6 @@ extern "C" {
         num_cipher_ids: usize,
     ) -> c_int;
 
-    fn SSL_CTX_set_grease_sigalgs_enabled(ctx: *mut c_void, enabled: c_int);
-
     fn SSL_set1_client_key_shares(
         ssl: *mut c_void,
         group_ids: *const u16,
@@ -313,13 +311,7 @@ impl Fingerprint {
         builder
             .set_max_proto_version(Some(SslVersion::TLS1_3))
             .map_err(tls)?;
-        builder.set_grease_enabled(self.grease);
-        unsafe {
-            SSL_CTX_set_grease_sigalgs_enabled(
-                builder.as_ptr().cast(),
-                c_int::from(self.grease_sigalgs),
-            )
-        };
+        builder.set_grease_enabled(self.grease || self.grease_sigalgs);
         builder.set_permute_extensions(self.permute_extensions);
         set_groups(builder, &self.groups)?;
         builder.set_alpn_protos(alpn).map_err(tls)?;

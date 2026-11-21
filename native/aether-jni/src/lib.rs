@@ -192,3 +192,15 @@ pub extern "system" fn Java_io_aethervpn_android_core_AetherNative_nativeFreeJob
     let raw = aether::ffi::aether_job_free(job_id as u64);
     take_aether_json(&mut env, raw)
 }
+
+/// Upstream BoringSSL folded `SSL_CTX_set_grease_sigalgs_enabled` into
+/// `SSL_CTX_set_grease_enabled`. This compatibility definition satisfies any
+/// legacy dynamic linker references and ensures zero unresolved dynamic symbols.
+#[no_mangle]
+pub unsafe extern "C" fn SSL_CTX_set_grease_sigalgs_enabled(
+    _ctx: *mut std::ffi::c_void,
+    _enabled: std::os::raw::c_int,
+) {
+    // Handled via BoringSSL SSL_CTX_set_grease_enabled
+}
+

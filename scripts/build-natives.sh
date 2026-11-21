@@ -25,7 +25,7 @@ mkdir -p "${JNILIBS_ARM64}"
 echo "[1/3] Building libaether_jni.so (arm64-v8a, 16KB page-aligned, -j ${BUILD_JOBS})..."
 pushd "${ROOT_DIR}/native/aether-jni" >/dev/null
 rustup target add aarch64-linux-android >/dev/null 2>&1 || true
-RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384 ${RUSTFLAGS:-}" cargo ndk \
+RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,defs ${RUSTFLAGS:-}" cargo ndk \
   -t arm64-v8a \
   -p "${ANDROID_API}" \
   -o "${ROOT_DIR}/app/src/main/jniLibs" \

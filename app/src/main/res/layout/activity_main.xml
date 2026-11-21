@@ -459,24 +459,42 @@
                         android:text="Run Tunnel Probe" />
 
                     <Button
+                        android:id="@+id/btnCopyLogs"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:text="Copy Logs" />
+
+                    <Button
                         android:id="@+id/btnClearLogs"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
+                        android:layout_marginStart="6dp"
                         android:layout_weight="1"
                         android:text="Clear Logs" />
                 </LinearLayout>
 
-                <TextView
-                    android:id="@+id/tvRedactedLogs"
+                <androidx.core.widget.NestedScrollView
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="320dp"
                     android:layout_marginTop="10dp"
                     android:background="@color/card_bg"
-                    android:fontFamily="monospace"
-                    android:padding="12dp"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="11sp" />
+                    android:fadeScrollbars="false"
+                    android:fillViewport="true"
+                    android:scrollbars="vertical">
+
+                    <TextView
+                        android:id="@+id/tvRedactedLogs"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:lineSpacingExtra="3dp"
+                        android:padding="12dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp"
+                        android:textIsSelectable="true" />
+                </androidx.core.widget.NestedScrollView>
             </LinearLayout>
         </ScrollView>
 

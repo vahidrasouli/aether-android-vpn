@@ -109,6 +109,57 @@ jobs:
           done
           echo "All DT_NEEDED dynamic dependencies successfully resolved."
 
+          echo "=== 3. Verifying zero unresolved dynamic symbols in libaether_jni.so ==="
+          # Check 1: Cryptographic and engine symbol check
+          if readelf -Ws --dyn-syms app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep " UND " | grep -E "SSL_|EVP_|CRYPTO_|BORINGSSL_|bssl_|quiche_|aether_"; then
+            echo "ERROR: Unresolved BoringSSL/Quiche/Aether symbols found in libaether_jni.so!" >&2
+            exit 1
+          fi
+
+          # Check 2: Strict symbol audit for non-system undefined symbols
+          python3 - <<'EOF'
+          import subprocess
+          import sys
+
+          out = subprocess.check_output(['readelf', '-Ws', '--dyn-syms', 'app/src/main/jniLibs/arm64-v8a/libaether_jni.so']).decode('utf-8')
+          
+          # Allowed system prefixes for Android NDK public libraries (libc, libm, libdl, liblog) and libc++_shared
+          allowed_prefix = (
+              '__', '_exit', 'abort', 'bind', 'bsearch', 'calloc', 'chdir', 'chmod', 'chroot',
+              'clock_gettime', 'close', 'closedir', 'connect', 'dirfd', 'dl_iterate_phdr',
+              'dlclose', 'dlopen', 'dlsym', 'dup2', 'environ', 'epoll_', 'eventfd', 'execvp',
+              'fclose', 'fcntl', 'feof', 'ferror', 'fflush', 'fgets', 'fopen', 'fork', 'fprintf',
+              'fread', 'free', 'freeaddrinfo', 'fseek', 'fstat', 'fsync', 'ftell', 'fwrite',
+              'gai_strerror', 'getaddrinfo', 'getauxval', 'getcwd', 'getenv', 'getpeername',
+              'getpid', 'getrandom', 'getrlimit', 'getsockname', 'getsockopt', 'gettid',
+              'gettimeofday', 'isatty', 'kill', 'listen', 'lseek64', 'lstat', 'madvise', 'malloc',
+              'memchr', 'memcmp', 'memcpy', 'memmove', 'memset', 'mkdir', 'mmap', 'munmap',
+              'open', 'opendir', 'perror', 'pipe2', 'poll', 'posix_memalign', 'pow', 'prctl',
+              'pthread_', 'read', 'readdir', 'readlink', 'realloc', 'realpath', 'recv', 'recvfrom',
+              'rename', 'sched_', 'send', 'sendto', 'setgid', 'setgroups', 'setpgid', 'setrlimit',
+              'setsid', 'setsockopt', 'setuid', 'shutdown', 'sigaction', 'socket', 'socketpair',
+              'stat', 'strchr', 'strcmp', 'strerror', 'strlen', 'strncmp', 'syscall', 'sysconf',
+              'time', 'unlink', 'vsnprintf', 'waitpid', 'write', 'writev',
+              '_Z', 'ZSTD_trace_', 'OPENSSL_memory_'
+          )
+
+          unresolved = []
+          for line in out.splitlines():
+              parts = line.split()
+              if len(parts) >= 8 and parts[6] == 'UND' and parts[4] == 'GLOBAL':
+                  sym_name = parts[7]
+                  if not any(sym_name.startswith(p) for p in allowed_prefix):
+                      unresolved.append(sym_name)
+
+          if unresolved:
+              print(f"ERROR: Found {len(unresolved)} unresolved dynamic symbols in libaether_jni.so:")
+              for s in unresolved:
+                  print(f"  - {s}")
+              sys.exit(1)
+
+          print("SUCCESS: 0 unresolved non-system dynamic symbols in libaether_jni.so.")
+          EOF
+
       - name: Set up pinned Gradle 8.9 with build cache
         uses: gradle/actions/setup-gradle@v4
         with:

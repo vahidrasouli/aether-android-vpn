@@ -32,6 +32,10 @@ object DiagnosticsLog {
         }
     }
 
+    fun entries(): List<String> = synchronized(lock) {
+        ring.toList()
+    }
+
     fun snapshot(): String = synchronized(lock) {
         if (ring.isEmpty()) "No diagnostic events yet." else ring.joinToString("\n")
     }

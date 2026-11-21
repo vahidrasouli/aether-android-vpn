@@ -280,6 +280,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnCopyLogs.setOnClickListener {
+            val logs = DiagnosticsLog.snapshot()
+            val cm = getSystemService(ClipboardManager::class.java)
+            cm?.setPrimaryClip(ClipData.newPlainText("AetherLogs", logs))
+            toast("Diagnostic logs copied to clipboard")
+        }
+
         binding.btnClearLogs.setOnClickListener {
             DiagnosticsLog.clear()
             refreshIdentityAndDiagnostics()
@@ -401,7 +408,8 @@ class MainActivity : AppCompatActivity() {
             append("Last Verified RTT: ").append(if (snap.latencyMs > 0) "${snap.latencyMs} ms" else "N/A").append('\n')
             append(String.format("App Heap: %.1f MiB JVM | %.1f MiB Native", jvmUsedMb, nativeHeapMb))
         }
-        binding.tvRedactedLogs.text = DiagnosticsLog.snapshot()
+        val logLines = DiagnosticsLog.entries()
+        binding.tvRedactedLogs.text = LogFormatter.format(this, logLines)
     }
 
     private fun requestVpnAndConnect() {
