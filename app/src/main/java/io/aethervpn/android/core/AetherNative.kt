@@ -12,6 +12,14 @@ fun interface SocketProtectorCallback {
 }
 
 /**
+ * Callback interface invoked from Rust logger in `libaether_jni.so` to bridge
+ * Aether engine logs directly into Android DiagnosticsLog.
+ */
+fun interface AetherLogCallback {
+    fun onLog(level: Int, message: String)
+}
+
+/**
  * JNI bridge to `libaether_jni.so` (native/aether-jni).
  * Every method maps 1:1 to `Java_io_aethervpn_android_core_AetherNative_*` in Rust.
  */
@@ -49,6 +57,11 @@ object AetherNative {
                     // Step 3: Initialize native logging in separate call
                     nativeInitLogging()
 
+                    // Step 4: Register log bridge callback
+                    nativeRegisterLogCallback { level, message ->
+                        onAetherLog(level, message)
+                    }
+
                     loaded = true
                     loadError = null
                     diagnosticInfo = null
@@ -66,6 +79,17 @@ object AetherNative {
 
     @JvmStatic
     external fun nativeInitLogging()
+
+    @JvmStatic
+    external fun nativeRegisterLogCallback(callback: AetherLogCallback?): Boolean
+
+    @JvmStatic
+    fun onAetherLog(level: Int, message: String) {
+        val clean = message.trim()
+        if (clean.isNotEmpty()) {
+            DiagnosticsLog.record("Aether", clean)
+        }
+    }
 
     @JvmStatic
     external fun nativeRegisterProtector(protector: SocketProtectorCallback?): Boolean

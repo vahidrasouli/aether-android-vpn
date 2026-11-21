@@ -10,6 +10,7 @@
     <color name="log_timestamp">#768390</color>
     <color name="log_tag_native">#BC8CFF</color>
     <color name="log_tag_vpn">#58A6FF</color>
+    <color name="log_tag_aether">#2DD4BF</color>
     <color name="log_tag_other">#79C0FF</color>
     <color name="log_error">#F85149</color>
     <color name="log_success">#3FB950</color>

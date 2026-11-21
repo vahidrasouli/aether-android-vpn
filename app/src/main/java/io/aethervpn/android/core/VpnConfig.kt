@@ -2,6 +2,8 @@ package io.aethervpn.android.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -163,6 +165,19 @@ data class VpnConfig(
 
     companion object {
         const val LOOPBACK_HOST = "127.0.0.1"
+
+        val LOOPBACK_INET4: InetAddress by lazy {
+            try {
+                InetAddress.getByAddress(LOOPBACK_HOST, byteArrayOf(127, 0, 0, 1))
+            } catch (_: Exception) {
+                InetAddress.getLoopbackAddress()
+            }
+        }
+
+        fun loopbackSocketAddress(port: Int): InetSocketAddress {
+            return InetSocketAddress(LOOPBACK_INET4, port)
+        }
+
         const val DEFAULT_SOCKS_PORT = 1819
         const val DEFAULT_TUN_MTU = 1280
         const val TUN_IPV4_ADDRESS = "198.18.0.1"

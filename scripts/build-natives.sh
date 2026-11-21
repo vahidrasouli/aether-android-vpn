@@ -37,14 +37,16 @@ if [ ! -d "${ROOT_DIR}/native/hev-socks5-tunnel/jni" ]; then
   bash "${ROOT_DIR}/scripts/fetch-hev.sh"
 fi
 
-pushd "${ROOT_DIR}/native/hev-socks5-tunnel" >/dev/null
-"${ANDROID_NDK_HOME}/ndk-build" \
-  -j "${BUILD_JOBS}" \
-  APP_ABI=arm64-v8a \
-  APP_PLATFORM="android-${ANDROID_API}" \
-  APP_CFLAGS="-O2 -DPKGNAME=hev/htproxy -DCLSNAME=TProxyService"
-cp -f libs/arm64-v8a/libhev-socks5-tunnel.so "${JNILIBS_ARM64}/libhev-socks5-tunnel.so"
-popd >/dev/null
+if [ ! -f "${ROOT_DIR}/native/hev-socks5-tunnel/libs/arm64-v8a/libhev-socks5-tunnel.so" ]; then
+  pushd "${ROOT_DIR}/native/hev-socks5-tunnel" >/dev/null
+  "${ANDROID_NDK_HOME}/ndk-build" \
+    -j "${BUILD_JOBS}" \
+    APP_ABI=arm64-v8a \
+    APP_PLATFORM="android-${ANDROID_API}" \
+    APP_CFLAGS="-O2 -DPKGNAME=hev/htproxy -DCLSNAME=TProxyService"
+  popd >/dev/null
+fi
+cp -f "${ROOT_DIR}/native/hev-socks5-tunnel/libs/arm64-v8a/libhev-socks5-tunnel.so" "${JNILIBS_ARM64}/libhev-socks5-tunnel.so"
 
 echo "[3/3] Staging NDK libc++_shared.so (arm64-v8a)..."
 LIBCXX_SO=""

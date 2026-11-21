@@ -24,11 +24,11 @@ object TunnelValidator {
 
     fun verifyThroughSocks(
         socksPort: Int,
-        timeoutMs: Int = 8_000
+        timeoutMs: Int = 12_000
     ): Result<ValidationResult> {
         val proxy = Proxy(
             Proxy.Type.SOCKS,
-            InetSocketAddress(VpnConfig.LOOPBACK_HOST, socksPort)
+            VpnConfig.loopbackSocketAddress(socksPort)
         )
         var conn: HttpsURLConnection? = null
         val startNs = System.nanoTime()

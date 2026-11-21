@@ -14,10 +14,111 @@ use jni::{JNIEnv, JavaVM};
 
 static JVM: OnceLock<JavaVM> = OnceLock::new();
 static PROTECTOR_REF: OnceLock<Mutex<Option<GlobalRef>>> = OnceLock::new();
+static LOG_CALLBACK_REF: OnceLock<Mutex<Option<GlobalRef>>> = OnceLock::new();
 
 fn protector_slot() -> &'static Mutex<Option<GlobalRef>> {
     PROTECTOR_REF.get_or_init(|| Mutex::new(None))
 }
+
+fn log_callback_slot() -> &'static Mutex<Option<GlobalRef>> {
+    LOG_CALLBACK_REF.get_or_init(|| Mutex::new(None))
+}
+
+extern "C" {
+    fn __android_log_write(
+        prio: std::os::raw::c_int,
+        tag: *const std::os::raw::c_char,
+        text: *const std::os::raw::c_char,
+    ) -> std::os::raw::c_int;
+}
+
+struct JniAetherLogger;
+
+impl log::Log for JniAetherLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+
+        thread_local! {
+            static IN_LOG: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        let entered = IN_LOG.with(|cell| {
+            if cell.get() {
+                false
+            } else {
+                cell.set(true);
+                true
+            }
+        });
+
+        if !entered {
+            return;
+        }
+
+        let formatted = format!("{}", record.args());
+
+        // 1. Android Logcat
+        #[cfg(target_os = "android")]
+        {
+            let prio = match record.level() {
+                log::Level::Error => 6, // ANDROID_LOG_ERROR
+                log::Level::Warn => 5,  // ANDROID_LOG_WARN
+                log::Level::Info => 4,  // ANDROID_LOG_INFO
+                log::Level::Debug => 3, // ANDROID_LOG_DEBUG
+                log::Level::Trace => 2, // ANDROID_LOG_VERBOSE
+            };
+            let tag = b"AetherCore\0";
+            if let Ok(c_msg) = CString::new(formatted.clone()) {
+                unsafe {
+                    __android_log_write(prio, tag.as_ptr().cast(), c_msg.as_ptr());
+                }
+            }
+        }
+
+        // 2. Dispatch to Kotlin AetherLogCallback.onLog(level, msg)
+        if let Some(vm) = JVM.get() {
+            let callback_ref = {
+                let guard = match log_callback_slot().lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                guard.clone()
+            };
+
+            if let Some(cb_obj) = callback_ref {
+                if let Ok(mut env) = vm.attach_current_thread_permanently() {
+                    let level_int: jint = match record.level() {
+                        log::Level::Error => 1,
+                        log::Level::Warn => 2,
+                        log::Level::Info => 3,
+                        _ => 4,
+                    };
+                    if let Ok(jmsg) = env.new_string(&formatted) {
+                        let _ = env.call_method(
+                            cb_obj.as_obj(),
+                            "onLog",
+                            "(ILjava/lang/String;)V",
+                            &[JValue::Int(level_int), (&jmsg).into()],
+                        );
+                        let _ = env.exception_clear();
+                    }
+                }
+            }
+        }
+
+        IN_LOG.with(|cell| cell.set(false));
+    }
+
+    fn flush(&self) {}
+}
+
+static AETHER_LOGGER: JniAetherLogger = JniAetherLogger;
 
 /// C callback registered in `aether::egress::set_socket_protector`.
 /// Attaches the current Rust/Tokio worker thread permanently as a daemon thread to the JVM
@@ -78,16 +179,47 @@ fn take_aether_json(env: &mut JNIEnv, raw: *mut std::ffi::c_char) -> jstring {
 
 #[no_mangle]
 pub extern "system" fn Java_io_aethervpn_android_core_AetherNative_nativeInitLogging(
-    _env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
 ) {
-    #[cfg(target_os = "android")]
-    {
-        android_logger::init_once(
-            android_logger::Config::default()
-                .with_max_level(log::LevelFilter::Warn)
-                .with_tag("AetherCore"),
-        );
+    if JVM.get().is_none() {
+        if let Ok(vm) = env.get_java_vm() {
+            let _ = JVM.set(vm);
+        }
+    }
+
+    let _ = log::set_logger(&AETHER_LOGGER);
+    log::set_max_level(log::LevelFilter::Info);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_aethervpn_android_core_AetherNative_nativeRegisterLogCallback(
+    env: JNIEnv,
+    _class: JClass,
+    callback_obj: JObject,
+) -> jboolean {
+    if JVM.get().is_none() {
+        if let Ok(vm) = env.get_java_vm() {
+            let _ = JVM.set(vm);
+        }
+    }
+
+    let mut slot = match log_callback_slot().lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    if callback_obj.is_null() {
+        *slot = None;
+        return JNI_TRUE;
+    }
+
+    match env.new_global_ref(callback_obj) {
+        Ok(global_ref) => {
+            *slot = Some(global_ref);
+            JNI_TRUE
+        }
+        Err(_) => JNI_FALSE,
     }
 }
 

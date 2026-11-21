@@ -32,7 +32,7 @@ class AetherEngineManager(private val privateDataDir: File) {
             "--config", configFile.absolutePath,
             "--scan", config.scanMode.cliValue,
             "--ip", config.ipFamily.cliValue,
-            "--log-level", "warn"
+            "--log-level", "info"
         )
 
         if (config.quickReconnect) {
@@ -161,7 +161,7 @@ class AetherEngineManager(private val privateDataDir: File) {
                 stop()
                 return Result.failure(IllegalStateException("Aether engine exited: $exitError"))
             }
-            if (isLoopbackPortOpen(config.socksPort)) {
+            if (isSocks5Ready(config.socksPort)) {
                 return Result.success(jobId)
             }
             delay(backoffMs)
@@ -207,11 +207,18 @@ class AetherEngineManager(private val privateDataDir: File) {
         return null
     }
 
-    private fun isLoopbackPortOpen(port: Int): Boolean {
+    private fun isSocks5Ready(port: Int): Boolean {
         return try {
             Socket().use { sock ->
-                sock.connect(InetSocketAddress(VpnConfig.LOOPBACK_HOST, port), 250)
-                true
+                sock.soTimeout = 400
+                sock.connect(VpnConfig.loopbackSocketAddress(port), 400)
+                val out = sock.getOutputStream()
+                out.write(byteArrayOf(0x05, 0x01, 0x00))
+                out.flush()
+                val inStream = sock.getInputStream()
+                val response = ByteArray(2)
+                val read = inStream.read(response)
+                read == 2 && response[0] == 0x05.toByte() && response[1] == 0x00.toByte()
             }
         } catch (_: Exception) {
             false

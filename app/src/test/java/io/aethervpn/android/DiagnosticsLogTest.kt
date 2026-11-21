@@ -1,6 +1,8 @@
 package io.aethervpn.android
 
+import io.aethervpn.android.core.AetherNative
 import io.aethervpn.android.core.DiagnosticsLog
+import io.aethervpn.android.core.VpnConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,6 +31,34 @@ class DiagnosticsLogTest {
 
         assertTrue("Redacted tag must be present", snapshot.contains("[REDACTED]"))
         assertTrue("Proxy credential redaction must be present", snapshot.contains("://***:***@"))
+    }
+
+    @Test
+    fun testAetherNativeLogBridgeAndRedaction() {
+        AetherNative.onAetherLog(3, "Connected to WARP gateway 162.159.198.1:443 with token=token_abc_123")
+        AetherNative.onAetherLog(1, "TLS handshake failed: private_key=0123456789abcdef")
+
+        val snapshot = DiagnosticsLog.snapshot()
+        val entries = DiagnosticsLog.entries()
+
+        assertEquals(2, entries.size)
+        assertTrue("Tag must be [Aether]", entries[0].contains("[Aether]"))
+        assertTrue("Tag must be [Aether]", entries[1].contains("[Aether]"))
+
+        assertFalse("Secret token must be scrubbed", snapshot.contains("token_abc_123"))
+        assertFalse("Secret key must be scrubbed", snapshot.contains("0123456789abcdef"))
+        assertTrue("Redaction tag must be present", snapshot.contains("[REDACTED]"))
+    }
+
+    @Test
+    fun testLoopbackSocketAddressNullSafety() {
+        val endpoint = VpnConfig.loopbackSocketAddress(1819)
+        val addr = endpoint.address
+        org.junit.Assert.assertNotNull("InetAddress must not be null", addr)
+        assertFalse("Endpoint must not be unresolved", endpoint.isUnresolved)
+        assertEquals("Host string must be 127.0.0.1", "127.0.0.1", endpoint.hostString)
+        assertEquals("Address toString must be /127.0.0.1 or 127.0.0.1", "/127.0.0.1", addr.toString())
+        assertEquals(1819, endpoint.port)
     }
 
     @Test

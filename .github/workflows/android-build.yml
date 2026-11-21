@@ -56,14 +56,27 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "native/aether-jni -> target"
+          cache-all-targets: "true"
+          key: "cargo-ndk-${{ env.ANDROID_NDK_VERSION }}"
 
-      - name: Cache pinned hev-socks5-tunnel source
+      - name: Cache pinned hev-socks5-tunnel source & build artifacts
         uses: actions/cache@v4
         with:
-          path: native/hev-socks5-tunnel
-          key: hev-socks5-tunnel-${{ env.HEV_VERSION }}
+          path: |
+            native/hev-socks5-tunnel
+            native/hev-socks5-tunnel/libs
+            native/hev-socks5-tunnel/obj
+          key: hev-socks5-tunnel-${{ env.HEV_VERSION }}-${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Cache cargo-ndk binary
+        id: cache-cargo-ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-3.5.4
 
       - name: Install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
         run: cargo install cargo-ndk --version 3.5.4 --locked
 
       - name: Build ARM64 native libraries (Aether + pinned HEV 2.20.0)
