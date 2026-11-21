@@ -89,22 +89,25 @@ jobs:
         run: gradle --max-workers=2 :app:testDebugUnitTest :app:assembleDebug
 
       - name: Assemble signed Release APK (only when keystore secrets are present)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
-          cat <<EOF > keystore.properties
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+            cat > keystore.properties <<EOF
           storeFile=../release.jks
           storePassword=${KEYSTORE_PASSWORD}
           keyAlias=${KEY_ALIAS}
           keyPassword=${KEY_PASSWORD}
           EOF
-          gradle --max-workers=2 :app:assembleRelease
-          rm -f release.jks keystore.properties
+            gradle --max-workers=2 :app:assembleRelease
+            rm -f release.jks keystore.properties
+          else
+            echo "No signing keystore configured; skipping release APK assembly."
+          fi
 
       - name: Verify APK structure and native libraries
         run: |
@@ -144,6 +147,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
