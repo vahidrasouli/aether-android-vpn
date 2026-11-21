@@ -110,8 +110,8 @@ jobs:
           echo "All DT_NEEDED dynamic dependencies successfully resolved."
 
           echo "=== 3. Verifying zero unresolved dynamic symbols in libaether_jni.so ==="
-          # Check 1: Cryptographic and engine symbol check
-          if readelf -Ws --dyn-syms app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep " UND " | grep -E "SSL_|EVP_|CRYPTO_|BORINGSSL_|bssl_|quiche_|aether_"; then
+          # Check 1: No GLOBAL undefined cryptographic or engine symbols (dlopen fatal blockers)
+          if readelf -Ws --dyn-syms app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep " GLOBAL " | grep " UND " | grep -E "(^|[ _])(SSL_|EVP_|CRYPTO_|BORINGSSL_|bssl_|quiche_|aether_)"; then
             echo "ERROR: Unresolved BoringSSL/Quiche/Aether symbols found in libaether_jni.so!" >&2
             exit 1
           fi
