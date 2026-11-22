@@ -177,6 +177,7 @@ class MainActivity : AppCompatActivity() {
         binding.switchQuickReconnect.isChecked = cfg.quickReconnect
         binding.spinnerScanMode.setSelection(cfg.scanMode.ordinal, false)
         binding.etManualPeer.setText(cfg.manualPeer)
+        binding.etExitLocation.setText(cfg.exitLocation)
 
         binding.spinnerIpFamily.setSelection(cfg.ipFamily.ordinal, false)
         binding.etCustomDns.setText(cfg.customDns)
@@ -199,14 +200,35 @@ class MainActivity : AppCompatActivity() {
     private fun bindActions() {
         binding.btnToggleVpn.setOnClickListener {
             val phase = VpnStateStore.state.value.phase
-            if (phase == TunnelPhase.CONNECTED ||
-                phase == TunnelPhase.CONNECTING ||
-                phase == TunnelPhase.VALIDATING ||
-                phase == TunnelPhase.RECONNECTING
+            if (phase == TunnelPhase.VPN_CONNECTED ||
+                phase.isWorking
             ) {
                 stopVpnService()
             } else {
                 requestVpnAndConnect()
+            }
+        }
+
+        binding.btnToggleCore.setOnClickListener {
+            val snap = VpnStateStore.state.value
+            if (snap.coreActive) {
+                AetherVpnService.stopCoreOnly(this)
+            } else {
+                AetherVpnService.startCoreOnly(this)
+            }
+        }
+
+        binding.btnToggleTun.setOnClickListener {
+            val snap = VpnStateStore.state.value
+            if (snap.tunActive) {
+                AetherVpnService.stopTunOnly(this)
+            } else {
+                val prepareIntent = VpnService.prepare(this)
+                if (prepareIntent != null) {
+                    vpnPermissionLauncher.launch(prepareIntent)
+                } else {
+                    AetherVpnService.startTunOnly(this)
+                }
             }
         }
 
@@ -224,7 +246,8 @@ class MainActivity : AppCompatActivity() {
                 autoFallbackToH2 = binding.switchAutoH2Fallback.isChecked,
                 quickReconnect = binding.switchQuickReconnect.isChecked,
                 scanMode = ScanMode.entries[binding.spinnerScanMode.selectedItemPosition],
-                manualPeer = binding.etManualPeer.text.toString().trim()
+                manualPeer = binding.etManualPeer.text.toString().trim(),
+                exitLocation = binding.etExitLocation.text.toString().trim()
             )
             VpnConfig.save(this, updated)
             loadConfigIntoUi(updated)
@@ -339,10 +362,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderHomeState(snapshot: TunnelSnapshot) {
         val statusText = when (snapshot.phase) {
-            TunnelPhase.DISCONNECTED -> getString(R.string.status_disconnected)
-            TunnelPhase.CONNECTING -> getString(R.string.status_connecting)
-            TunnelPhase.VALIDATING -> getString(R.string.status_validating)
-            TunnelPhase.CONNECTED -> getString(R.string.status_connected)
+            TunnelPhase.STOPPED -> getString(R.string.status_disconnected)
+            TunnelPhase.WAITING_FOR_INTERNET -> "Waiting for Internet"
+            TunnelPhase.STARTING_CORE -> "Starting Aether Core"
+            TunnelPhase.CORE_CONNECTED -> "Core Running"
+            TunnelPhase.SOCKS5_READY -> "SOCKS5 Ready"
+            TunnelPhase.STARTING_HEV -> "Starting TUN / HEV"
+            TunnelPhase.TUN_ACTIVE -> "TUN Active"
+            TunnelPhase.VPN_CONNECTED -> getString(R.string.status_connected)
             TunnelPhase.RECONNECTING -> getString(R.string.status_reconnecting)
             TunnelPhase.ERROR -> getString(R.string.status_error)
         }
@@ -350,10 +377,8 @@ class MainActivity : AppCompatActivity() {
         binding.tvProtocol.text = "Protocol: ${snapshot.protocolLabel}"
         binding.tvGateway.text = "Gateway: ${snapshot.gatewayLabel.ifBlank { "Auto (WARP)" }}"
 
-        val isActive = snapshot.phase == TunnelPhase.CONNECTED ||
-            snapshot.phase == TunnelPhase.CONNECTING ||
-            snapshot.phase == TunnelPhase.VALIDATING ||
-            snapshot.phase == TunnelPhase.RECONNECTING
+        val isActive = snapshot.phase == TunnelPhase.VPN_CONNECTED ||
+            snapshot.phase.isWorking
 
         binding.btnToggleVpn.text = if (isActive) {
             getString(R.string.action_disconnect)
@@ -371,20 +396,28 @@ class MainActivity : AppCompatActivity() {
         binding.tvError.text = snapshot.errorMessage.orEmpty()
         binding.tvError.visibility = if (snapshot.errorMessage.isNullOrBlank()) View.GONE else View.VISIBLE
 
-        if (snapshot.phase != TunnelPhase.CONNECTED) {
+        if (snapshot.phase != TunnelPhase.VPN_CONNECTED && !snapshot.tunActive) {
             binding.tvTrafficStats.text = getString(R.string.label_stats_idle)
             binding.tvDuration.text = getString(R.string.label_duration_idle)
         }
+
+        // Diagnostics component badges & toggles
+        binding.tvComponentStatusSummary.text =
+            "Core: ${if (snapshot.coreActive) "Ready (127.0.0.1:1819)" else "Stopped"} • TUN: ${if (snapshot.tunActive) "Active (/dev/tun)" else "Stopped"}"
+        binding.btnToggleCore.text = if (snapshot.coreActive) "Stop Aether Core" else "Start Aether Core"
+        binding.btnToggleTun.text = if (snapshot.tunActive) "Stop TUN / HEV" else "Start TUN / HEV"
     }
 
     private fun updateStatsLoop(snapshot: TunnelSnapshot) {
         statsJob?.cancel()
-        if (snapshot.phase != TunnelPhase.CONNECTED || currentTabId != R.id.nav_home) return
+        if ((snapshot.phase != TunnelPhase.VPN_CONNECTED && !snapshot.tunActive) || currentTabId != R.id.nav_home) return
         val intervalMs = VpnConfig.load(this).statsRefreshIntervalMs
         statsJob = uiScope.launch {
             while (true) {
                 val stats = AetherVpnService.readLiveStats()
-                val elapsedSec = ((System.currentTimeMillis() - snapshot.connectedSinceMs) / 1000L).coerceAtLeast(0L)
+                val elapsedSec = if (snapshot.connectedSinceMs > 0L) {
+                    ((System.currentTimeMillis() - snapshot.connectedSinceMs) / 1000L).coerceAtLeast(0L)
+                } else 0L
                 binding.tvDuration.text = "Duration: ${formatDuration(elapsedSec)}"
                 binding.tvTrafficStats.text =
                     "TX: ${formatBytes(stats.txBytes)} (${stats.txPackets} pkts)  •  " +
@@ -411,11 +444,15 @@ class MainActivity : AppCompatActivity() {
         val nativeHeapMb = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
         val jvmUsedMb = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024.0 * 1024.0)
         binding.tvDiagnosticsSummary.text = buildString {
-            append("Tunnel Phase: ").append(snap.phase.name).append('\n')
+            append("Tunnel Phase: ").append(snap.phase.label).append('\n')
             append("DNS Mode: ").append(cfg.customDns.ifBlank { "1.1.1.1 / 1.0.0.1 (TUN forced)" }).append('\n')
             append("Last Verified RTT: ").append(if (snap.latencyMs > 0) "${snap.latencyMs} ms" else "N/A").append('\n')
             append(String.format("App Heap: %.1f MiB JVM | %.1f MiB Native", jvmUsedMb, nativeHeapMb))
         }
+        binding.tvComponentStatusSummary.text =
+            "Core: ${if (snap.coreActive) "Ready (127.0.0.1:1819)" else "Stopped"} • TUN: ${if (snap.tunActive) "Active (/dev/tun)" else "Stopped"}"
+        binding.btnToggleCore.text = if (snap.coreActive) "Stop Aether Core" else "Start Aether Core"
+        binding.btnToggleTun.text = if (snap.tunActive) "Stop TUN / HEV" else "Start TUN / HEV"
         val logLines = DiagnosticsLog.entries()
         binding.tvRedactedLogs.text = LogFormatter.format(this, logLines)
     }

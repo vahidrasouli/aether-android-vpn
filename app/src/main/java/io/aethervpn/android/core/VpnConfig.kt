@@ -77,6 +77,8 @@ data class VpnConfig(
     val quickReconnect: Boolean = true,
     val scanMode: ScanMode = ScanMode.TURBO,
     val manualPeer: String = "",
+    val exitLocation: String = "",
+    val exitLocationSecs: Int = 60,
     val ipFamily: IpFamily = IpFamily.IPV4,
     val perfProfile: PerfProfile = PerfProfile.LOW,
     val hevMode: HevMode = HevMode.TCP_UDP,
@@ -110,6 +112,11 @@ data class VpnConfig(
 
     val enableUdp: Boolean
         get() = hevMode == HevMode.TCP_UDP
+
+    val hasExitLocationPolicy: Boolean
+        get() = exitLocation.isNotBlank() &&
+            !exitLocation.equals("any", ignoreCase = true) &&
+            !exitLocation.equals("off", ignoreCase = true)
 
     fun applyPreset(level: ProfileLevel): VpnConfig = when (level) {
         ProfileLevel.BATTERY_EFFICIENT -> copy(
@@ -164,6 +171,8 @@ data class VpnConfig(
             put("quickReconnect", quickReconnect)
             put("scanMode", scanMode.name)
             put("manualPeer", manualPeer)
+            put("exitLocation", exitLocation.trim())
+            put("exitLocationSecs", exitLocationSecs)
             put("ipFamily", ipFamily.name)
             put("perfProfile", perfProfile.name)
             put("hevMode", hevMode.name)
@@ -232,6 +241,8 @@ data class VpnConfig(
                 quickReconnect = o.optBoolean("quickReconnect", true),
                 scanMode = enumOrDefault(o.optString("scanMode"), ScanMode.TURBO),
                 manualPeer = o.optString("manualPeer", "").trim(),
+                exitLocation = o.optString("exitLocation", "").trim(),
+                exitLocationSecs = o.optInt("exitLocationSecs", 60).coerceIn(10, 600),
                 ipFamily = enumOrDefault(o.optString("ipFamily"), IpFamily.IPV4),
                 perfProfile = enumOrDefault(o.optString("perfProfile"), PerfProfile.LOW),
                 hevMode = enumOrDefault(o.optString("hevMode"), HevMode.TCP_UDP),
@@ -266,6 +277,8 @@ data class VpnConfig(
                 quickReconnect = p.getBoolean("quick_reconnect", true),
                 scanMode = enumOrDefault(p.getString("scan_mode", null), ScanMode.TURBO),
                 manualPeer = p.getString("manual_peer", "").orEmpty(),
+                exitLocation = p.getString("exit_location", "").orEmpty(),
+                exitLocationSecs = p.getInt("exit_location_secs", 60),
                 ipFamily = enumOrDefault(p.getString("ip_family", null), IpFamily.IPV4),
                 perfProfile = enumOrDefault(p.getString("perf_profile", null), PerfProfile.LOW),
                 hevMode = enumOrDefault(p.getString("hev_mode", null), HevMode.TCP_UDP),
@@ -300,6 +313,8 @@ data class VpnConfig(
                 .putBoolean("quick_reconnect", config.quickReconnect)
                 .putString("scan_mode", config.scanMode.name)
                 .putString("manual_peer", config.manualPeer.trim())
+                .putString("exit_location", config.exitLocation.trim())
+                .putInt("exit_location_secs", config.exitLocationSecs)
                 .putString("ip_family", config.ipFamily.name)
                 .putString("perf_profile", config.perfProfile.name)
                 .putString("hev_mode", config.hevMode.name)

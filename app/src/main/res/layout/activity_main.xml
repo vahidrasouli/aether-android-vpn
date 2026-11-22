@@ -237,6 +237,24 @@
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_secondary" />
 
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Exit Country / Location Filter"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/etExitLocation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:hint="e.g. DE or !IR,RU (optional)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
                 <Button
                     android:id="@+id/btnSaveConnection"
                     android:layout_width="match_parent"
@@ -472,6 +490,48 @@
                     android:padding="12dp"
                     android:textColor="@color/text_primary"
                     android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Independent Component Diagnostics"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvComponentStatusSummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@color/card_bg"
+                    android:padding="10dp"
+                    android:text="Core: Stopped • TUN: Stopped"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnToggleCore"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Start Aether Core" />
+
+                    <Button
+                        android:id="@+id/btnToggleTun"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="Start TUN / HEV" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"

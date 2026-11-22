@@ -49,6 +49,15 @@ class AetherEngineManager(private val privateDataDir: File) {
             else -> Unit
         }
 
+        if (config.hasExitLocationPolicy) {
+            args += "--exit-loc"
+            args += config.exitLocation.trim()
+            if (config.exitLocationSecs > 0) {
+                args += "--exit-loc-secs"
+                args += config.exitLocationSecs.toString()
+            }
+        }
+
         if (config.manualPeer.isNotBlank()) {
             when (proto) {
                 AetherProtocol.WIREGUARD -> {
@@ -115,11 +124,27 @@ class AetherEngineManager(private val privateDataDir: File) {
         return args
     }
 
+    fun calculateStartupTimeoutMs(
+        config: VpnConfig,
+        overrideProtocol: AetherProtocol? = null
+    ): Long {
+        val proto = overrideProtocol ?: config.protocol
+        return when {
+            proto == AetherProtocol.GOOL ||
+            proto == AetherProtocol.GOOL_CLASSIC ||
+            proto == AetherProtocol.MIM -> 60_000L
+
+            proto == AetherProtocol.MASQUE_H3 -> 55_000L
+            config.scanMode != ScanMode.TURBO -> 55_000L
+            else -> 35_000L
+        }
+    }
+
     suspend fun start(
         config: VpnConfig,
         protector: SocketProtectorCallback,
         overrideProtocol: AetherProtocol? = null,
-        readinessTimeoutMs: Long = 20_000L
+        readinessTimeoutMs: Long? = null
     ): Result<Long> {
         if (!AetherNative.ensureLoaded()) {
             val errDetails = AetherNative.diagnosticInfo
@@ -136,9 +161,11 @@ class AetherEngineManager(private val privateDataDir: File) {
             return Result.failure(IllegalStateException("Failed to register VpnService socket protector"))
         }
 
+        val effectiveTimeoutMs = readinessTimeoutMs ?: calculateStartupTimeoutMs(config, overrideProtocol)
+        val proto = overrideProtocol ?: config.protocol
         val cliArgs = buildCoreArguments(config, overrideProtocol)
         runCatching { android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true) }
-        DiagnosticsLog.record("Engine", "Starting Aether (${(overrideProtocol ?: config.protocol).label})")
+        DiagnosticsLog.record("Engine", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s]")
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
         val parsed = runCatching { JSONObject(rawReply) }.getOrNull()
@@ -155,7 +182,7 @@ class AetherEngineManager(private val privateDataDir: File) {
         }
         activeJobId = jobId
 
-        val deadline = System.currentTimeMillis() + readinessTimeoutMs
+        val deadline = System.currentTimeMillis() + effectiveTimeoutMs
         var backoffMs = 150L
         while (System.currentTimeMillis() < deadline) {
             val exitError = pollIfExited(jobId)
@@ -172,7 +199,7 @@ class AetherEngineManager(private val privateDataDir: File) {
 
         stop()
         return Result.failure(
-            IllegalStateException("Timed out waiting for Aether SOCKS5 listener on ${config.socksBindAddress}")
+            IllegalStateException("Timed out waiting for Aether SOCKS5 listener on ${config.socksBindAddress} after ${effectiveTimeoutMs / 1000}s")
         )
     }
 
