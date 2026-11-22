@@ -1,5 +1,6 @@
 package io.aethervpn.android
 
+import io.aethervpn.android.core.HevMode
 import io.aethervpn.android.core.HevTunnelManager
 import io.aethervpn.android.core.IpFamily
 import io.aethervpn.android.core.VpnConfig
@@ -13,7 +14,7 @@ class HevConfigGeneratorTest {
     @Test
     fun generatesBoundedLoopbackDualStackYaml() {
         val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
-        val yaml = manager.generateYamlConfig(VpnConfig(ipFamily = IpFamily.BOTH))
+        val yaml = manager.generateYamlConfig(VpnConfig(ipFamily = IpFamily.BOTH, hevMode = HevMode.TCP_UDP))
 
         assertTrue(yaml.contains("address: '127.0.0.1'"))
         assertTrue(yaml.contains("port: 1819"))
@@ -32,5 +33,13 @@ class HevConfigGeneratorTest {
         val yaml = manager.generateYamlConfig(VpnConfig(ipFamily = IpFamily.IPV4))
 
         assertFalse(yaml.contains("ipv6:"))
+    }
+
+    @Test
+    fun omitsUdpSectionWhenTcpOnlyMode() {
+        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+        val yaml = manager.generateYamlConfig(VpnConfig(hevMode = HevMode.TCP_ONLY))
+
+        assertFalse(yaml.contains("udp: 'udp'"))
     }
 }

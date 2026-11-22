@@ -32,6 +32,7 @@ class AetherEngineManager(private val privateDataDir: File) {
             "--config", configFile.absolutePath,
             "--scan", config.scanMode.cliValue,
             "--ip", config.ipFamily.cliValue,
+            "--perf", config.perfProfile.cliValue,
             "--log-level", "info"
         )
 
@@ -136,6 +137,7 @@ class AetherEngineManager(private val privateDataDir: File) {
         }
 
         val cliArgs = buildCoreArguments(config, overrideProtocol)
+        runCatching { android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true) }
         DiagnosticsLog.record("Engine", "Starting Aether (${(overrideProtocol ?: config.protocol).label})")
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())

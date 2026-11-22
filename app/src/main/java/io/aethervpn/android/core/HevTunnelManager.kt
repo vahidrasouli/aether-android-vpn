@@ -31,8 +31,10 @@ class HevTunnelManager(private val cacheDir: File) {
             append("socks5:\n")
             append("  port: ").append(config.socksPort).append('\n')
             append("  address: '").append(VpnConfig.LOOPBACK_HOST).append("'\n")
-            // Standard RFC 1928 UDP ASSOCIATE (supported by CluvexStudio/Aether src/socks.rs)
-            append("  udp: 'udp'\n")
+            // RFC 1928 UDP ASSOCIATE - omitted in TCP-only mode to conserve battery & RAM
+            if (config.enableUdp) {
+                append("  udp: 'udp'\n")
+            }
             append("\n")
             append("misc:\n")
             // Low-memory tuning per upstream hev-socks5-tunnel mobile guidelines

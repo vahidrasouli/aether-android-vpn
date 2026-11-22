@@ -139,6 +139,14 @@ class AetherVpnService : VpnService() {
         super.onDestroy()
     }
 
+    private fun formatException(t: Throwable?): String {
+        if (t == null) return "Unknown error"
+        val cls = t.javaClass.simpleName
+        val msg = t.message ?: "No error message"
+        val topFrame = t.stackTrace.firstOrNull()?.let { " (${it.fileName}:${it.lineNumber})" } ?: ""
+        return "$cls: $msg$topFrame"
+    }
+
     private suspend fun connectPipeline(isReconnect: Boolean) {
         val config = VpnConfig.load(this)
         val primaryProtocol = config.protocol
@@ -151,18 +159,19 @@ class AetherVpnService : VpnService() {
             primaryProtocol == AetherProtocol.MASQUE_H3 &&
             config.autoFallbackToH2
         ) {
-            DiagnosticsLog.record("VPN", "MASQUE HTTP/3 failed (${firstAttempt.exceptionOrNull()?.message}); trying 1-shot HTTP/2 fallback")
+            val firstErr = formatException(firstAttempt.exceptionOrNull())
+            DiagnosticsLog.record("VPN", "MASQUE HTTP/3 failed ($firstErr); trying 1-shot HTTP/2 fallback")
             val fallbackAttempt = attemptSingleProtocol(config, AetherProtocol.MASQUE_H2, isReconnect)
             if (fallbackAttempt.isSuccess) return
             failClosed(
-                fallbackAttempt.exceptionOrNull()?.message ?: "MASQUE HTTP/3 and HTTP/2 both failed",
+                formatException(fallbackAttempt.exceptionOrNull()),
                 AetherProtocol.MASQUE_H2.label
             )
             return
         }
 
         failClosed(
-            firstAttempt.exceptionOrNull()?.message ?: "VPN startup failed",
+            formatException(firstAttempt.exceptionOrNull()),
             primaryProtocol.label
         )
     }
@@ -281,9 +290,16 @@ class AetherVpnService : VpnService() {
         }
         val isCustomV4 = parsedDns.count { it == '.' } == 3
         val isCustomV6 = parsedDns.contains(':') && !isCustomV4
+        var dnsAdded = false
         if (isCustomV4 || (isCustomV6 && config.ipv6Enabled)) {
-            runCatching { builder.addDnsServer(parsedDns) }
-        } else {
+            val res = runCatching { builder.addDnsServer(parsedDns) }
+            if (res.isSuccess) {
+                dnsAdded = true
+            } else {
+                DiagnosticsLog.record("VPN", "Custom DNS ($parsedDns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
+            }
+        }
+        if (!dnsAdded) {
             builder.addDnsServer(VpnConfig.DNS_IPV4_PRIMARY)
             builder.addDnsServer(VpnConfig.DNS_IPV4_SECONDARY)
         }
@@ -305,13 +321,18 @@ class AetherVpnService : VpnService() {
     }
 
     private fun applyPerAppRouting(builder: Builder, config: VpnConfig) {
+        // Enforce true kernel-level TUN bypass for Aether itself
+        val bypassRes = runCatching { builder.addDisallowedApplication(packageName) }
+        if (bypassRes.isSuccess) {
+            DiagnosticsLog.record("VPN", "Kernel TUN bypass active ($packageName excluded from /dev/tun)")
+        } else {
+            DiagnosticsLog.record("VPN", "Warning: could not add disallowed app $packageName: ${bypassRes.exceptionOrNull()?.message}")
+        }
+
         when (config.splitTunnelMode) {
-            SplitTunnelMode.ALL_APPS -> {
-                runCatching { builder.addDisallowedApplication(packageName) }
-            }
+            SplitTunnelMode.ALL_APPS -> Unit
 
             SplitTunnelMode.EXCLUDE_SELECTED -> {
-                runCatching { builder.addDisallowedApplication(packageName) }
                 config.selectedPackages.forEach { pkg ->
                     if (pkg != packageName) runCatching { builder.addDisallowedApplication(pkg) }
                 }
@@ -319,11 +340,7 @@ class AetherVpnService : VpnService() {
 
             SplitTunnelMode.INCLUDE_ONLY_SELECTED -> {
                 val targets = config.selectedPackages.filter { it != packageName }
-                if (targets.isEmpty()) {
-                    runCatching { builder.addDisallowedApplication(packageName) }
-                } else {
-                    targets.forEach { pkg -> runCatching { builder.addAllowedApplication(pkg) } }
-                }
+                targets.forEach { pkg -> runCatching { builder.addAllowedApplication(pkg) } }
             }
         }
     }

@@ -2,7 +2,10 @@ package io.aethervpn.android
 
 import io.aethervpn.android.core.AetherEngineManager
 import io.aethervpn.android.core.AetherProtocol
+import io.aethervpn.android.core.HevMode
+import io.aethervpn.android.core.IpFamily
 import io.aethervpn.android.core.NoizeProfile
+import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.VpnConfig
 import org.junit.Assert.assertEquals
@@ -29,6 +32,9 @@ class VpnConfigTest {
         assertTrue(args.contains("--h3"))
         assertTrue(args.contains("--quick-reconnect"))
         assertTrue(args.contains("turbo"))
+        assertTrue(args.contains("--perf"))
+        assertTrue(args.contains("low"))
+        assertTrue(args.contains("v4"))
         assertFalse(args.contains("--noize"))
         assertFalse(args.contains("--fragment"))
     }
@@ -38,6 +44,8 @@ class VpnConfigTest {
         val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val cfg = VpnConfig(
             protocol = AetherProtocol.MASQUE_H2,
+            perfProfile = PerfProfile.MEDIUM,
+            hevMode = HevMode.TCP_UDP,
             manualPeer = "162.159.198.1:443",
             routeDirectRules = "domain:local,private",
             routeBlockRules = "domain:ads.example",
@@ -53,6 +61,8 @@ class VpnConfigTest {
         assertTrue(args.contains("--h2"))
         assertTrue(args.contains("--h2-peer"))
         assertTrue(args.contains("162.159.198.1:443"))
+        assertTrue(args.contains("--perf"))
+        assertTrue(args.contains("medium"))
         assertTrue(args.contains("--route-direct"))
         assertTrue(args.contains("--route-block"))
         assertTrue(args.contains("--noize"))
@@ -76,6 +86,9 @@ class VpnConfigTest {
     fun backupJsonRedactsProxyCredentialsAndRoundTrips() {
         val original = VpnConfig(
             protocol = AetherProtocol.WIREGUARD,
+            perfProfile = PerfProfile.LOW,
+            hevMode = HevMode.TCP_ONLY,
+            ipFamily = IpFamily.IPV4,
             upstreamProxy = "socks5://user:supersecret@10.0.0.2:1080",
             routeDirectRules = "private,port:22"
         )
@@ -84,6 +97,9 @@ class VpnConfigTest {
 
         val restored = VpnConfig.fromBackupJson(json).getOrThrow()
         assertEquals(AetherProtocol.WIREGUARD, restored.protocol)
+        assertEquals(PerfProfile.LOW, restored.perfProfile)
+        assertEquals(HevMode.TCP_ONLY, restored.hevMode)
+        assertEquals(IpFamily.IPV4, restored.ipFamily)
         assertEquals("private,port:22", restored.routeDirectRules)
         assertEquals("", restored.upstreamProxy)
     }

@@ -31,9 +31,20 @@ enum class ScanMode(val cliValue: String, val label: String) {
 }
 
 enum class IpFamily(val cliValue: String, val label: String) {
+    IPV4("v4", "IPv4 Only (Stable Mobile)"),
     BOTH("both", "IPv4 + IPv6 (Dual-Stack)"),
-    IPV4("v4", "IPv4 Only"),
     IPV6("v6", "IPv6 Only")
+}
+
+enum class PerfProfile(val cliValue: String, val label: String) {
+    LOW("low", "Low (Mobile / Battery)"),
+    MEDIUM("medium", "Medium (Balanced)"),
+    HIGH("high", "High (Maximum Throughput)")
+}
+
+enum class HevMode(val label: String) {
+    TCP_UDP("hev-socks5-tunnel (TCP + UDP)"),
+    TCP_ONLY("hev-socks5-tunnel (TCP only)")
 }
 
 enum class NoizeProfile(val cliValue: String, val label: String) {
@@ -66,7 +77,9 @@ data class VpnConfig(
     val quickReconnect: Boolean = true,
     val scanMode: ScanMode = ScanMode.TURBO,
     val manualPeer: String = "",
-    val ipFamily: IpFamily = IpFamily.BOTH,
+    val ipFamily: IpFamily = IpFamily.IPV4,
+    val perfProfile: PerfProfile = PerfProfile.LOW,
+    val hevMode: HevMode = HevMode.TCP_UDP,
     val customDns: String = "",
     val routeDirectRules: String = "",
     val routeBlockRules: String = "",
@@ -95,6 +108,9 @@ data class VpnConfig(
     val ipv6Enabled: Boolean
         get() = ipFamily == IpFamily.BOTH || ipFamily == IpFamily.IPV6
 
+    val enableUdp: Boolean
+        get() = hevMode == HevMode.TCP_UDP
+
     fun applyPreset(level: ProfileLevel): VpnConfig = when (level) {
         ProfileLevel.BATTERY_EFFICIENT -> copy(
             profileLevel = level,
@@ -102,6 +118,9 @@ data class VpnConfig(
             autoFallbackToH2 = true,
             quickReconnect = true,
             scanMode = ScanMode.TURBO,
+            ipFamily = IpFamily.IPV4,
+            perfProfile = PerfProfile.LOW,
+            hevMode = HevMode.TCP_ONLY,
             noizeProfile = NoizeProfile.OFF,
             tlsFragmentation = false,
             echEnabled = false,
@@ -114,6 +133,9 @@ data class VpnConfig(
             autoFallbackToH2 = true,
             quickReconnect = true,
             scanMode = ScanMode.BALANCED,
+            ipFamily = IpFamily.IPV4,
+            perfProfile = PerfProfile.LOW,
+            hevMode = HevMode.TCP_UDP,
             noizeProfile = NoizeProfile.OFF,
             tlsFragmentation = false,
             echEnabled = false,
@@ -122,6 +144,8 @@ data class VpnConfig(
 
         ProfileLevel.ADVANCED -> copy(
             profileLevel = level,
+            perfProfile = PerfProfile.MEDIUM,
+            hevMode = HevMode.TCP_UDP,
             statsRefreshIntervalMs = 3_000L
         )
     }
@@ -141,6 +165,8 @@ data class VpnConfig(
             put("scanMode", scanMode.name)
             put("manualPeer", manualPeer)
             put("ipFamily", ipFamily.name)
+            put("perfProfile", perfProfile.name)
+            put("hevMode", hevMode.name)
             put("customDns", customDns)
             put("routeDirectRules", routeDirectRules)
             put("routeBlockRules", routeBlockRules)
@@ -206,7 +232,9 @@ data class VpnConfig(
                 quickReconnect = o.optBoolean("quickReconnect", true),
                 scanMode = enumOrDefault(o.optString("scanMode"), ScanMode.TURBO),
                 manualPeer = o.optString("manualPeer", "").trim(),
-                ipFamily = enumOrDefault(o.optString("ipFamily"), IpFamily.BOTH),
+                ipFamily = enumOrDefault(o.optString("ipFamily"), IpFamily.IPV4),
+                perfProfile = enumOrDefault(o.optString("perfProfile"), PerfProfile.LOW),
+                hevMode = enumOrDefault(o.optString("hevMode"), HevMode.TCP_UDP),
                 customDns = o.optString("customDns", "").trim(),
                 routeDirectRules = o.optString("routeDirectRules", "").trim(),
                 routeBlockRules = o.optString("routeBlockRules", "").trim(),
@@ -238,7 +266,9 @@ data class VpnConfig(
                 quickReconnect = p.getBoolean("quick_reconnect", true),
                 scanMode = enumOrDefault(p.getString("scan_mode", null), ScanMode.TURBO),
                 manualPeer = p.getString("manual_peer", "").orEmpty(),
-                ipFamily = enumOrDefault(p.getString("ip_family", null), IpFamily.BOTH),
+                ipFamily = enumOrDefault(p.getString("ip_family", null), IpFamily.IPV4),
+                perfProfile = enumOrDefault(p.getString("perf_profile", null), PerfProfile.LOW),
+                hevMode = enumOrDefault(p.getString("hev_mode", null), HevMode.TCP_UDP),
                 customDns = p.getString("custom_dns", "").orEmpty(),
                 routeDirectRules = p.getString("route_direct", "").orEmpty(),
                 routeBlockRules = p.getString("route_block", "").orEmpty(),
@@ -271,6 +301,8 @@ data class VpnConfig(
                 .putString("scan_mode", config.scanMode.name)
                 .putString("manual_peer", config.manualPeer.trim())
                 .putString("ip_family", config.ipFamily.name)
+                .putString("perf_profile", config.perfProfile.name)
+                .putString("hev_mode", config.hevMode.name)
                 .putString("custom_dns", config.customDns.trim())
                 .putString("route_direct", config.routeDirectRules.trim())
                 .putString("route_block", config.routeBlockRules.trim())

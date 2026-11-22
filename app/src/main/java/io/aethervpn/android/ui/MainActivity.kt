@@ -23,9 +23,11 @@ import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.AppThemeMode
 import io.aethervpn.android.core.DiagnosticsLog
+import io.aethervpn.android.core.HevMode
 import io.aethervpn.android.core.IdentityRepository
 import io.aethervpn.android.core.IpFamily
 import io.aethervpn.android.core.NoizeProfile
+import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.ScanMode
 import io.aethervpn.android.core.TunnelPhase
@@ -140,6 +142,8 @@ class MainActivity : AppCompatActivity() {
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
 
         binding.spinnerProfile.adapter = simpleAdapter(ProfileLevel.entries.map { it.label })
+        binding.spinnerPerfProfile.adapter = simpleAdapter(PerfProfile.entries.map { it.label })
+        binding.spinnerHevMode.adapter = simpleAdapter(HevMode.entries.map { it.label })
         binding.spinnerProtocol.adapter = simpleAdapter(AetherProtocol.entries.map { it.label })
         binding.spinnerScanMode.adapter = simpleAdapter(ScanMode.entries.map { it.label })
         binding.spinnerIpFamily.adapter = simpleAdapter(IpFamily.entries.map { it.label })
@@ -166,6 +170,8 @@ class MainActivity : AppCompatActivity() {
             "Profile: ${cfg.profileLevel.label} • Protocol: ${cfg.protocol.label} • Quick Reconnect: ${if (cfg.quickReconnect) "On" else "Off"}"
 
         binding.spinnerProfile.setSelection(cfg.profileLevel.ordinal, false)
+        binding.spinnerPerfProfile.setSelection(cfg.perfProfile.ordinal, false)
+        binding.spinnerHevMode.setSelection(cfg.hevMode.ordinal, false)
         binding.spinnerProtocol.setSelection(cfg.protocol.ordinal, false)
         binding.switchAutoH2Fallback.isChecked = cfg.autoFallbackToH2
         binding.switchQuickReconnect.isChecked = cfg.quickReconnect
@@ -212,6 +218,8 @@ class MainActivity : AppCompatActivity() {
             val cur = VpnConfig.load(this)
             val updated = cur.copy(
                 profileLevel = ProfileLevel.entries[binding.spinnerProfile.selectedItemPosition],
+                perfProfile = PerfProfile.entries[binding.spinnerPerfProfile.selectedItemPosition],
+                hevMode = HevMode.entries[binding.spinnerHevMode.selectedItemPosition],
                 protocol = AetherProtocol.entries[binding.spinnerProtocol.selectedItemPosition],
                 autoFallbackToH2 = binding.switchAutoH2Fallback.isChecked,
                 quickReconnect = binding.switchQuickReconnect.isChecked,
