@@ -92,4 +92,19 @@ class DiagnosticsLogTest {
         DiagnosticsLog.clear()
         assertEquals(0, DiagnosticsLog.logsFlow.value.size)
     }
+
+    @Test
+    fun testRingBufferTrimUnderMemoryPressure() {
+        for (i in 1..100) {
+            DiagnosticsLog.record("PressureTest", "Event $i")
+        }
+        assertEquals(100, DiagnosticsLog.entries().size)
+
+        DiagnosticsLog.trim(keepCount = 25)
+        val trimmed = DiagnosticsLog.entries()
+        assertEquals(25, trimmed.size)
+        assertTrue(trimmed.first().contains("Event 76"))
+        assertTrue(trimmed.last().contains("Event 100"))
+        assertEquals(25, DiagnosticsLog.logsFlow.value.size)
+    }
 }

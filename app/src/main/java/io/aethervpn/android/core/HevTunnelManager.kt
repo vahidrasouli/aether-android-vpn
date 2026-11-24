@@ -39,8 +39,8 @@ class HevTunnelManager(private val cacheDir: File) {
             }
             append("\n")
             append("misc:\n")
-            // Low-memory tuning per upstream hev-socks5-tunnel mobile guidelines
-            append("  task-stack-size: 20480\n")
+            // Low-memory tuning per upstream hev-socks5-tunnel mobile guidelines (16KB stack per coroutine)
+            append("  task-stack-size: 16384\n")
             append("  tcp-buffer-size: 65536\n")
             append("  max-session-count: 512\n")
             append("  connect-timeout: 5000\n")

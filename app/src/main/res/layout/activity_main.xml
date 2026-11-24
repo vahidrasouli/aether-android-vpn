@@ -650,29 +650,19 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <!-- Full-Height Monospace Live Log Console -->
-            <androidx.core.widget.NestedScrollView
-                android:id="@+id/scrollLogs"
+            <!-- Full-Height Monospace Live Log Console (RecyclerView for 60fps diffing) -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvLogs"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_marginTop="8dp"
                 android:layout_weight="1"
                 android:background="@color/card_bg"
                 android:fadeScrollbars="false"
-                android:fillViewport="true"
-                android:scrollbars="vertical">
-
-                <TextView
-                    android:id="@+id/tvRedactedLogs"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="monospace"
-                    android:lineSpacingExtra="3dp"
-                    android:padding="12dp"
-                    android:textColor="@color/text_secondary"
-                    android:textIsSelectable="true"
-                    android:textSize="11sp" />
-            </androidx.core.widget.NestedScrollView>
+                android:scrollbars="vertical"
+                android:clipToPadding="false"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp" />
         </LinearLayout>
     </FrameLayout>
 

@@ -27,6 +27,9 @@ android {
             // Primary target: ARM64 Android devices (minimizes APK size)
             abiFilters += listOf("arm64-v8a")
         }
+
+        // Strip unused AndroidX / Material library locales to shrink APK
+        resourceConfigurations += listOf("en", "fa")
     }
 
     signingConfigs {
@@ -74,8 +77,9 @@ android {
 
     packaging {
         jniLibs {
-            // Required for Android 15 16KB page alignment & direct mmap without extra extraction
-            useLegacyPackaging = false
+            // Extract libpsiphon-tunnel-core.so to nativeLibraryDir with +x permissions (required for execve() on Android 10+)
+            // and compress .so files inside the APK.
+            useLegacyPackaging = true
         }
     }
 

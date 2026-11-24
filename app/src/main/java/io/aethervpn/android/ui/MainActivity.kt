@@ -3,6 +3,7 @@ package io.aethervpn.android.ui
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
@@ -18,7 +19,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.widget.NestedScrollView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import io.aethervpn.android.AetherApplication
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherProtocol
@@ -46,23 +48,28 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 /**
  * Clean, organized, battery-first native Kotlin XML UI structured into 3 tabs:
  * 1. Home / Connect: Status card, primary Connect/Disconnect button, active mode summary.
  * 2. Settings: Neatly grouped configuration cards (Protocol, Psiphon, Routing, Anti-Censorship, App Settings).
- * 3. Logs & Diagnostics: Full-height live auto-refreshing log console with smart auto-scroll + component controls.
+ * 3. Logs & Diagnostics: 60fps RecyclerView live auto-refreshing log console with smart auto-scroll + component controls.
  *
- * Battery discipline:
+ * Battery & performance discipline:
+ * - Lightweight native XML RecyclerView with ListAdapter (diffing new entries only).
  * - Zero Compose runtime overhead, zero FragmentTransaction churn.
  * - Foreground stats loop runs ONLY when Home tab is visible AND VPN is CONNECTED.
  * - Reactive StateFlow log collection with pause on manual scroll up.
+ * - All SharedPreferences and file I/O offloaded to Dispatchers.IO.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var logAdapter: LogAdapter
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var stateJob: Job? = null
     private var statsJob: Job? = null
@@ -71,6 +78,9 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile
     private var userAutoScrollEnabled = true
+
+    @Volatile
+    private var cachedConfig: VpnConfig? = null
 
     private val statsIntervalsMs = longArrayOf(5_000L, 3_000L, 10_000L)
     private val statsIntervalLabels = listOf(
@@ -101,9 +111,15 @@ class MainActivity : AppCompatActivity() {
         requestNotificationPermissionIfNeeded()
         setupNavigation()
         setupSpinners()
-        loadConfigIntoUi(VpnConfig.load(this))
-        setupLogAutoScroll()
+        setupLogRecyclerView()
         bindActions()
+
+        // Load configuration asynchronously off the main thread
+        uiScope.launch {
+            val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@MainActivity) }
+            cachedConfig = cfg
+            loadConfigIntoUi(cfg)
+        }
     }
 
     override fun onStart() {
@@ -136,6 +152,13 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            DiagnosticsLog.trim(keepCount = 30)
+        }
+    }
+
     private fun setupNavigation() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             currentTabId = item.itemId
@@ -145,9 +168,9 @@ class MainActivity : AppCompatActivity() {
 
             if (currentTabId == R.id.nav_logs) {
                 refreshIdentityAndDiagnostics()
-                if (userAutoScrollEnabled) {
-                    binding.scrollLogs.post {
-                        binding.scrollLogs.fullScroll(View.FOCUS_DOWN)
+                if (userAutoScrollEnabled && logAdapter.itemCount > 0) {
+                    binding.rvLogs.post {
+                        binding.rvLogs.scrollToPosition(logAdapter.itemCount - 1)
                     }
                 }
             }
@@ -156,25 +179,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupLogAutoScroll() {
-        binding.scrollLogs.setOnScrollChangeListener(
-            NestedScrollView.OnScrollChangeListener { v, _, scrollY, _, oldScrollY ->
-                val atBottom = !v.canScrollVertically(1)
-                if (atBottom) {
+    private fun setupLogRecyclerView() {
+        val layoutManager = LinearLayoutManager(this).apply {
+            stackFromEnd = true
+        }
+        binding.rvLogs.layoutManager = layoutManager
+        logAdapter = LogAdapter()
+        binding.rvLogs.adapter = logAdapter
+
+        binding.rvLogs.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                val canScrollDown = recyclerView.canScrollVertically(1)
+                if (!canScrollDown) {
+                    // Reached the bottom -> re-enable auto-scroll
                     userAutoScrollEnabled = true
-                } else if (scrollY < oldScrollY) {
-                    // User manually scrolled up -> pause auto-scrolling
+                } else if (dy < 0) {
+                    // User scrolled up -> pause auto-scrolling
                     userAutoScrollEnabled = false
                 }
             }
-        )
+        })
     }
 
     private fun renderLogs(lines: List<String>) {
-        binding.tvRedactedLogs.text = LogFormatter.format(this@MainActivity, lines)
-        if (userAutoScrollEnabled) {
-            binding.scrollLogs.post {
-                binding.scrollLogs.fullScroll(View.FOCUS_DOWN)
+        logAdapter.submitList(lines) {
+            if (userAutoScrollEnabled && lines.isNotEmpty()) {
+                binding.rvLogs.scrollToPosition(lines.size - 1)
             }
         }
     }
@@ -198,11 +229,14 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerProfile.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
                 val level = ProfileLevel.entries[pos]
-                val current = VpnConfig.load(this@MainActivity)
-                if (current.profileLevel != level) {
-                    val updated = current.applyPreset(level)
-                    VpnConfig.save(this@MainActivity, updated)
-                    loadConfigIntoUi(updated)
+                uiScope.launch {
+                    val current = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@MainActivity) }
+                    if (current.profileLevel != level) {
+                        val updated = current.applyPreset(level)
+                        cachedConfig = updated
+                        withContext(Dispatchers.IO) { VpnConfig.save(this@MainActivity, updated) }
+                        loadConfigIntoUi(updated)
+                    }
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -292,11 +326,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnRunProbe.setOnClickListener {
-            val cfg = VpnConfig.load(this)
+            val egressPort = cachedConfig?.effectiveSocksPort ?: VpnConfig.DEFAULT_SOCKS_PORT
             binding.tvDiagnosticsSummary.text = "Running on-demand tunnel probe..."
             uiScope.launch {
                 val res = withContext(Dispatchers.IO) {
-                    TunnelValidator.verifyThroughSocks(cfg.effectiveSocksPort)
+                    TunnelValidator.verifyThroughSocks(egressPort)
                 }
                 res.onSuccess { v ->
                     DiagnosticsLog.record("Probe", "OK: IP=${v.publicIp}, WARP=${v.warpStatus}, RTT=${v.latencyMs}ms")
@@ -325,20 +359,27 @@ class MainActivity : AppCompatActivity() {
                 .setTitle("Reset WARP Identity?")
                 .setMessage("Deletes local device identity and cached gateways. A fresh identity will be provisioned on next connect.")
                 .setPositiveButton("Reset") { _, _ ->
-                    IdentityRepository.resetIdentity(filesDir)
-                    DiagnosticsLog.record("Identity", "Local WARP identity reset by user")
-                    refreshIdentityAndDiagnostics()
-                    toast("Identity cleared")
+                    uiScope.launch {
+                        withContext(Dispatchers.IO) {
+                            IdentityRepository.resetIdentity(filesDir)
+                        }
+                        DiagnosticsLog.record("Identity", "Local WARP identity reset by user")
+                        refreshIdentityAndDiagnostics()
+                        toast("Identity cleared")
+                    }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
         }
 
         binding.btnExportConfig.setOnClickListener {
-            val json = VpnConfig.load(this).toSafeBackupJson()
-            val cm = getSystemService(ClipboardManager::class.java)
-            cm?.setPrimaryClip(ClipData.newPlainText("AetherConfigBackup", json))
-            toast("Backup JSON copied to clipboard (secrets excluded)")
+            uiScope.launch {
+                val cfg = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@MainActivity) }
+                val json = cfg.toSafeBackupJson()
+                val cm = getSystemService(ClipboardManager::class.java)
+                cm?.setPrimaryClip(ClipData.newPlainText("AetherConfigBackup", json))
+                toast("Backup JSON copied to clipboard (secrets excluded)")
+            }
         }
 
         binding.btnImportConfig.setOnClickListener {
@@ -348,7 +389,10 @@ class MainActivity : AppCompatActivity() {
                 .setView(input)
                 .setPositiveButton("Restore") { _, _ ->
                     VpnConfig.fromBackupJson(input.text.toString()).onSuccess { restored ->
-                        VpnConfig.save(this, restored)
+                        cachedConfig = restored
+                        uiScope.launch(Dispatchers.IO) {
+                            VpnConfig.save(this@MainActivity, restored)
+                        }
                         AetherApplication.applyTheme(restored.themeMode)
                         loadConfigIntoUi(restored)
                         toast("Configuration restored")
@@ -361,45 +405,50 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnSaveSettings.setOnClickListener {
-            val cur = VpnConfig.load(this)
-            val keepalive = binding.etWgKeepalive.text.toString().trim().toIntOrNull()?.coerceIn(0, 300) ?: 0
-            val theme = AppThemeMode.entries[binding.spinnerTheme.selectedItemPosition]
-            val interval = statsIntervalsMs[binding.spinnerStatsInterval.selectedItemPosition]
-            val selectedRegionCode = VpnConfig.PSIPHON_REGIONS.getOrNull(
-                binding.spinnerPsiphonRegion.selectedItemPosition
-            )?.first.orEmpty()
+            uiScope.launch {
+                val cur = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@MainActivity) }
+                val keepalive = binding.etWgKeepalive.text.toString().trim().toIntOrNull()?.coerceIn(0, 300) ?: 0
+                val theme = AppThemeMode.entries[binding.spinnerTheme.selectedItemPosition]
+                val interval = statsIntervalsMs[binding.spinnerStatsInterval.selectedItemPosition]
+                val selectedRegionCode = VpnConfig.PSIPHON_REGIONS.getOrNull(
+                    binding.spinnerPsiphonRegion.selectedItemPosition
+                )?.first.orEmpty()
 
-            val updated = cur.copy(
-                profileLevel = ProfileLevel.entries[binding.spinnerProfile.selectedItemPosition],
-                perfProfile = PerfProfile.entries[binding.spinnerPerfProfile.selectedItemPosition],
-                hevMode = HevMode.entries[binding.spinnerHevMode.selectedItemPosition],
-                protocol = AetherProtocol.entries[binding.spinnerProtocol.selectedItemPosition],
-                autoFallbackToH2 = binding.switchAutoH2Fallback.isChecked,
-                quickReconnect = binding.switchQuickReconnect.isChecked,
-                manualPeer = binding.etManualPeer.text.toString().trim(),
-                psiphonMode = PsiphonMode.entries[binding.spinnerPsiphonMode.selectedItemPosition],
-                psiphonRegion = selectedRegionCode,
-                exitLocation = binding.etExitLocation.text.toString().trim(),
-                ipFamily = IpFamily.entries[binding.spinnerIpFamily.selectedItemPosition],
-                customDns = binding.etCustomDns.text.toString().trim(),
-                routeDirectRules = binding.etRouteDirect.text.toString().trim(),
-                routeBlockRules = binding.etRouteBlock.text.toString().trim(),
-                upstreamProxy = binding.etUpstreamProxy.text.toString().trim(),
-                scanMode = ScanMode.entries[binding.spinnerScanMode.selectedItemPosition],
-                noizeProfile = NoizeProfile.entries[binding.spinnerNoize.selectedItemPosition],
-                tlsFragmentation = binding.switchTlsFragment.isChecked,
-                masqueSni = binding.etMasqueSni.text.toString().trim(),
-                echEnabled = binding.switchEch.isChecked,
-                tlsVerify = binding.switchTlsVerify.isChecked,
-                wgKeepaliveSecs = keepalive,
-                zeroTrustTeam = binding.etZeroTrustTeam.text.toString().trim(),
-                themeMode = theme,
-                statsRefreshIntervalMs = interval
-            )
-            VpnConfig.save(this, updated)
-            AetherApplication.applyTheme(theme)
-            loadConfigIntoUi(updated)
-            toast(getString(R.string.saved_confirmation))
+                val updated = cur.copy(
+                    profileLevel = ProfileLevel.entries[binding.spinnerProfile.selectedItemPosition],
+                    perfProfile = PerfProfile.entries[binding.spinnerPerfProfile.selectedItemPosition],
+                    hevMode = HevMode.entries[binding.spinnerHevMode.selectedItemPosition],
+                    protocol = AetherProtocol.entries[binding.spinnerProtocol.selectedItemPosition],
+                    autoFallbackToH2 = binding.switchAutoH2Fallback.isChecked,
+                    quickReconnect = binding.switchQuickReconnect.isChecked,
+                    manualPeer = binding.etManualPeer.text.toString().trim(),
+                    psiphonMode = PsiphonMode.entries[binding.spinnerPsiphonMode.selectedItemPosition],
+                    psiphonRegion = selectedRegionCode,
+                    exitLocation = binding.etExitLocation.text.toString().trim(),
+                    ipFamily = IpFamily.entries[binding.spinnerIpFamily.selectedItemPosition],
+                    customDns = binding.etCustomDns.text.toString().trim(),
+                    routeDirectRules = binding.etRouteDirect.text.toString().trim(),
+                    routeBlockRules = binding.etRouteBlock.text.toString().trim(),
+                    upstreamProxy = binding.etUpstreamProxy.text.toString().trim(),
+                    scanMode = ScanMode.entries[binding.spinnerScanMode.selectedItemPosition],
+                    noizeProfile = NoizeProfile.entries[binding.spinnerNoize.selectedItemPosition],
+                    tlsFragmentation = binding.switchTlsFragment.isChecked,
+                    masqueSni = binding.etMasqueSni.text.toString().trim(),
+                    echEnabled = binding.switchEch.isChecked,
+                    tlsVerify = binding.switchTlsVerify.isChecked,
+                    wgKeepaliveSecs = keepalive,
+                    zeroTrustTeam = binding.etZeroTrustTeam.text.toString().trim(),
+                    themeMode = theme,
+                    statsRefreshIntervalMs = interval
+                )
+                cachedConfig = updated
+                withContext(Dispatchers.IO) {
+                    VpnConfig.save(this@MainActivity, updated)
+                }
+                AetherApplication.applyTheme(theme)
+                loadConfigIntoUi(updated)
+                toast(getString(R.string.saved_confirmation))
+            }
         }
     }
 
@@ -408,35 +457,37 @@ class MainActivity : AppCompatActivity() {
             TunnelPhase.STOPPED -> getString(R.string.status_disconnected)
             TunnelPhase.WAITING_FOR_INTERNET -> "Waiting for Internet"
             TunnelPhase.STARTING_CORE -> "Starting Aether Core"
-            TunnelPhase.CORE_CONNECTED -> "Core Running"
-            TunnelPhase.SOCKS5_READY -> "SOCKS5 Ready"
-            TunnelPhase.STARTING_HEV -> "Starting TUN / HEV"
-            TunnelPhase.TUN_ACTIVE -> "TUN Active"
+            TunnelPhase.STARTING_TUN -> "Establishing TUN Interface"
+            TunnelPhase.VALIDATING_EGRESS -> "Validating WARP Egress"
             TunnelPhase.VPN_CONNECTED -> getString(R.string.status_connected)
-            TunnelPhase.RECONNECTING -> getString(R.string.status_reconnecting)
-            TunnelPhase.ERROR -> getString(R.string.status_error)
+            TunnelPhase.ERROR -> "Error: ${snapshot.lastErrorMessage ?: "Unknown"}"
+            TunnelPhase.DEGRADED -> "Degraded Connection"
+            TunnelPhase.RECONNECTING -> "Reconnecting..."
         }
-        binding.tvStatus.text = statusText
-        binding.tvProtocol.text = "Protocol: ${snapshot.protocolLabel}"
-        binding.tvGateway.text = "Gateway: ${snapshot.gatewayLabel.ifBlank { "Auto (WARP)" }}"
+        binding.tvConnectionStatus.text = statusText
+        binding.tvConnectedProtocolBadge.text =
+            if (snapshot.phase == TunnelPhase.VPN_CONNECTED) "Active: ${snapshot.protocolLabel}" else "Protocol: ${snapshot.protocolLabel}"
 
-        val isActive = snapshot.phase == TunnelPhase.VPN_CONNECTED || snapshot.phase.isWorking
-
-        binding.btnToggleVpn.text = if (isActive) {
-            getString(R.string.action_disconnect)
-        } else {
-            getString(R.string.action_connect)
+        when (snapshot.phase) {
+            TunnelPhase.VPN_CONNECTED -> {
+                binding.btnToggleVpn.text = getString(R.string.action_disconnect)
+                binding.btnToggleVpn.setBackgroundColor(ContextCompat.getColor(this, R.color.btn_disconnect))
+                binding.btnToggleVpn.isEnabled = true
+            }
+            TunnelPhase.STOPPED, TunnelPhase.ERROR -> {
+                binding.btnToggleVpn.text = getString(R.string.action_connect)
+                binding.btnToggleVpn.setBackgroundColor(ContextCompat.getColor(this, R.color.accent_primary))
+                binding.btnToggleVpn.isEnabled = true
+            }
+            else -> {
+                binding.btnToggleVpn.text = "Connecting..."
+                binding.btnToggleVpn.isEnabled = true
+            }
         }
 
-        binding.tvPublicIp.text = if (snapshot.verifiedPublicIp != null) {
-            val colo = snapshot.colo?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
-            "Verified IP: ${snapshot.verifiedPublicIp}$colo • WARP: ${snapshot.warpStatus} • ${snapshot.latencyMs}ms"
-        } else {
-            getString(R.string.label_ip_unverified)
-        }
-
-        binding.tvError.text = snapshot.errorMessage.orEmpty()
-        binding.tvError.visibility = if (snapshot.errorMessage.isNullOrBlank()) View.GONE else View.VISIBLE
+        val pubIp = snapshot.egressPublicIp ?: "—"
+        val latency = if (snapshot.lastLatencyMs != null) "${snapshot.lastLatencyMs} ms" else "—"
+        binding.tvEgressInfo.text = "Public IP: $pubIp  •  Latency: $latency"
 
         if (snapshot.phase != TunnelPhase.VPN_CONNECTED && !snapshot.tunActive) {
             binding.tvTrafficStats.text = getString(R.string.label_stats_idle)
@@ -444,7 +495,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Diagnostics component badges & toggles
-        val egressPort = VpnConfig.load(this).effectiveSocksPort
+        val egressPort = cachedConfig?.effectiveSocksPort ?: VpnConfig.DEFAULT_SOCKS_PORT
         binding.tvComponentStatusSummary.text =
             "Core: ${if (snapshot.coreActive) "Ready (127.0.0.1:$egressPort)" else "Stopped"} • TUN: ${if (snapshot.tunActive) "Active (/dev/tun)" else "Stopped"}"
         binding.btnToggleCore.text = if (snapshot.coreActive) getString(R.string.action_stop_core) else getString(R.string.action_start_core)
@@ -454,7 +505,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatsLoop(snapshot: TunnelSnapshot) {
         statsJob?.cancel()
         if ((snapshot.phase != TunnelPhase.VPN_CONNECTED && !snapshot.tunActive) || currentTabId != R.id.nav_home) return
-        val intervalMs = VpnConfig.load(this).statsRefreshIntervalMs
+        val intervalMs = cachedConfig?.statsRefreshIntervalMs ?: 5_000L
         statsJob = uiScope.launch {
             while (true) {
                 val stats = AetherVpnService.readLiveStats()
@@ -471,29 +522,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshIdentityAndDiagnostics() {
-        val id = IdentityRepository.load(filesDir)
-        val cfg = VpnConfig.load(this)
-        binding.tvIdentitySummary.text = buildString {
-            append("Identity: ").append(if (id.provisioned) "Provisioned" else "Not provisioned").append(" | ")
-            if (id.deviceId.isNotBlank()) append("Device: ").append(id.deviceId.take(12)).append("... | ")
-            if (id.ipv4.isNotBlank()) append("IPv4: ").append(id.ipv4).append(" | ")
-            append("Gateway: ").append(id.cachedGateway.ifBlank { "Auto" })
-        }
+        uiScope.launch {
+            val (id, cfg) = withContext(Dispatchers.IO) {
+                Pair(IdentityRepository.load(filesDir), cachedConfig ?: VpnConfig.load(this@MainActivity))
+            }
+            if (!isActive) return@launch
+            cachedConfig = cfg
+            binding.tvIdentitySummary.text = buildString {
+                append("Identity: ").append(if (id.provisioned) "Provisioned" else "Not provisioned").append(" | ")
+                if (id.deviceId.isNotBlank()) append("Device: ").append(id.deviceId.take(12)).append("... | ")
+                if (id.ipv4.isNotBlank()) append("IPv4: ").append(id.ipv4).append(" | ")
+                append("Gateway: ").append(id.cachedGateway.ifBlank { "Auto" })
+            }
 
-        val snap = VpnStateStore.state.value
-        val nativeHeapMb = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
-        val jvmUsedMb = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024.0 * 1024.0)
-        binding.tvDiagnosticsSummary.text = buildString {
-            append("Phase: ").append(snap.phase.label).append(" • ")
-            append("DNS: ").append(cfg.customDns.ifBlank { "1.1.1.1 (TUN forced)" }).append(" • ")
-            append("Heap: ").append(String.format("%.1fM JVM / %.1fM Native", jvmUsedMb, nativeHeapMb))
-        }
+            val snap = VpnStateStore.state.value
+            val nativeHeapMb = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
+            val jvmUsedMb = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024.0 * 1024.0)
+            binding.tvDiagnosticsSummary.text = buildString {
+                append("Phase: ").append(snap.phase.label).append(" • ")
+                append("DNS: ").append(cfg.customDns.ifBlank { "1.1.1.1 (TUN forced)" }).append(" • ")
+                append("Heap: ").append(String.format(Locale.US, "%.1fM JVM / %.1fM Native", jvmUsedMb, nativeHeapMb))
+            }
 
-        val egressPort = cfg.effectiveSocksPort
-        binding.tvComponentStatusSummary.text =
-            "Core: ${if (snap.coreActive) "Ready (127.0.0.1:$egressPort)" else "Stopped"} • TUN: ${if (snap.tunActive) "Active (/dev/tun)" else "Stopped"}"
-        binding.btnToggleCore.text = if (snap.coreActive) getString(R.string.action_stop_core) else getString(R.string.action_start_core)
-        binding.btnToggleTun.text = if (snap.tunActive) getString(R.string.action_stop_tun) else getString(R.string.action_start_tun)
+            val egressPort = cfg.effectiveSocksPort
+            binding.tvComponentStatusSummary.text =
+                "Core: ${if (snap.coreActive) "Ready (127.0.0.1:$egressPort)" else "Stopped"} • TUN: ${if (snap.tunActive) "Active (/dev/tun)" else "Stopped"}"
+            binding.btnToggleCore.text = if (snap.coreActive) getString(R.string.action_stop_core) else getString(R.string.action_start_core)
+            binding.btnToggleTun.text = if (snap.tunActive) getString(R.string.action_stop_tun) else getString(R.string.action_start_tun)
+        }
     }
 
     private fun requestVpnAndConnect() {
@@ -506,45 +562,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVpnService() {
-        val intent = Intent(this, AetherVpnService::class.java).apply {
-            action = AetherVpnService.ACTION_CONNECT
-        }
-        ContextCompat.startForegroundService(this, intent)
+        AetherVpnService.start(this)
     }
 
     private fun stopVpnService() {
-        val intent = Intent(this, AetherVpnService::class.java).apply {
-            action = AetherVpnService.ACTION_DISCONNECT
-        }
-        startService(intent)
+        AetherVpnService.stop(this)
     }
 
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
 
-    private fun formatDuration(totalSec: Long): String {
-        val h = totalSec / 3600
-        val m = (totalSec % 3600) / 60
-        val s = totalSec % 60
-        return String.format("%02d:%02d:%02d", h, m, s)
+    private fun formatBytes(bytes: Long): String {
+        val b = bytes.coerceAtLeast(0L)
+        return when {
+            b < 1024L -> "$b B"
+            b < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", b / 1024.0)
+            b < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.2f MB", b / (1024.0 * 1024.0))
+            else -> String.format(Locale.US, "%.2f GB", b / (1024.0 * 1024.0 * 1024.0))
+        }
     }
 
-    private fun formatBytes(bytes: Long): String {
-        if (bytes < 1024L) return "$bytes B"
-        val kib = bytes / 1024.0
-        if (kib < 1024.0) return String.format("%.1f KiB", kib)
-        val mib = kib / 1024.0
-        if (mib < 1024.0) return String.format("%.1f MiB", mib)
-        return String.format("%.2f GiB", mib / 1024.0)
+    private fun formatDuration(seconds: Long): String {
+        val s = seconds % 60L
+        val m = (seconds / 60L) % 60L
+        val h = seconds / 3600L
+        return if (h > 0) {
+            String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
+        } else {
+            String.format(Locale.US, "%02d:%02d", m, s)
+        }
     }
 
     private fun toast(msg: String) {

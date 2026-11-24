@@ -52,4 +52,17 @@ object DiagnosticsLog {
         ring.clear()
         _logsFlow.value = emptyList()
     }
+
+    /**
+     * Trims the oldest log entries under system memory pressure (onTrimMemory)
+     * so that the VPN service memory footprint stays minimal.
+     */
+    fun trim(keepCount: Int = 30) = synchronized(lock) {
+        if (ring.size > keepCount) {
+            while (ring.size > keepCount) {
+                ring.removeFirst()
+            }
+            _logsFlow.value = ring.toList()
+        }
+    }
 }

@@ -18,7 +18,7 @@ android_logger = "0.14"
 
 [profile.release]
 opt-level = "z"
-lto = true
+lto = "thin"
 codegen-units = 1
 strip = "symbols"
-panic = "unwind"
+panic = "abort"

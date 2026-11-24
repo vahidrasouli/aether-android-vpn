@@ -221,6 +221,19 @@ class AetherVpnService : VpnService() {
         super.onRevoke()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when (level) {
+            android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL,
+            android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW,
+            android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE,
+            android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE -> {
+                DiagnosticsLog.record("System", "Memory pressure (level=$level); trimming log buffer to protect VPN service")
+                DiagnosticsLog.trim(keepCount = 25)
+            }
+        }
+    }
+
     override fun onDestroy() {
         userRequestedStop = true
         activeJob?.cancel()

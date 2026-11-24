@@ -204,7 +204,31 @@ class AetherEngineManager(private val privateDataDir: File) {
         val effectiveTimeoutMs = readinessTimeoutMs ?: calculateStartupTimeoutMs(config, overrideProtocol)
         val proto = overrideProtocol ?: config.protocol
         val cliArgs = buildCoreArguments(config, overrideProtocol, psiphonBinaryPath)
-        runCatching { android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true) }
+
+        // Mobile runtime tuning for Rust engine (allow cellular radio idle, low memory footprint)
+        runCatching {
+            android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true)
+            android.system.Os.setenv("AETHER_MAX_CLIENTS", "128", true)
+            android.system.Os.setenv("AETHER_HALF_CLOSE_SECS", "30", true)
+            android.system.Os.setenv("AETHER_TCP_KEEPALIVE_SECS", "60", true)
+            android.system.Os.setenv("AETHER_MASQUE_H2_KEEPALIVE_SECS", "45", true)
+        }
+
+        // Apply mobile Go runtime caps when Psiphon is enabled to prevent Android LMK kills
+        if (config.psiphonMode != PsiphonMode.OFF) {
+            runCatching {
+                android.system.Os.setenv("GOMEMLIMIT", "32MiB", true)
+                android.system.Os.setenv("GOGC", "25", true)
+                android.system.Os.setenv("GOMAXPROCS", "2", true)
+            }
+        } else {
+            runCatching {
+                android.system.Os.unsetenv("GOMEMLIMIT")
+                android.system.Os.unsetenv("GOGC")
+                android.system.Os.unsetenv("GOMAXPROCS")
+            }
+        }
+
         DiagnosticsLog.record("Engine", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
@@ -258,6 +282,12 @@ class AetherEngineManager(private val privateDataDir: File) {
         }
         if (AetherNative.ensureLoaded()) {
             runCatching { AetherNative.nativeRegisterProtector(null) }
+        }
+        // Clean up Go runtime caps on stop to ensure zero lingering overhead
+        runCatching {
+            android.system.Os.unsetenv("GOMEMLIMIT")
+            android.system.Os.unsetenv("GOGC")
+            android.system.Os.unsetenv("GOMAXPROCS")
         }
     }
 
