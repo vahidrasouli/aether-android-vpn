@@ -456,38 +456,40 @@ class MainActivity : AppCompatActivity() {
         val statusText = when (snapshot.phase) {
             TunnelPhase.STOPPED -> getString(R.string.status_disconnected)
             TunnelPhase.WAITING_FOR_INTERNET -> "Waiting for Internet"
-            TunnelPhase.STARTING_CORE -> "Starting Aether Core"
-            TunnelPhase.STARTING_TUN -> "Establishing TUN Interface"
-            TunnelPhase.VALIDATING_EGRESS -> "Validating WARP Egress"
+            TunnelPhase.STARTING_CORE -> getString(R.string.status_connecting)
+            TunnelPhase.CORE_CONNECTED -> "Core Running"
+            TunnelPhase.SOCKS5_READY -> "SOCKS5 Ready"
+            TunnelPhase.STARTING_HEV -> "Starting TUN / HEV"
+            TunnelPhase.TUN_ACTIVE -> "TUN Active"
             TunnelPhase.VPN_CONNECTED -> getString(R.string.status_connected)
-            TunnelPhase.ERROR -> "Error: ${snapshot.lastErrorMessage ?: "Unknown"}"
-            TunnelPhase.DEGRADED -> "Degraded Connection"
-            TunnelPhase.RECONNECTING -> "Reconnecting..."
+            TunnelPhase.RECONNECTING -> getString(R.string.status_reconnecting)
+            TunnelPhase.ERROR -> getString(R.string.status_error)
         }
-        binding.tvConnectionStatus.text = statusText
-        binding.tvConnectedProtocolBadge.text =
-            if (snapshot.phase == TunnelPhase.VPN_CONNECTED) "Active: ${snapshot.protocolLabel}" else "Protocol: ${snapshot.protocolLabel}"
+        binding.tvStatus.text = statusText
+        binding.tvProtocol.text = "Protocol: ${snapshot.protocolLabel}"
+        binding.tvGateway.text = "Gateway: ${snapshot.gatewayLabel.ifBlank { "Auto (WARP)" }}"
 
-        when (snapshot.phase) {
-            TunnelPhase.VPN_CONNECTED -> {
-                binding.btnToggleVpn.text = getString(R.string.action_disconnect)
-                binding.btnToggleVpn.setBackgroundColor(ContextCompat.getColor(this, R.color.btn_disconnect))
-                binding.btnToggleVpn.isEnabled = true
-            }
-            TunnelPhase.STOPPED, TunnelPhase.ERROR -> {
-                binding.btnToggleVpn.text = getString(R.string.action_connect)
-                binding.btnToggleVpn.setBackgroundColor(ContextCompat.getColor(this, R.color.accent_primary))
-                binding.btnToggleVpn.isEnabled = true
-            }
-            else -> {
-                binding.btnToggleVpn.text = "Connecting..."
-                binding.btnToggleVpn.isEnabled = true
-            }
+        val isActive = snapshot.phase == TunnelPhase.VPN_CONNECTED ||
+            snapshot.phase == TunnelPhase.STARTING_CORE ||
+            snapshot.phase == TunnelPhase.STARTING_HEV ||
+            snapshot.phase == TunnelPhase.RECONNECTING ||
+            snapshot.phase.isWorking
+
+        binding.btnToggleVpn.text = if (isActive) {
+            getString(R.string.action_disconnect)
+        } else {
+            getString(R.string.action_connect)
         }
 
-        val pubIp = snapshot.egressPublicIp ?: "—"
-        val latency = if (snapshot.lastLatencyMs != null) "${snapshot.lastLatencyMs} ms" else "—"
-        binding.tvEgressInfo.text = "Public IP: $pubIp  •  Latency: $latency"
+        binding.tvPublicIp.text = if (snapshot.verifiedPublicIp != null) {
+            val colo = snapshot.colo?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
+            "Verified IP: ${snapshot.verifiedPublicIp}$colo • WARP: ${snapshot.warpStatus} • ${snapshot.latencyMs}ms"
+        } else {
+            getString(R.string.label_ip_unverified)
+        }
+
+        binding.tvError.text = snapshot.errorMessage.orEmpty()
+        binding.tvError.visibility = if (snapshot.errorMessage.isNullOrBlank()) View.GONE else View.VISIBLE
 
         if (snapshot.phase != TunnelPhase.VPN_CONNECTED && !snapshot.tunActive) {
             binding.tvTrafficStats.text = getString(R.string.label_stats_idle)
