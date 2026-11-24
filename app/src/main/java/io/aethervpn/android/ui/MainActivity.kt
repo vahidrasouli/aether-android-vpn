@@ -562,11 +562,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVpnService() {
-        AetherVpnService.start(this)
+        AetherVpnService.startVpn(this)
     }
 
     private fun stopVpnService() {
-        AetherVpnService.stop(this)
+        AetherVpnService.stopVpn(this)
     }
 
     private fun requestNotificationPermissionIfNeeded() {
