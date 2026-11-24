@@ -92,9 +92,9 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             native/psiphon-tunnel-core
-          key: ${{ runner.os }}-go-psiphon-stable-v1
+          key: ${{ runner.os }}-go-psiphon-cluvex-83aa73b-v1
           restore-keys: |
-            ${{ runner.os }}-go-psiphon-stable-
+            ${{ runner.os }}-go-psiphon-cluvex-
 
       - name: Build ARM64 Psiphon tunnel core (Go layer)
         run: bash scripts/build-psiphon.sh
@@ -195,10 +195,11 @@ jobs:
           print("SUCCESS: 0 unresolved non-system dynamic symbols in libaether_jni.so.")
           EOF
 
-          echo "=== 4. Verifying libpsiphon-tunnel-core.so ELF properties ==="
+          echo "=== 4. Verifying libpsiphon-tunnel-core.so ELF properties & patched protocols ==="
           readelf -h app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so | grep -q "ELF64"
           readelf -h app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so | grep -E -q "AArch64|183"
-          echo "libpsiphon-tunnel-core.so ELF properties (ELFCLASS64, EM_AARCH64) verified."
+          grep -a -q "FRONTED-MEEK-CDN-OSSH" app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so
+          echo "libpsiphon-tunnel-core.so ELF properties (ELFCLASS64, EM_AARCH64) & FRONTED-MEEK-CDN-OSSH verified."
 
       - name: Set up pinned Gradle 8.9 with build cache
         uses: gradle/actions/setup-gradle@v4
@@ -253,14 +254,18 @@ jobs:
               if info.file_size == 0:
                   print("ERROR: libpsiphon-tunnel-core.so inside APK is empty!")
                   sys.exit(1)
-              hdr = z.read('lib/arm64-v8a/libpsiphon-tunnel-core.so')[:64]
+              raw = z.read('lib/arm64-v8a/libpsiphon-tunnel-core.so')
+              hdr = raw[:64]
               magic = hdr[:4]
               elf_class = hdr[4] # 2 = ELFCLASS64
               machine = int.from_bytes(hdr[18:20], 'little') # 0xb7 = 183 = EM_AARCH64
               if magic != b'\x7fELF' or elf_class != 2 or machine != 0xb7:
                   print(f"ERROR: libpsiphon-tunnel-core.so invalid ELF header: magic={magic}, class={elf_class}, machine={hex(machine)}")
                   sys.exit(1)
-              print(f"SUCCESS: libpsiphon-tunnel-core.so inside APK verified (size={info.file_size} bytes, ELFCLASS64, EM_AARCH64).")
+              if b'FRONTED-MEEK-CDN-OSSH' not in raw:
+                  print("ERROR: libpsiphon-tunnel-core.so inside APK missing FRONTED-MEEK-CDN-OSSH string!")
+                  sys.exit(1)
+              print(f"SUCCESS: libpsiphon-tunnel-core.so inside APK verified (size={info.file_size} bytes, ELFCLASS64, EM_AARCH64, FRONTED-MEEK-CDN-OSSH).")
           EOF
 
           echo "APK ARM64-v8a packaging verified successfully."

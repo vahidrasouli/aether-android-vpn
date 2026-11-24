@@ -28,7 +28,7 @@ This Android VPN client is released under the **GNU Affero General Public Licens
    - License: Apache License 2.0
    - Usage: `androidx.core:core-ktx`, `androidx.appcompat:appcompat`, `com.google.android.material:material`, `kotlinx-coroutines-android`.
 
-6. **Psiphon Tunnel Core (`Psiphon-Labs/psiphon-tunnel-core`)**
-   - Source: https://github.com/Psiphon-Labs/psiphon-tunnel-core
+6. **Psiphon Tunnel Core (`CluvexStudio/psiphon-tunnel-core`)**
+   - Source: https://github.com/CluvexStudio/psiphon-tunnel-core (branch `shirokhorshid`, commit `83aa73b9b982e7421e00117f5b0c5aceb5dda452`)
    - License: GNU General Public License v3.0 or later (`GPL-3.0-or-later`)
-   - Usage: Bundled standalone ARM64 circumvention binary (`libpsiphon-tunnel-core.so`), executed on-demand via `--psiphon-bin` CLI contract when Psiphon mode is enabled.
+   - Usage: Bundled standalone ARM64 circumvention binary (`libpsiphon-tunnel-core.so`), compiled with Aether's extended CDN/OSSH tunnel protocol patches and executed on-demand via `--psiphon-bin` CLI contract when Psiphon mode is enabled.
