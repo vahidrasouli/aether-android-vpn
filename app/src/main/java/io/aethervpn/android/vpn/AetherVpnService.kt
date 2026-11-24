@@ -15,6 +15,7 @@ import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.HevTunnelManager
 import io.aethervpn.android.core.IdentityRepository
+import io.aethervpn.android.core.PsiphonMode
 import io.aethervpn.android.core.SocketProtectorCallback
 import io.aethervpn.android.core.SplitTunnelMode
 import io.aethervpn.android.core.TrafficStats
