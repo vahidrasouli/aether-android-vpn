@@ -8,9 +8,12 @@
     <color name="error_text">#EF5350</color>
     <color name="divider_line">#27303F</color>
     <color name="log_timestamp">#768390</color>
+    <color name="log_tag_aether">#2DD4BF</color>
+    <color name="log_tag_psiphon">#BC8CFF</color>
+    <color name="log_tag_tunnel">#58A6FF</color>
+    <color name="log_tag_system">#8B949E</color>
     <color name="log_tag_native">#BC8CFF</color>
     <color name="log_tag_vpn">#58A6FF</color>
-    <color name="log_tag_aether">#2DD4BF</color>
     <color name="log_tag_other">#79C0FF</color>
     <color name="log_error">#F85149</color>
     <color name="log_success">#3FB950</color>

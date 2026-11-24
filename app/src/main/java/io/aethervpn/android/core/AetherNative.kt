@@ -70,7 +70,7 @@ object AetherNative {
                     loadError = t
                     val diag = getRuntimeDiagnostics()
                     diagnosticInfo = "Failed loading native libraries ($diag): ${t.javaClass.simpleName}: ${t.message}"
-                    DiagnosticsLog.record("Native", diagnosticInfo ?: t.message ?: "Unknown native load error")
+                    DiagnosticsLog.record("Aether", diagnosticInfo ?: t.message ?: "Unknown native load error")
                 }
             }
             loaded
@@ -87,7 +87,8 @@ object AetherNative {
     fun onAetherLog(level: Int, message: String) {
         val clean = message.trim()
         if (clean.isNotEmpty()) {
-            DiagnosticsLog.record("Aether", clean)
+            val tag = if (clean.contains("psiphon", ignoreCase = true)) "Psiphon" else "Aether"
+            DiagnosticsLog.record(tag, clean)
         }
     }
 

@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
@@ -729,6 +732,23 @@ struct Notice {
     data: serde_json::Value,
 }
 
+fn format_status(status: &std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        if let Some(sig) = status.signal() {
+            let sig_name = match sig {
+                9 => "SIGKILL / OOM",
+                11 => "SIGSEGV",
+                6 => "SIGABRT",
+                15 => "SIGTERM",
+                _ => "signal",
+            };
+            return format!("exit code {:?}, signal {} ({})", status.code(), sig, sig_name);
+        }
+    }
+    format!("exit code {:?}", status.code())
+}
+
 pub struct Running {
     child: Child,
     pub socks: SocketAddr,
@@ -738,6 +758,7 @@ pub struct Running {
 impl Running {
     pub async fn wait(&mut self) -> Result<()> {
         let status = self.child.wait().await.map_err(PsiphonError::Io)?;
+        log::warn!("[-] psiphon process ended with {}", format_status(&status));
         Err(PsiphonError::Stopped(status).into())
     }
 }
@@ -860,21 +881,56 @@ pub async fn start(
     let mut socks_port: Option<u16> = None;
     let mut http_port: Option<u16> = None;
     let mut tunnelled = false;
+    let mut captured_stderr: Vec<String> = Vec::new();
 
     let deadline = tokio::time::Instant::now() + ready_timeout();
 
     loop {
         let line = match tokio::time::timeout_at(deadline, lines.next_line()).await {
-            Err(_) => return Err(PsiphonError::NotReadyInTime.into()),
+            Err(_) => {
+                let status_desc = match child.try_wait() {
+                    Ok(Some(status)) => format_status(&status),
+                    Ok(None) => "still running".to_string(),
+                    Err(e) => format!("status check error: {e}"),
+                };
+                let stderr_summary = if captured_stderr.is_empty() {
+                    "no stderr output captured".to_string()
+                } else {
+                    captured_stderr.join("\n")
+                };
+                log::error!(
+                    "[-] psiphon did not come up in time ({status_desc}); recent stderr:\n{stderr_summary}"
+                );
+                return Err(PsiphonError::NotReadyInTime.into());
+            }
             Ok(Err(e)) => return Err(PsiphonError::Io(e).into()),
-            Ok(Ok(None)) => return Err(PsiphonError::StoppedBeforeReady.into()),
+            Ok(Ok(None)) => {
+                let status_desc = match child.wait().await {
+                    Ok(status) => format_status(&status),
+                    Err(e) => format!("wait error: {e}"),
+                };
+                let stderr_summary = if captured_stderr.is_empty() {
+                    "no stderr output captured".to_string()
+                } else {
+                    captured_stderr.join("\n")
+                };
+                log::error!(
+                    "[-] psiphon stopped before ready ({status_desc}); captured stderr:\n{stderr_summary}"
+                );
+                return Err(PsiphonError::StoppedBeforeReady.into());
+            }
             Ok(Ok(Some(line))) => line,
         };
+
+        if captured_stderr.len() >= 50 {
+            captured_stderr.remove(0);
+        }
+        captured_stderr.push(line.clone());
 
         let notice: Notice = match serde_json::from_str(&line) {
             Ok(notice) => notice,
             Err(_) => {
-                log::debug!("[psiphon] {line}");
+                log::warn!("[psiphon] {line}");
                 continue;
             }
         };
@@ -923,7 +979,7 @@ pub async fn start(
         while let Ok(Some(line)) = lines.next_line().await {
             match serde_json::from_str::<Notice>(&line) {
                 Ok(notice) => note(&notice.kind, &notice.data),
-                Err(_) => log::debug!("[psiphon] {line}"),
+                Err(_) => log::info!("[psiphon] {line}"),
             }
         }
     });

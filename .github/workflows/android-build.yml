@@ -44,6 +44,16 @@ jobs:
             build-tools;${{ env.ANDROID_BUILD_TOOLS }}
             ndk;${{ env.ANDROID_NDK_VERSION }}
 
+      - name: Set up pinned Gradle 8.9 with build cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-read-only: false
+          validate-wrappers: false
+
+      - name: Fail-fast Kotlin compilation and unit tests
+        run: gradle --max-workers=2 :app:compileDebugKotlin :app:testDebugUnitTest
+
       - name: Set up Rust (aarch64-linux-android)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -201,15 +211,8 @@ jobs:
           grep -a -q "FRONTED-MEEK-CDN-OSSH" app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so
           echo "libpsiphon-tunnel-core.so ELF properties (ELFCLASS64, EM_AARCH64) & FRONTED-MEEK-CDN-OSSH verified."
 
-      - name: Set up pinned Gradle 8.9 with build cache
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-read-only: false
-          validate-wrappers: false
-
-      - name: Run unit tests & assemble ARM64 Debug APK (bounded workers)
-        run: gradle --max-workers=2 :app:testDebugUnitTest :app:assembleDebug
+      - name: Assemble ARM64 Debug APK (bounded workers)
+        run: gradle --max-workers=2 :app:assembleDebug
 
       - name: Assemble signed Release APK (only when keystore secrets are present)
         env:

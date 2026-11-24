@@ -73,7 +73,7 @@ object VpnStateStore {
     }
 
     fun reportError(message: String, protocolLabel: String = _state.value.protocolLabel) {
-        DiagnosticsLog.record("VPN", "Error: $message")
+        DiagnosticsLog.record("System", "Error: $message")
         _state.value = _state.value.copy(
             phase = TunnelPhase.ERROR,
             protocolLabel = protocolLabel,

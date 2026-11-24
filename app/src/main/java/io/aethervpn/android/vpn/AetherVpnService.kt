@@ -142,7 +142,7 @@ class AetherVpnService : VpnService() {
         when (intent?.action) {
             ACTION_DISCONNECT -> {
                 userRequestedStop = true
-                DiagnosticsLog.record("VPN", "User requested disconnect")
+                DiagnosticsLog.record("System", "User requested disconnect")
                 activeJob?.cancel()
                 reconnectJob?.cancel()
                 activeJob = serviceScope.launch {
@@ -211,7 +211,7 @@ class AetherVpnService : VpnService() {
 
     override fun onRevoke() {
         userRequestedStop = true
-        DiagnosticsLog.record("VPN", "VPN permission revoked by system")
+        DiagnosticsLog.record("System", "VPN permission revoked by system")
         activeJob?.cancel()
         serviceScope.launch {
             teardownAll(clearError = true)
@@ -273,7 +273,7 @@ class AetherVpnService : VpnService() {
             config.autoFallbackToH2
         ) {
             val firstErr = formatException(firstAttempt.exceptionOrNull())
-            DiagnosticsLog.record("VPN", "MASQUE HTTP/3 failed ($firstErr); trying 1-shot HTTP/2 fallback")
+            DiagnosticsLog.record("Aether", "MASQUE HTTP/3 failed ($firstErr); trying 1-shot HTTP/2 fallback")
             val fallbackAttempt = attemptSingleProtocol(config, AetherProtocol.MASQUE_H2, isReconnect)
             if (fallbackAttempt.isSuccess) return
             failClosed(
@@ -299,7 +299,7 @@ class AetherVpnService : VpnService() {
             val net = cm?.activeNetwork
             val caps = cm?.getNetworkCapabilities(net)
             if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                DiagnosticsLog.record("VPN", "No internet connection detected; awaiting network")
+                DiagnosticsLog.record("System", "No internet connection detected; awaiting network")
                 VpnStateStore.update(
                     TunnelSnapshot(
                         phase = TunnelPhase.WAITING_FOR_INTERNET,
@@ -410,7 +410,7 @@ class AetherVpnService : VpnService() {
 
             registerNetworkCallback(config.effectiveSocksPort)
             DiagnosticsLog.record(
-                "VPN",
+                "System",
                 "Connected via ${protocol.label} | IP=${verified.publicIp} | WARP=${verified.warpStatus} | ${verified.latencyMs}ms"
             )
 
@@ -474,7 +474,7 @@ class AetherVpnService : VpnService() {
             )
             if (engineResult.isFailure) {
                 val err = formatException(engineResult.exceptionOrNull())
-                DiagnosticsLog.record("VPN", "Standalone Core failed: $err")
+                DiagnosticsLog.record("Aether", "Standalone Core failed: $err")
                 VpnStateStore.reportError(err, config.protocol.label)
                 if (!isTunRunning) {
                     stopForegroundCompat()
@@ -483,7 +483,7 @@ class AetherVpnService : VpnService() {
                 return@withLock
             }
             isCoreRunning = true
-            DiagnosticsLog.record("VPN", "Standalone Core ready on 127.0.0.1:${config.effectiveSocksPort}")
+            DiagnosticsLog.record("Aether", "Standalone Core ready on 127.0.0.1:${config.effectiveSocksPort}")
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
                     phase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.SOCKS5_READY,
@@ -507,7 +507,7 @@ class AetherVpnService : VpnService() {
     private suspend fun stopCoreStandalone() = lifecycleMutex.withLock {
         engineManager.stop()
         isCoreRunning = false
-        DiagnosticsLog.record("VPN", "Standalone Core stopped")
+        DiagnosticsLog.record("Aether", "Standalone Core stopped")
         val newPhase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.STOPPED
         VpnStateStore.update(
             VpnStateStore.state.value.copy(
@@ -538,7 +538,7 @@ class AetherVpnService : VpnService() {
             val pfd = establishTun(config)
             if (pfd == null) {
                 val err = "VpnService.Builder.establish() returned null"
-                DiagnosticsLog.record("VPN", "Standalone TUN failed: $err")
+                DiagnosticsLog.record("Tunnel", "Standalone TUN failed: $err")
                 VpnStateStore.reportError(err, config.protocol.label)
                 if (!isCoreRunning) {
                     stopForegroundCompat()
@@ -551,7 +551,7 @@ class AetherVpnService : VpnService() {
             val hevResult = hevManager.start(config, pfd.fd)
             if (hevResult.isFailure) {
                 val err = formatException(hevResult.exceptionOrNull())
-                DiagnosticsLog.record("VPN", "Standalone HEV failed: $err")
+                DiagnosticsLog.record("Tunnel", "Standalone HEV failed: $err")
                 closeTun()
                 VpnStateStore.reportError(err, config.protocol.label)
                 if (!isCoreRunning) {
@@ -562,7 +562,7 @@ class AetherVpnService : VpnService() {
             }
             isTunRunning = true
             registerNetworkCallback(config.effectiveSocksPort)
-            DiagnosticsLog.record("VPN", "Standalone TUN active (/dev/tun -> 127.0.0.1:${config.effectiveSocksPort})")
+            DiagnosticsLog.record("Tunnel", "Standalone TUN active (/dev/tun -> 127.0.0.1:${config.effectiveSocksPort})")
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
                     phase = TunnelPhase.TUN_ACTIVE,
@@ -587,7 +587,7 @@ class AetherVpnService : VpnService() {
         hevManager.stop()
         closeTun()
         isTunRunning = false
-        DiagnosticsLog.record("VPN", "Standalone TUN stopped")
+        DiagnosticsLog.record("Tunnel", "Standalone TUN stopped")
         val newPhase = if (isCoreRunning) TunnelPhase.SOCKS5_READY else TunnelPhase.STOPPED
         val cfg = VpnConfig.load(this@AetherVpnService)
         VpnStateStore.update(
@@ -626,7 +626,7 @@ class AetherVpnService : VpnService() {
             if (res.isSuccess) {
                 dnsAdded = true
             } else {
-                DiagnosticsLog.record("VPN", "Custom DNS ($parsedDns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
+                DiagnosticsLog.record("System", "Custom DNS ($parsedDns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
             }
         }
         if (!dnsAdded) {
@@ -654,9 +654,9 @@ class AetherVpnService : VpnService() {
         // Enforce true kernel-level TUN bypass for Aether itself
         val bypassRes = runCatching { builder.addDisallowedApplication(packageName) }
         if (bypassRes.isSuccess) {
-            DiagnosticsLog.record("VPN", "Kernel TUN bypass active ($packageName excluded from /dev/tun)")
+            DiagnosticsLog.record("Tunnel", "Kernel TUN bypass active ($packageName excluded from /dev/tun)")
         } else {
-            DiagnosticsLog.record("VPN", "Warning: could not add disallowed app $packageName: ${bypassRes.exceptionOrNull()?.message}")
+            DiagnosticsLog.record("Tunnel", "Warning: could not add disallowed app $packageName: ${bypassRes.exceptionOrNull()?.message}")
         }
 
         when (config.splitTunnelMode) {
@@ -699,9 +699,9 @@ class AetherVpnService : VpnService() {
                     // Battery-first check: avoid tearing down a healthy tunnel on transient network events
                     serviceScope.launch {
                         if (!recoveringFromLoss && TunnelValidator.isTunnelHealthy(socksPort)) {
-                            DiagnosticsLog.record("Net", "Network changed but tunnel remains healthy; skipping reconnect")
+                            DiagnosticsLog.record("System", "Network changed but tunnel remains healthy; skipping reconnect")
                         } else {
-                            DiagnosticsLog.record("Net", "Network transition requires reconnect; scheduling backoff")
+                            DiagnosticsLog.record("System", "Network transition requires reconnect; scheduling backoff")
                             scheduleReconnectWithBackoff()
                         }
                     }
@@ -713,7 +713,7 @@ class AetherVpnService : VpnService() {
                     activeNetworkId = -1L
                     networkLostDuringSession = true
                     runCatching { setUnderlyingNetworks(null) }
-                    DiagnosticsLog.record("Net", "Underlying network lost; awaiting new network")
+                    DiagnosticsLog.record("System", "Underlying network lost; awaiting new network")
                     VpnStateStore.update(
                         VpnStateStore.state.value.copy(phase = TunnelPhase.WAITING_FOR_INTERNET)
                     )
@@ -745,14 +745,14 @@ class AetherVpnService : VpnService() {
                 if (userRequestedStop) return@launch
                 delay(delayMs)
                 if (userRequestedStop) return@launch
-                DiagnosticsLog.record("VPN", "Reconnect attempt ${index + 1}/${backoffDelaysMs.size} (backoff ${delayMs / 1000}s)")
+                DiagnosticsLog.record("System", "Reconnect attempt ${index + 1}/${backoffDelaysMs.size} (backoff ${delayMs / 1000}s)")
                 connectPipeline(isReconnect = true)
                 if (VpnStateStore.state.value.phase == TunnelPhase.VPN_CONNECTED) {
-                    DiagnosticsLog.record("VPN", "Reconnect successful; backoff reset")
+                    DiagnosticsLog.record("System", "Reconnect successful; backoff reset")
                     return@launch
                 }
             }
-            DiagnosticsLog.record("VPN", "All reconnect attempts exhausted; waiting for network event")
+            DiagnosticsLog.record("System", "All reconnect attempts exhausted; waiting for network event")
         }
     }
 

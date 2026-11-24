@@ -333,9 +333,9 @@ class MainActivity : AppCompatActivity() {
                     TunnelValidator.verifyThroughSocks(egressPort)
                 }
                 res.onSuccess { v ->
-                    DiagnosticsLog.record("Probe", "OK: IP=${v.publicIp}, WARP=${v.warpStatus}, RTT=${v.latencyMs}ms")
+                    DiagnosticsLog.record("System", "Probe OK: IP=${v.publicIp}, WARP=${v.warpStatus}, RTT=${v.latencyMs}ms")
                 }.onFailure { e ->
-                    DiagnosticsLog.record("Probe", "Failed: ${e.message}")
+                    DiagnosticsLog.record("System", "Probe failed: ${e.message}")
                 }
                 refreshIdentityAndDiagnostics()
             }
@@ -363,7 +363,7 @@ class MainActivity : AppCompatActivity() {
                         withContext(Dispatchers.IO) {
                             IdentityRepository.resetIdentity(filesDir)
                         }
-                        DiagnosticsLog.record("Identity", "Local WARP identity reset by user")
+                        DiagnosticsLog.record("System", "Local WARP identity reset by user")
                         refreshIdentityAndDiagnostics()
                         toast("Identity cleared")
                     }

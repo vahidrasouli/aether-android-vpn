@@ -217,8 +217,8 @@ class AetherEngineManager(private val privateDataDir: File) {
         // Apply mobile Go runtime caps when Psiphon is enabled to prevent Android LMK kills
         if (config.psiphonMode != PsiphonMode.OFF) {
             runCatching {
-                android.system.Os.setenv("GOMEMLIMIT", "32MiB", true)
-                android.system.Os.setenv("GOGC", "25", true)
+                android.system.Os.setenv("GOMEMLIMIT", "64MiB", true)
+                android.system.Os.setenv("GOGC", "50", true)
                 android.system.Os.setenv("GOMAXPROCS", "2", true)
             }
         } else {
@@ -229,7 +229,7 @@ class AetherEngineManager(private val privateDataDir: File) {
             }
         }
 
-        DiagnosticsLog.record("Engine", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
+        DiagnosticsLog.record("Aether", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
         val parsed = runCatching { JSONObject(rawReply) }.getOrNull()

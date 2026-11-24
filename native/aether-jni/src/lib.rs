@@ -73,7 +73,10 @@ impl log::Log for JniAetherLogger {
                 log::Level::Debug => 3, // ANDROID_LOG_DEBUG
                 log::Level::Trace => 2, // ANDROID_LOG_VERBOSE
             };
-            let tag = b"AetherCore\0";
+            let is_psiphon = record.target().contains("psiphon")
+                || formatted.contains("[psiphon]")
+                || formatted.to_lowercase().contains("psiphon");
+            let tag = if is_psiphon { b"Psiphon\0" } else { b"Aether\0" };
             if let Ok(c_msg) = CString::new(formatted.clone()) {
                 unsafe {
                     __android_log_write(prio, tag.as_ptr().cast(), c_msg.as_ptr());

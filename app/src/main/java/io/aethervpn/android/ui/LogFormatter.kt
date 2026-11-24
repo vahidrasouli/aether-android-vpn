@@ -14,9 +14,10 @@ object LogFormatter {
 
     fun formatLine(context: Context, line: String): CharSequence {
         val colorTimestamp = ContextCompat.getColor(context, R.color.log_timestamp)
-        val colorTagNative = ContextCompat.getColor(context, R.color.log_tag_native)
-        val colorTagVpn = ContextCompat.getColor(context, R.color.log_tag_vpn)
         val colorTagAether = ContextCompat.getColor(context, R.color.log_tag_aether)
+        val colorTagPsiphon = ContextCompat.getColor(context, R.color.log_tag_psiphon)
+        val colorTagTunnel = ContextCompat.getColor(context, R.color.log_tag_tunnel)
+        val colorTagSystem = ContextCompat.getColor(context, R.color.log_tag_system)
         val colorTagOther = ContextCompat.getColor(context, R.color.log_tag_other)
         val colorError = ContextCompat.getColor(context, R.color.log_error)
         val colorSuccess = ContextCompat.getColor(context, R.color.log_success)
@@ -43,9 +44,11 @@ object LogFormatter {
             val tagStart = builder.length
             builder.append("[$tag]")
             val tagColor = when {
-                tag.contains("Native", ignoreCase = true) || tag.contains("JNI", ignoreCase = true) -> colorTagNative
-                tag.contains("VPN", ignoreCase = true) || tag.contains("Tunnel", ignoreCase = true) -> colorTagVpn
-                tag.contains("Aether", ignoreCase = true) -> colorTagAether
+                tag.equals("Aether", ignoreCase = true) -> colorTagAether
+                tag.equals("Psiphon", ignoreCase = true) -> colorTagPsiphon
+                tag.equals("Tunnel", ignoreCase = true) || tag.equals("VPN", ignoreCase = true) -> colorTagTunnel
+                tag.equals("System", ignoreCase = true) || tag.equals("Net", ignoreCase = true) -> colorTagSystem
+                tag.contains("Native", ignoreCase = true) || tag.contains("JNI", ignoreCase = true) -> colorTagAether
                 else -> colorTagOther
             }
             builder.setSpan(

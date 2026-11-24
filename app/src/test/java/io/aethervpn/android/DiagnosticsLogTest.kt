@@ -18,13 +18,15 @@ class DiagnosticsLogTest {
 
     @Test
     fun testRecordAndSnapshotRedactsSensitiveData() {
-        DiagnosticsLog.record("VPN", "Connecting with token=secret123 and private_key: mysecretkey")
+        DiagnosticsLog.record("System", "Connecting with token=secret123 and private_key: mysecretkey")
         DiagnosticsLog.record("Tunnel", "Proxy socks5://user:pass123@1.2.3.4:1080 configured")
 
         val snapshot = DiagnosticsLog.snapshot()
         val entries = DiagnosticsLog.entries()
 
         assertEquals(2, entries.size)
+        assertTrue("Tag must be [System]", entries[0].contains("[System]"))
+        assertTrue("Tag must be [Tunnel]", entries[1].contains("[Tunnel]"))
         assertFalse("Raw token must not appear in snapshot", snapshot.contains("secret123"))
         assertFalse("Raw private key must not appear in snapshot", snapshot.contains("mysecretkey"))
         assertFalse("Raw proxy credentials must not appear in snapshot", snapshot.contains("pass123"))
@@ -48,6 +50,17 @@ class DiagnosticsLogTest {
         assertFalse("Secret token must be scrubbed", snapshot.contains("token_abc_123"))
         assertFalse("Secret key must be scrubbed", snapshot.contains("0123456789abcdef"))
         assertTrue("Redaction tag must be present", snapshot.contains("[REDACTED]"))
+    }
+
+    @Test
+    fun testPsiphonLogRouting() {
+        AetherNative.onAetherLog(3, "[+] psiphon reached a server at 198.51.100.1")
+        AetherNative.onAetherLog(2, "[-] psiphon: notice warning")
+
+        val entries = DiagnosticsLog.entries()
+        assertEquals(2, entries.size)
+        assertTrue("Tag must be [Psiphon]", entries[0].contains("[Psiphon]"))
+        assertTrue("Tag must be [Psiphon]", entries[1].contains("[Psiphon]"))
     }
 
     @Test
