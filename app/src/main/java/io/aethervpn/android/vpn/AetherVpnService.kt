@@ -564,7 +564,7 @@ class AetherVpnService : VpnService() {
                 return@withLock
             }
             isTunRunning = true
-            registerNetworkCallback(config.effectiveSocksPort)
+            registerNetworkCallback(config.effectiveSocksPort, config.psiphonMode)
             DiagnosticsLog.record("Tunnel", "Standalone TUN active (/dev/tun -> 127.0.0.1:${config.effectiveSocksPort})")
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
