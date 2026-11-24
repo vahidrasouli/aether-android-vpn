@@ -119,8 +119,11 @@ class VpnConfigTest {
         // MASQUE HTTP/3 requires 55s for QUIC scan
         assertEquals(55_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H3)))
 
-        // Non-turbo scan requires 55s
-        assertEquals(55_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.THOROUGH)))
+        // Non-turbo scan (balanced) requires 55s
+        assertEquals(55_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.BALANCED)))
+
+        // Thorough scan requires 310s budget (aligns with upstream Aether 300s sweep)
+        assertEquals(310_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.THOROUGH)))
 
         // Turbo MASQUE_H2 uses 35s budget
         assertEquals(35_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.TURBO)))
@@ -172,5 +175,54 @@ class VpnConfigTest {
         assertEquals(90, restored.exitLocationSecs)
         assertEquals("private,port:22", restored.routeDirectRules)
         assertEquals("", restored.upstreamProxy)
+    }
+
+    @Test
+    fun psiphonChainingCliFlagsAndDynamicPortRouting() {
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+
+        // 1. Off mode: Egress port 1819, no Psiphon flags
+        val cfgOff = VpnConfig(psiphonMode = io.aethervpn.android.core.PsiphonMode.OFF)
+        assertEquals(1819, cfgOff.effectiveSocksPort)
+        val argsOff = mgr.buildCoreArguments(cfgOff)
+        assertFalse(argsOff.contains("--psiphon"))
+        assertFalse(argsOff.contains("--psiphon-reverse"))
+        assertFalse(argsOff.contains("--psiphon-only"))
+
+        // 2. WARP -> Psiphon: Egress port 1821, emits --psiphon, --psiphon-bind, --psiphon-region
+        val cfgChain = VpnConfig(
+            psiphonMode = io.aethervpn.android.core.PsiphonMode.WARP_TO_PSIPHON,
+            psiphonRegion = "DE"
+        )
+        assertEquals(1821, cfgChain.effectiveSocksPort)
+        val argsChain = mgr.buildCoreArguments(cfgChain, psiphonBinaryPath = "/data/local/tmp/psiphon-tunnel-core")
+        assertTrue(argsChain.contains("--psiphon"))
+        assertTrue(argsChain.contains("--psiphon-bind"))
+        assertTrue(argsChain.contains("127.0.0.1:1821"))
+        assertTrue(argsChain.contains("--psiphon-region"))
+        assertTrue(argsChain.contains("DE"))
+        assertTrue(argsChain.contains("--psiphon-bin"))
+        assertTrue(argsChain.contains("/data/local/tmp/psiphon-tunnel-core"))
+
+        // 3. Psiphon -> WARP: Egress port 1819, emits --psiphon-reverse
+        val cfgReverse = VpnConfig(
+            psiphonMode = io.aethervpn.android.core.PsiphonMode.PSIPHON_TO_WARP,
+            psiphonRegion = "NL"
+        )
+        assertEquals(1819, cfgReverse.effectiveSocksPort)
+        val argsReverse = mgr.buildCoreArguments(cfgReverse)
+        assertTrue(argsReverse.contains("--psiphon-reverse"))
+        assertTrue(argsReverse.contains("--psiphon-region"))
+        assertTrue(argsReverse.contains("NL"))
+
+        // 4. Psiphon Only: Egress port 1821, binds directly on 1821, emits --psiphon-only
+        val cfgOnly = VpnConfig(
+            psiphonMode = io.aethervpn.android.core.PsiphonMode.PSIPHON_ONLY
+        )
+        assertEquals(1821, cfgOnly.effectiveSocksPort)
+        val argsOnly = mgr.buildCoreArguments(cfgOnly)
+        assertTrue(argsOnly.contains("--psiphon-only"))
+        val bindIdx = argsOnly.indexOf("--bind")
+        assertTrue(bindIdx >= 0 && argsOnly[bindIdx + 1] == "127.0.0.1:1821")
     }
 }

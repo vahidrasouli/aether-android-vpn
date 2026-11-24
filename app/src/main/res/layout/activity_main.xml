@@ -11,7 +11,9 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- SECTION 1: HOME -->
+        <!-- ================================================================= -->
+        <!-- TAB 1: HOME / CONNECT                                             -->
+        <!-- ================================================================= -->
         <ScrollView
             android:id="@+id/sectionHome"
             android:layout_width="match_parent"
@@ -32,6 +34,7 @@
                     android:textSize="22sp"
                     android:textStyle="bold" />
 
+                <!-- Status Card -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -102,6 +105,7 @@
                         android:visibility="gone" />
                 </LinearLayout>
 
+                <!-- Primary Connect/Disconnect Action -->
                 <Button
                     android:id="@+id/btnToggleVpn"
                     android:layout_width="match_parent"
@@ -109,6 +113,7 @@
                     android:layout_marginTop="20dp"
                     android:text="@string/action_connect" />
 
+                <!-- Active Profile & Mode Badge -->
                 <TextView
                     android:id="@+id/tvActiveProfileBadge"
                     android:layout_width="match_parent"
@@ -119,9 +124,11 @@
             </LinearLayout>
         </ScrollView>
 
-        <!-- SECTION 2: CONNECTION -->
+        <!-- ================================================================= -->
+        <!-- TAB 2: SETTINGS                                                   -->
+        <!-- ================================================================= -->
         <ScrollView
-            android:id="@+id/sectionConnection"
+            android:id="@+id/sectionSettings"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone">
@@ -132,10 +139,11 @@
                 android:orientation="vertical"
                 android:padding="20dp">
 
+                <!-- 1. Connection Profile & Performance -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Connection Profile"
+                    android:text="Connection Profile &amp; Performance"
                     android:textColor="@color/text_primary"
                     android:textSize="18sp"
                     android:textStyle="bold" />
@@ -182,13 +190,14 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp" />
 
+                <!-- 2. Protocol & Transport -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="18dp"
                     android:text="Protocol &amp; Transport"
                     android:textColor="@color/text_primary"
-                    android:textSize="15sp"
+                    android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <Spinner
@@ -201,7 +210,7 @@
                     android:id="@+id/switchAutoH2Fallback"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     android:text="Smart HTTP/3 → HTTP/2 Fallback (1-shot)"
                     android:textColor="@color/text_primary" />
 
@@ -213,10 +222,149 @@
                     android:text="Quick Reconnect (reuse verified gateway)"
                     android:textColor="@color/text_primary" />
 
+                <EditText
+                    android:id="@+id/etManualPeer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:hint="Optional manual gateway (e.g. 162.159.198.1:443)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
+                <!-- 3. Psiphon Chain & Country -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="18dp"
+                    android:text="@string/title_psiphon_chain"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/label_psiphon_mode"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <Spinner
+                    android:id="@+id/spinnerPsiphonMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/label_psiphon_region"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <Spinner
+                    android:id="@+id/spinnerPsiphonRegion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" />
+
+                <!-- 4. Exit Location & Routing -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:text="Exit Location &amp; Routing"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/etExitLocation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:hint="Exit country filter (e.g. DE or !IR,RU)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
+                <Button
+                    android:id="@+id/btnSplitTunnel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/title_split_tunnel" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="IP Version"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <Spinner
+                    android:id="@+id/spinnerIpFamily"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" />
+
+                <EditText
+                    android:id="@+id/etCustomDns"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Custom DNS (blank = 1.1.1.1 / 1.0.0.1)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
+                <EditText
+                    android:id="@+id/etRouteDirect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Direct rules (domain:local,ip:10.0.0.0/8,port:22)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
+                <EditText
+                    android:id="@+id/etRouteBlock"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Block rules (domain:ads.example,keyword:tracker)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
+                <EditText
+                    android:id="@+id/etUpstreamProxy"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Optional upstream proxy (socks5:// or http://)"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+
+                <!-- 5. Anti-Censorship & Obfuscation -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:text="Anti-Censorship &amp; Obfuscation"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
                     android:text="Endpoint Discovery Scan Mode"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp" />
@@ -227,124 +375,19 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp" />
 
-                <EditText
-                    android:id="@+id/etManualPeer"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:hint="Optional manual gateway (e.g. 162.159.198.1:443)"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Exit Country / Location Filter"
+                    android:layout_marginTop="10dp"
+                    android:text="Traffic Obfuscation (Noize)"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp" />
-
-                <EditText
-                    android:id="@+id/etExitLocation"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:hint="e.g. DE or !IR,RU (optional)"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-
-                <Button
-                    android:id="@+id/btnSaveConnection"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="Save Connection Settings" />
-            </LinearLayout>
-        </ScrollView>
-
-        <!-- SECTION 3: ADVANCED NETWORKING & APP ROUTING -->
-        <ScrollView
-            android:id="@+id/sectionNetwork"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Advanced Networking"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-
-                <Button
-                    android:id="@+id/btnSplitTunnel"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/title_split_tunnel" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="IP Version"
-                    android:textColor="@color/text_primary" />
-
-                <Spinner
-                    android:id="@+id/spinnerIpFamily"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-
-                <EditText
-                    android:id="@+id/etCustomDns"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="Custom DNS (blank = 1.1.1.1 / 1.0.0.1)"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-
-                <EditText
-                    android:id="@+id/etRouteDirect"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="Direct rules (domain:local,ip:10.0.0.0/8,port:22,private)"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-
-                <EditText
-                    android:id="@+id/etRouteBlock"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="Block rules (domain:ads.example,keyword:tracker)"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Traffic Obfuscation (Noize)"
-                    android:textColor="@color/text_primary" />
 
                 <Spinner
                     android:id="@+id/spinnerNoize"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" />
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchTlsFragment"
@@ -381,16 +424,6 @@
                     android:textColor="@color/text_primary" />
 
                 <EditText
-                    android:id="@+id/etUpstreamProxy"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="Optional upstream proxy (socks5:// or http://)"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-
-                <EditText
                     android:id="@+id/etWgKeepalive"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -400,45 +433,15 @@
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_secondary" />
 
-                <Button
-                    android:id="@+id/btnSaveNetwork"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="Save Networking Settings" />
-            </LinearLayout>
-        </ScrollView>
-
-        <!-- SECTION 4: WARP IDENTITY & DIAGNOSTICS -->
-        <ScrollView
-            android:id="@+id/sectionDiagnostics"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
+                <!-- 6. Zero Trust & Application Settings -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="WARP &amp; Identity"
+                    android:layout_marginTop="18dp"
+                    android:text="Zero Trust &amp; Application"
                     android:textColor="@color/text_primary"
-                    android:textSize="18sp"
+                    android:textSize="16sp"
                     android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvIdentitySummary"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@color/card_bg"
-                    android:padding="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
 
                 <EditText
                     android:id="@+id/etZeroTrustTeam"
@@ -450,200 +453,47 @@
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_secondary" />
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/btnSaveTeam"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Save Team" />
-
-                    <Button
-                        android:id="@+id/btnResetIdentity"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:layout_weight="1"
-                        android:text="Reset Identity" />
-                </LinearLayout>
-
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="20dp"
-                    android:text="Diagnostics &amp; Resource Snapshot"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvDiagnosticsSummary"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@color/card_bg"
-                    android:padding="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="Independent Component Diagnostics"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvComponentStatusSummary"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:background="@color/card_bg"
-                    android:padding="10dp"
-                    android:text="Core: Stopped • TUN: Stopped"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/btnToggleCore"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Start Aether Core" />
-
-                    <Button
-                        android:id="@+id/btnToggleTun"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:layout_weight="1"
-                        android:text="Start TUN / HEV" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/btnRunProbe"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Run Tunnel Probe" />
-
-                    <Button
-                        android:id="@+id/btnCopyLogs"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:layout_weight="1"
-                        android:text="Copy Logs" />
-
-                    <Button
-                        android:id="@+id/btnClearLogs"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:layout_weight="1"
-                        android:text="Clear Logs" />
-                </LinearLayout>
-
-                <androidx.core.widget.NestedScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="320dp"
                     android:layout_marginTop="10dp"
-                    android:background="@color/card_bg"
-                    android:fadeScrollbars="false"
-                    android:fillViewport="true"
-                    android:scrollbars="vertical">
-
-                    <TextView
-                        android:id="@+id/tvRedactedLogs"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="monospace"
-                        android:lineSpacingExtra="3dp"
-                        android:padding="12dp"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="11sp"
-                        android:textIsSelectable="true" />
-                </androidx.core.widget.NestedScrollView>
-            </LinearLayout>
-        </ScrollView>
-
-        <!-- SECTION 5: SETTINGS -->
-        <ScrollView
-            android:id="@+id/sectionSettings"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Application Settings"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
                     android:text="Theme"
-                    android:textColor="@color/text_primary" />
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
 
                 <Spinner
                     android:id="@+id/spinnerTheme"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="10dp"
                     android:text="Foreground Stats Refresh Interval (Battery)"
-                    android:textColor="@color/text_primary" />
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
 
                 <Spinner
                     android:id="@+id/spinnerStatsInterval"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" />
 
+                <!-- Backup & Restore -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:text="Configuration Backup &amp; Restore (No Secrets)"
+                    android:layout_marginTop="14dp"
+                    android:text="Configuration Backup &amp; Restore"
                     android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
+                    android:textSize="14sp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="6dp"
                     android:orientation="horizontal">
 
                     <Button
@@ -665,13 +515,168 @@
                 <Button
                     android:id="@+id/btnSaveSettings"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="16dp"
                     android:text="Apply Settings" />
             </LinearLayout>
         </ScrollView>
+
+        <!-- ================================================================= -->
+        <!-- TAB 3: LOGS & DIAGNOSTICS                                         -->
+        <!-- ================================================================= -->
+        <LinearLayout
+            android:id="@+id/sectionLogs"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="gone">
+
+            <!-- Independent Diagnostic Controls (Compact Card) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/card_bg"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/title_component_diagnostics"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvComponentStatusSummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Core: Stopped • TUN: Stopped"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnToggleCore"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/action_start_core"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnToggleTun"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:text="@string/action_start_tun"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnRunProbe"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:text="@string/action_run_probe"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Compact WARP / Heap Snapshot -->
+                <TextView
+                    android:id="@+id/tvDiagnosticsSummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/tvIdentitySummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btnResetIdentity"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Reset Identity"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- Logs Action Bar -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/title_logs_console"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnCopyLogs"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/action_copy_logs"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnClearLogs"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/action_clear_logs"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- Full-Height Monospace Live Log Console -->
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/scrollLogs"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="8dp"
+                android:layout_weight="1"
+                android:background="@color/card_bg"
+                android:fadeScrollbars="false"
+                android:fillViewport="true"
+                android:scrollbars="vertical">
+
+                <TextView
+                    android:id="@+id/tvRedactedLogs"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:padding="12dp"
+                    android:textColor="@color/text_secondary"
+                    android:textIsSelectable="true"
+                    android:textSize="11sp" />
+            </androidx.core.widget.NestedScrollView>
+        </LinearLayout>
     </FrameLayout>
 
+    <!-- Bottom Navigation Bar (3 Tabs: Home, Settings, Logs) -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"

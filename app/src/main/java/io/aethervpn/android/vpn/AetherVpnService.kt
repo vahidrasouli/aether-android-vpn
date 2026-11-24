@@ -154,7 +154,8 @@ class AetherVpnService : VpnService() {
 
             ACTION_START_CORE -> {
                 userRequestedStop = false
-                startForegroundCompat("Aether Diagnostic Core", "Listening on 127.0.0.1:1819")
+                val cfg = VpnConfig.load(this)
+                startForegroundCompat("Aether Diagnostic Core", "Listening on 127.0.0.1:${cfg.effectiveSocksPort}")
                 activeJob?.cancel()
                 activeJob = serviceScope.launch {
                     startCoreStandalone()
@@ -172,7 +173,8 @@ class AetherVpnService : VpnService() {
 
             ACTION_START_TUN -> {
                 userRequestedStop = false
-                startForegroundCompat("Aether Diagnostic TUN", "Relaying to 127.0.0.1:1819")
+                val cfg = VpnConfig.load(this)
+                startForegroundCompat("Aether Diagnostic TUN", "Relaying to 127.0.0.1:${cfg.effectiveSocksPort}")
                 activeJob?.cancel()
                 activeJob = serviceScope.launch {
                     startTunStandalone()
@@ -314,9 +316,26 @@ class AetherVpnService : VpnService() {
             isCoreRunning = false
             isTunRunning = false
 
+            // Psiphon external binary requirement check
+            val psiphonBin = if (config.psiphonMode != PsiphonMode.OFF) {
+                val bin = AetherEngineManager.findPsiphonBinary(this@AetherVpnService)
+                if (bin == null) {
+                    val msg = "Psiphon binary (libpsiphon-tunnel-core.so) not found in nativeLibraryDir. External ARM64 binary required for Psiphon chaining."
+                    DiagnosticsLog.record("Psiphon", msg)
+                    VpnStateStore.reportError(msg, protocol.label)
+                    return@withLock Result.failure(IllegalStateException(msg))
+                }
+                bin.absolutePath
+            } else null
+
             // 1. Start single managed Aether Rust engine with VpnService.protect(fd) callback
             val protector = SocketProtectorCallback { fd -> protect(fd) }
-            val engineResult = engineManager.start(config, protector, overrideProtocol = protocol)
+            val engineResult = engineManager.start(
+                config = config,
+                protector = protector,
+                overrideProtocol = protocol,
+                psiphonBinaryPath = psiphonBin
+            )
             if (engineResult.isFailure) {
                 return@withLock Result.failure(
                     engineResult.exceptionOrNull() ?: IllegalStateException("Aether engine failed")
@@ -343,7 +362,7 @@ class AetherVpnService : VpnService() {
                 )
             tunInterface = pfd
 
-            // 3. Start single managed HEV SOCKS5 Tunnel bridging TUN fd -> 127.0.0.1:1819
+            // 3. Start single managed HEV SOCKS5 Tunnel bridging TUN fd -> egress SOCKS5 port (1819 or 1821)
             val hevResult = hevManager.start(config, pfd.fd)
             if (hevResult.isFailure) {
                 return@withLock Result.failure(
@@ -362,7 +381,7 @@ class AetherVpnService : VpnService() {
             // 4. End-to-end WARP verification before ever reporting VPN_CONNECTED
             updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
 
-            val validation = TunnelValidator.verifyThroughSocks(config.socksPort)
+            val validation = TunnelValidator.verifyThroughSocks(config.effectiveSocksPort)
             if (validation.isFailure) {
                 return@withLock Result.failure(
                     validation.exceptionOrNull() ?: IllegalStateException("End-to-end validation failed")
@@ -375,7 +394,7 @@ class AetherVpnService : VpnService() {
                 identity.cachedGateway.ifBlank { identity.assignedEndpoint.ifBlank { "Auto (WARP)" } }
             }
 
-            registerNetworkCallback(config.socksPort)
+            registerNetworkCallback(config.effectiveSocksPort)
             DiagnosticsLog.record(
                 "VPN",
                 "Connected via ${protocol.label} | IP=${verified.publicIp} | WARP=${verified.warpStatus} | ${verified.latencyMs}ms"
@@ -418,8 +437,27 @@ class AetherVpnService : VpnService() {
                 )
             )
             engineManager.stop()
+            val psiphonBin = if (config.psiphonMode != PsiphonMode.OFF) {
+                val bin = AetherEngineManager.findPsiphonBinary(this@AetherVpnService)
+                if (bin == null) {
+                    val msg = "Psiphon binary (libpsiphon-tunnel-core.so) not found in nativeLibraryDir. External ARM64 binary required for Psiphon chaining."
+                    DiagnosticsLog.record("Psiphon", msg)
+                    VpnStateStore.reportError(msg, config.protocol.label)
+                    if (!isTunRunning) {
+                        stopForegroundCompat()
+                        stopSelf()
+                    }
+                    return@withLock
+                }
+                bin.absolutePath
+            } else null
+
             val protector = SocketProtectorCallback { fd -> protect(fd) }
-            val engineResult = engineManager.start(config, protector)
+            val engineResult = engineManager.start(
+                config = config,
+                protector = protector,
+                psiphonBinaryPath = psiphonBin
+            )
             if (engineResult.isFailure) {
                 val err = formatException(engineResult.exceptionOrNull())
                 DiagnosticsLog.record("VPN", "Standalone Core failed: $err")
@@ -431,7 +469,7 @@ class AetherVpnService : VpnService() {
                 return@withLock
             }
             isCoreRunning = true
-            DiagnosticsLog.record("VPN", "Standalone Core ready on ${config.socksBindAddress}")
+            DiagnosticsLog.record("VPN", "Standalone Core ready on 127.0.0.1:${config.effectiveSocksPort}")
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
                     phase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.SOCKS5_READY,
@@ -439,7 +477,7 @@ class AetherVpnService : VpnService() {
                     coreActive = true
                 )
             )
-            updateNotification("Aether Core Ready", "127.0.0.1:${config.socksPort}")
+            updateNotification("Aether Core Ready", "127.0.0.1:${config.effectiveSocksPort}")
         } catch (ce: CancellationException) {
             throw ce
         } catch (t: Throwable) {
@@ -509,15 +547,15 @@ class AetherVpnService : VpnService() {
                 return@withLock
             }
             isTunRunning = true
-            registerNetworkCallback(config.socksPort)
-            DiagnosticsLog.record("VPN", "Standalone TUN active (/dev/tun -> 127.0.0.1:${config.socksPort})")
+            registerNetworkCallback(config.effectiveSocksPort)
+            DiagnosticsLog.record("VPN", "Standalone TUN active (/dev/tun -> 127.0.0.1:${config.effectiveSocksPort})")
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
                     phase = TunnelPhase.TUN_ACTIVE,
                     tunActive = true
                 )
             )
-            updateNotification("Aether TUN Active", "Relaying to 127.0.0.1:${config.socksPort}")
+            updateNotification("Aether TUN Active", "Relaying to 127.0.0.1:${config.effectiveSocksPort}")
         } catch (ce: CancellationException) {
             throw ce
         } catch (t: Throwable) {
@@ -537,6 +575,7 @@ class AetherVpnService : VpnService() {
         isTunRunning = false
         DiagnosticsLog.record("VPN", "Standalone TUN stopped")
         val newPhase = if (isCoreRunning) TunnelPhase.SOCKS5_READY else TunnelPhase.STOPPED
+        val cfg = VpnConfig.load(this@AetherVpnService)
         VpnStateStore.update(
             VpnStateStore.state.value.copy(
                 phase = newPhase,
@@ -547,7 +586,7 @@ class AetherVpnService : VpnService() {
             stopForegroundCompat()
             stopSelf()
         } else {
-            updateNotification("Aether Diagnostic Core", "127.0.0.1:1819")
+            updateNotification("Aether Diagnostic Core", "127.0.0.1:${cfg.effectiveSocksPort}")
         }
     }
 

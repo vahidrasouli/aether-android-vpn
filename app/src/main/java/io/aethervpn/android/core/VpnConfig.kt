@@ -47,6 +47,13 @@ enum class HevMode(val label: String) {
     TCP_ONLY("hev-socks5-tunnel (TCP only)")
 }
 
+enum class PsiphonMode(val label: String, val cliValue: String) {
+    OFF("Off (WARP Only)", "off"),
+    WARP_TO_PSIPHON("WARP → Psiphon (Chain)", "chain"),
+    PSIPHON_TO_WARP("Psiphon → WARP (Reverse)", "reverse"),
+    PSIPHON_ONLY("Psiphon Only", "only")
+}
+
 enum class NoizeProfile(val cliValue: String, val label: String) {
     OFF("off", "Off (Best battery)"),
     LIGHT("light", "Light"),
@@ -96,6 +103,8 @@ data class VpnConfig(
     val wgKeepaliveSecs: Int = 0,
     val upstreamProxy: String = "",
     val zeroTrustTeam: String = "",
+    val psiphonMode: PsiphonMode = PsiphonMode.OFF,
+    val psiphonRegion: String = "",
     val socksPort: Int = DEFAULT_SOCKS_PORT,
     val tunMtu: Int = DEFAULT_TUN_MTU,
     val splitTunnelMode: SplitTunnelMode = SplitTunnelMode.ALL_APPS,
@@ -106,6 +115,17 @@ data class VpnConfig(
 ) {
     val socksBindAddress: String
         get() = "$LOOPBACK_HOST:$socksPort"
+
+    val effectiveSocksPort: Int
+        get() = when (psiphonMode) {
+            PsiphonMode.WARP_TO_PSIPHON,
+            PsiphonMode.PSIPHON_ONLY -> PSIPHON_SOCKS_PORT
+            PsiphonMode.OFF,
+            PsiphonMode.PSIPHON_TO_WARP -> DEFAULT_SOCKS_PORT
+        }
+
+    val effectiveSocksBindAddress: String
+        get() = "$LOOPBACK_HOST:$effectiveSocksPort"
 
     val ipv6Enabled: Boolean
         get() = ipFamily == IpFamily.BOTH || ipFamily == IpFamily.IPV6
@@ -190,6 +210,8 @@ data class VpnConfig(
             put("wgKeepaliveSecs", wgKeepaliveSecs)
             put("upstreamProxy", safeUpstream)
             put("zeroTrustTeam", zeroTrustTeam)
+            put("psiphonMode", psiphonMode.name)
+            put("psiphonRegion", psiphonRegion.trim())
             put("splitTunnelMode", splitTunnelMode.name)
             put("selectedPackages", JSONArray(selectedPackages.sorted()))
             put("statsRefreshIntervalMs", statsRefreshIntervalMs)
@@ -214,6 +236,7 @@ data class VpnConfig(
         }
 
         const val DEFAULT_SOCKS_PORT = 1819
+        const val PSIPHON_SOCKS_PORT = 1821
         const val DEFAULT_TUN_MTU = 1280
         const val TUN_IPV4_ADDRESS = "198.18.0.1"
         const val TUN_IPV4_PREFIX = 30
@@ -222,6 +245,40 @@ data class VpnConfig(
         const val DNS_IPV4_PRIMARY = "1.1.1.1"
         const val DNS_IPV4_SECONDARY = "1.0.0.1"
         const val DNS_IPV6_PRIMARY = "2606:4700:4700::1111"
+
+        /**
+         * Valid Psiphon country codes supported by Aether core (ISO 3166-1 alpha-2).
+         * Empty code represents Auto (Best Available).
+         */
+        val PSIPHON_REGIONS = listOf(
+            "" to "Auto (Best Available)",
+            "AT" to "Austria (AT)",
+            "AU" to "Australia (AU)",
+            "BE" to "Belgium (BE)",
+            "BG" to "Bulgaria (BG)",
+            "CA" to "Canada (CA)",
+            "CH" to "Switzerland (CH)",
+            "CZ" to "Czech Republic (CZ)",
+            "DE" to "Germany (DE)",
+            "DK" to "Denmark (DK)",
+            "ES" to "Spain (ES)",
+            "FI" to "Finland (FI)",
+            "FR" to "France (FR)",
+            "GB" to "United Kingdom (GB)",
+            "HU" to "Hungary (HU)",
+            "IE" to "Ireland (IE)",
+            "IN" to "India (IN)",
+            "IT" to "Italy (IT)",
+            "JP" to "Japan (JP)",
+            "NL" to "Netherlands (NL)",
+            "NO" to "Norway (NO)",
+            "PL" to "Poland (PL)",
+            "RO" to "Romania (RO)",
+            "SE" to "Sweden (SE)",
+            "SG" to "Singapore (SG)",
+            "SK" to "Slovakia (SK)",
+            "US" to "United States (US)"
+        )
 
         private const val PREFS_NAME = "aether_vpn_config"
 
@@ -260,6 +317,8 @@ data class VpnConfig(
                 wgKeepaliveSecs = o.optInt("wgKeepaliveSecs", 0).coerceIn(0, 300),
                 upstreamProxy = o.optString("upstreamProxy", "").trim(),
                 zeroTrustTeam = o.optString("zeroTrustTeam", "").trim(),
+                psiphonMode = enumOrDefault(o.optString("psiphonMode"), PsiphonMode.OFF),
+                psiphonRegion = o.optString("psiphonRegion", "").trim(),
                 splitTunnelMode = enumOrDefault(o.optString("splitTunnelMode"), SplitTunnelMode.ALL_APPS),
                 selectedPackages = pkgs,
                 statsRefreshIntervalMs = o.optLong("statsRefreshIntervalMs", 5_000L).coerceIn(2_000L, 15_000L),
@@ -296,6 +355,8 @@ data class VpnConfig(
                 wgKeepaliveSecs = p.getInt("wg_keepalive", 0),
                 upstreamProxy = p.getString("upstream_proxy", "").orEmpty(),
                 zeroTrustTeam = p.getString("zerotrust_team", "").orEmpty(),
+                psiphonMode = enumOrDefault(p.getString("psiphon_mode", null), PsiphonMode.OFF),
+                psiphonRegion = p.getString("psiphon_region", "").orEmpty(),
                 splitTunnelMode = enumOrDefault(p.getString("split_mode", null), SplitTunnelMode.ALL_APPS),
                 selectedPackages = p.getStringSet("selected_packages", emptySet())?.toSet() ?: emptySet(),
                 statsRefreshIntervalMs = p.getLong("stats_refresh_ms", 5_000L),
@@ -332,6 +393,8 @@ data class VpnConfig(
                 .putInt("wg_keepalive", config.wgKeepaliveSecs)
                 .putString("upstream_proxy", config.upstreamProxy.trim())
                 .putString("zerotrust_team", config.zeroTrustTeam.trim())
+                .putString("psiphon_mode", config.psiphonMode.name)
+                .putString("psiphon_region", config.psiphonRegion.trim())
                 .putString("split_mode", config.splitTunnelMode.name)
                 .putStringSet("selected_packages", config.selectedPackages)
                 .putLong("stats_refresh_ms", config.statsRefreshIntervalMs)

@@ -77,4 +77,19 @@ class DiagnosticsLogTest {
         assertEquals("No diagnostic events yet.", DiagnosticsLog.snapshot())
         assertTrue(DiagnosticsLog.entries().isEmpty())
     }
+
+    @Test
+    fun testReactiveLogsFlowEmissions() {
+        assertEquals(0, DiagnosticsLog.logsFlow.value.size)
+
+        DiagnosticsLog.record("FlowTest", "Event 1")
+        assertEquals(1, DiagnosticsLog.logsFlow.value.size)
+        assertTrue(DiagnosticsLog.logsFlow.value[0].contains("Event 1"))
+
+        DiagnosticsLog.record("FlowTest", "Event 2")
+        assertEquals(2, DiagnosticsLog.logsFlow.value.size)
+
+        DiagnosticsLog.clear()
+        assertEquals(0, DiagnosticsLog.logsFlow.value.size)
+    }
 }

@@ -5,10 +5,8 @@
     <string name="notification_channel_desc">Persistent foreground status while the VPN tunnel is active</string>
 
     <string name="nav_home">Home</string>
-    <string name="nav_connection">Connect</string>
-    <string name="nav_network">Network</string>
-    <string name="nav_diagnostics">Identity</string>
     <string name="nav_settings">Settings</string>
+    <string name="nav_logs">Logs</string>
 
     <string name="status_disconnected">Disconnected</string>
     <string name="status_connecting">Connecting to WARP…</string>
@@ -31,4 +29,17 @@
     <string name="error_vpn_permission_denied">Android VPN permission was denied.</string>
     <string name="battery_profile_note">Battery Efficient minimizes wakeups, disables scanning/obfuscation, and uses MASQUE HTTP/3 with 1-shot HTTP/2 fallback. Advanced options (Noize, Fragmentation, GOOL/MIM, Thorough/Ironclad scan) increase CPU and battery usage.</string>
     <string name="saved_confirmation">Configuration saved. Reconnect to apply changes.</string>
+
+    <string name="title_psiphon_chain">Psiphon ↔ WARP Chaining</string>
+    <string name="label_psiphon_mode">Psiphon Chaining Mode</string>
+    <string name="label_psiphon_region">Psiphon Country / Egress Region</string>
+    <string name="title_logs_console">Live Diagnostics Console</string>
+    <string name="action_copy_logs">Copy Logs</string>
+    <string name="action_clear_logs">Clear Logs</string>
+    <string name="action_run_probe">Run Probe</string>
+    <string name="title_component_diagnostics">Component Diagnostics</string>
+    <string name="action_start_core">Start Aether Core</string>
+    <string name="action_stop_core">Stop Aether Core</string>
+    <string name="action_start_tun">Start TUN / HEV</string>
+    <string name="action_stop_tun">Stop TUN / HEV</string>
 </resources>

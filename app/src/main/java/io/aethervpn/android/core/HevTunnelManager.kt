@@ -29,10 +29,12 @@ class HevTunnelManager(private val cacheDir: File) {
             append(ipv6Line)
             append("\n")
             append("socks5:\n")
-            append("  port: ").append(config.socksPort).append('\n')
+            append("  port: ").append(config.effectiveSocksPort).append('\n')
             append("  address: '").append(VpnConfig.LOOPBACK_HOST).append("'\n")
-            // RFC 1928 UDP ASSOCIATE - omitted in TCP-only mode to conserve battery & RAM
-            if (config.enableUdp) {
+            // RFC 1928 UDP ASSOCIATE - omitted in TCP-only mode to conserve battery & RAM.
+            // Also omitted when Psiphon is final egress (WARP -> Psiphon or Psiphon Only) since Psiphon is TCP-only.
+            val isPsiphonEgress = config.psiphonMode == PsiphonMode.WARP_TO_PSIPHON || config.psiphonMode == PsiphonMode.PSIPHON_ONLY
+            if (config.enableUdp && !isPsiphonEgress) {
                 append("  udp: 'udp'\n")
             }
             append("\n")

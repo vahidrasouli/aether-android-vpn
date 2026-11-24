@@ -1,5 +1,6 @@
 package io.aethervpn.android.core
 
+import android.content.Context
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,15 +21,23 @@ class AetherEngineManager(private val privateDataDir: File) {
 
     fun buildCoreArguments(
         config: VpnConfig,
-        overrideProtocol: AetherProtocol? = null
+        overrideProtocol: AetherProtocol? = null,
+        psiphonBinaryPath: String? = null
     ): List<String> {
         val proto = overrideProtocol ?: config.protocol
         val stateDir = File(privateDataDir, "aether").apply { mkdirs() }
         val configFile = File(stateDir, "aether.toml")
 
+        // When Psiphon is run standalone (--psiphon-only), Aether listens on --bind directly for Psiphon
+        val bindAddress = if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) {
+            "${VpnConfig.LOOPBACK_HOST}:${VpnConfig.PSIPHON_SOCKS_PORT}"
+        } else {
+            config.socksBindAddress
+        }
+
         val args = mutableListOf(
             "--protocol", proto.cliProtocol,
-            "--bind", config.socksBindAddress,
+            "--bind", bindAddress,
             "--config", configFile.absolutePath,
             "--scan", config.scanMode.cliValue,
             "--ip", config.ipFamily.cliValue,
@@ -121,6 +130,33 @@ class AetherEngineManager(private val privateDataDir: File) {
             args += "--team"; args += config.zeroTrustTeam
         }
 
+        if (config.psiphonMode != PsiphonMode.OFF) {
+            when (config.psiphonMode) {
+                PsiphonMode.WARP_TO_PSIPHON -> {
+                    args += "--psiphon"
+                    args += "--psiphon-bind"
+                    args += "${VpnConfig.LOOPBACK_HOST}:${VpnConfig.PSIPHON_SOCKS_PORT}"
+                }
+                PsiphonMode.PSIPHON_TO_WARP -> {
+                    args += "--psiphon-reverse"
+                }
+                PsiphonMode.PSIPHON_ONLY -> {
+                    args += "--psiphon-only"
+                }
+                PsiphonMode.OFF -> Unit
+            }
+
+            if (config.psiphonRegion.isNotBlank() && !config.psiphonRegion.equals("auto", ignoreCase = true)) {
+                args += "--psiphon-region"
+                args += config.psiphonRegion.trim().uppercase()
+            }
+
+            if (!psiphonBinaryPath.isNullOrBlank()) {
+                args += "--psiphon-bin"
+                args += psiphonBinaryPath
+            }
+        }
+
         return args
     }
 
@@ -130,6 +166,9 @@ class AetherEngineManager(private val privateDataDir: File) {
     ): Long {
         val proto = overrideProtocol ?: config.protocol
         return when {
+            // Thorough scan sweeps entire subnets (upstream Aether 300s budget + 10s margin)
+            config.scanMode == ScanMode.THOROUGH -> 310_000L
+
             proto == AetherProtocol.GOOL ||
             proto == AetherProtocol.GOOL_CLASSIC ||
             proto == AetherProtocol.MIM -> 60_000L
@@ -144,7 +183,8 @@ class AetherEngineManager(private val privateDataDir: File) {
         config: VpnConfig,
         protector: SocketProtectorCallback,
         overrideProtocol: AetherProtocol? = null,
-        readinessTimeoutMs: Long? = null
+        readinessTimeoutMs: Long? = null,
+        psiphonBinaryPath: String? = null
     ): Result<Long> {
         if (!AetherNative.ensureLoaded()) {
             val errDetails = AetherNative.diagnosticInfo
@@ -163,9 +203,9 @@ class AetherEngineManager(private val privateDataDir: File) {
 
         val effectiveTimeoutMs = readinessTimeoutMs ?: calculateStartupTimeoutMs(config, overrideProtocol)
         val proto = overrideProtocol ?: config.protocol
-        val cliArgs = buildCoreArguments(config, overrideProtocol)
+        val cliArgs = buildCoreArguments(config, overrideProtocol, psiphonBinaryPath)
         runCatching { android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true) }
-        DiagnosticsLog.record("Engine", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s]")
+        DiagnosticsLog.record("Engine", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
         val parsed = runCatching { JSONObject(rawReply) }.getOrNull()
@@ -190,7 +230,7 @@ class AetherEngineManager(private val privateDataDir: File) {
                 stop()
                 return Result.failure(IllegalStateException("Aether engine exited: $exitError"))
             }
-            if (isSocks5Ready(config.socksPort)) {
+            if (isSocks5Ready(config.effectiveSocksPort)) {
                 return Result.success(jobId)
             }
             delay(backoffMs)
@@ -199,7 +239,7 @@ class AetherEngineManager(private val privateDataDir: File) {
 
         stop()
         return Result.failure(
-            IllegalStateException("Timed out waiting for Aether SOCKS5 listener on ${config.socksBindAddress} after ${effectiveTimeoutMs / 1000}s")
+            IllegalStateException("Timed out waiting for Aether SOCKS5 listener on 127.0.0.1:${config.effectiveSocksPort} after ${effectiveTimeoutMs / 1000}s")
         )
     }
 
@@ -251,6 +291,24 @@ class AetherEngineManager(private val privateDataDir: File) {
             }
         } catch (_: Exception) {
             false
+        }
+    }
+
+    companion object {
+        /**
+         * Resolves external Psiphon client binary on Android filesystem.
+         * On Android 10+ (API 29+), non-root binaries must reside in nativeLibraryDir
+         * or have explicit execution permissions.
+         */
+        fun findPsiphonBinary(context: Context): File? {
+            val nativeLibDir = File(context.applicationInfo.nativeLibraryDir)
+            val candidates = listOf(
+                File(nativeLibDir, "libpsiphon-tunnel-core.so"),
+                File(nativeLibDir, "psiphon-tunnel-core"),
+                File(context.filesDir, "psiphon-tunnel-core"),
+                File("/data/local/tmp/psiphon-tunnel-core")
+            )
+            return candidates.firstOrNull { it.exists() && it.canExecute() }
         }
     }
 }
