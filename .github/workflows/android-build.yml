@@ -92,7 +92,7 @@ jobs:
       - name: Set up Go (for Psiphon compilation)
         uses: actions/setup-go@v5
         with:
-          go-version: "stable"
+          go-version: "1.26.3"
           cache: false
 
       - name: Cache Go build and modules
@@ -102,12 +102,21 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             native/psiphon-tunnel-core
-          key: ${{ runner.os }}-go-psiphon-cluvex-83aa73b-v1
+          key: ${{ runner.os }}-go-1.26.3-psiphon-cluvex-83aa73b-v1
           restore-keys: |
-            ${{ runner.os }}-go-psiphon-cluvex-
+            ${{ runner.os }}-go-1.26.3-psiphon-cluvex-83aa73b-
 
       - name: Build ARM64 Psiphon tunnel core (Go layer)
         run: bash scripts/build-psiphon.sh
+
+      - name: Fail-fast smoke test Psiphon TLS initialization
+        run: |
+          echo "[*] Running host-native ConsoleClient -version smoke test to verify psiphon-tls init..."
+          (
+            cd native/psiphon-tunnel-core
+            CGO_ENABLED=0 go run -mod=vendor -ldflags="-s -w -checklinkname=0" ./ConsoleClient -version
+          )
+          echo "[+] Verified: psiphon-tls init.0 executed successfully without panic."
 
       - name: Build ARM64 native libraries (Aether + pinned HEV 2.20.0)
         env:
