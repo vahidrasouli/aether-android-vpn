@@ -4,10 +4,11 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:fontFamily="monospace"
+    android:lineSpacingExtra="2dp"
     android:paddingStart="12dp"
+    android:paddingTop="3dp"
     android:paddingEnd="12dp"
-    android:paddingTop="2dp"
-    android:paddingBottom="2dp"
-    android:textColor="@color/text_secondary"
+    android:paddingBottom="3dp"
+    android:textColor="@color/log_text"
     android:textIsSelectable="true"
-    android:textSize="11sp" />
+    android:textSize="11.5sp" />

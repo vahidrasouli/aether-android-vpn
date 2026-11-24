@@ -70,4 +70,24 @@ class HevConfigGeneratorTest {
         assertTrue(psiToWarp.contains("udp: 'udp'"))
         assertFalse(psiToWarp.contains("udp: 'tcp'"))
     }
+
+    @Test
+    fun enablesMapDnsByDefaultAndDisablesWhenBypassIranOrCustomDnsSet() {
+        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+
+        val defaultYaml = manager.generateYamlConfig(VpnConfig())
+        assertTrue(defaultYaml.contains("mapdns:"))
+        assertTrue(defaultYaml.contains("address: 198.18.0.2"))
+        assertTrue(defaultYaml.contains("udp-read-write-timeout: 30000"))
+
+        val psiphonYaml = manager.generateYamlConfig(VpnConfig(psiphonMode = PsiphonMode.WARP_TO_PSIPHON))
+        assertTrue(psiphonYaml.contains("mapdns:"))
+        assertTrue(psiphonYaml.contains("udp-read-write-timeout: 5000"))
+
+        val iranBypassYaml = manager.generateYamlConfig(VpnConfig(bypassIran = true))
+        assertFalse(iranBypassYaml.contains("mapdns:"))
+
+        val customDnsYaml = manager.generateYamlConfig(VpnConfig(customDns = "8.8.8.8"))
+        assertFalse(customDnsYaml.contains("mapdns:"))
+    }
 }

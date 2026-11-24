@@ -26,8 +26,8 @@ class AppSplitTunnelActivity : AppCompatActivity() {
         val config = VpnConfig.load(this)
         when (config.splitTunnelMode) {
             SplitTunnelMode.ALL_APPS -> binding.radioAllApps.isChecked = true
-            SplitTunnelMode.EXCLUDE_SELECTED -> binding.radioExcludeApps.isChecked = true
-            SplitTunnelMode.INCLUDE_ONLY_SELECTED -> binding.radioIncludeOnly.isChecked = true
+            SplitTunnelMode.BYPASS_SELECTED -> binding.radioExcludeApps.isChecked = true
+            SplitTunnelMode.ONLY_SELECTED -> binding.radioIncludeOnly.isChecked = true
         }
 
         val pm = packageManager
@@ -53,8 +53,8 @@ class AppSplitTunnelActivity : AppCompatActivity() {
 
         binding.btnSaveSplitTunnel.setOnClickListener {
             val mode = when (binding.radioGroupSplitMode.checkedRadioButtonId) {
-                R.id.radioExcludeApps -> SplitTunnelMode.EXCLUDE_SELECTED
-                R.id.radioIncludeOnly -> SplitTunnelMode.INCLUDE_ONLY_SELECTED
+                R.id.radioExcludeApps -> SplitTunnelMode.BYPASS_SELECTED
+                R.id.radioIncludeOnly -> SplitTunnelMode.ONLY_SELECTED
                 else -> SplitTunnelMode.ALL_APPS
             }
             val selected = mutableSetOf<String>()

@@ -1,9 +1,11 @@
 package io.aethervpn.android.ui
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import androidx.core.content.ContextCompat
@@ -40,9 +42,9 @@ object LogFormatter {
 
             builder.append(' ')
 
-            // 2. Tag (bold & distinct category color)
+            // 2. Tag (pill badge with bold category color + subtle tinted background)
             val tagStart = builder.length
-            builder.append("[$tag]")
+            builder.append(" [$tag] ")
             val tagColor = when {
                 tag.equals("Aether", ignoreCase = true) -> colorTagAether
                 tag.equals("Psiphon", ignoreCase = true) -> colorTagPsiphon
@@ -51,6 +53,13 @@ object LogFormatter {
                 tag.contains("Native", ignoreCase = true) || tag.contains("JNI", ignoreCase = true) -> colorTagAether
                 else -> colorTagOther
             }
+            val pillBg = Color.argb(38, Color.red(tagColor), Color.green(tagColor), Color.blue(tagColor))
+            builder.setSpan(
+                BackgroundColorSpan(pillBg),
+                tagStart,
+                builder.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
             builder.setSpan(
                 ForegroundColorSpan(tagColor),
                 tagStart,

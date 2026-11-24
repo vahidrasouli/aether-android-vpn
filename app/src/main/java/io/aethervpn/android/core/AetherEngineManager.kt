@@ -208,7 +208,7 @@ class AetherEngineManager(private val privateDataDir: File) {
         // Mobile runtime tuning for Rust engine (allow cellular radio idle, low memory footprint)
         runCatching {
             android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true)
-            android.system.Os.setenv("AETHER_MAX_CLIENTS", "128", true)
+            android.system.Os.setenv("AETHER_MAX_CLIENTS", MAX_CLIENTS.toString(), true)
             android.system.Os.setenv("AETHER_HALF_CLOSE_SECS", "30", true)
             android.system.Os.setenv("AETHER_TCP_KEEPALIVE_SECS", "60", true)
             android.system.Os.setenv("AETHER_MASQUE_H2_KEEPALIVE_SECS", "45", true)
@@ -325,6 +325,8 @@ class AetherEngineManager(private val privateDataDir: File) {
     }
 
     companion object {
+        const val MAX_CLIENTS = 512
+
         /**
          * Resolves external Psiphon client binary on Android filesystem.
          * On Android 10+ (API 29+), non-root binaries must reside in nativeLibraryDir

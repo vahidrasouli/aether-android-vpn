@@ -3,6 +3,7 @@ package io.aethervpn.android.vpn
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.IpPrefix
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
@@ -12,12 +13,14 @@ import android.os.ParcelFileDescriptor
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherEngineManager
 import io.aethervpn.android.core.AetherProtocol
+import io.aethervpn.android.core.CidrRoutePlanner
 import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.HevTunnelManager
 import io.aethervpn.android.core.IdentityRepository
 import io.aethervpn.android.core.PsiphonMode
 import io.aethervpn.android.core.SocketProtectorCallback
 import io.aethervpn.android.core.SplitTunnelMode
+import io.aethervpn.android.core.SplitTunnelPlanner
 import io.aethervpn.android.core.TrafficStats
 import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.TunnelSnapshot
@@ -612,29 +615,57 @@ class AetherVpnService : VpnService() {
             .setSession("Aether VPN")
             .setMtu(config.tunMtu)
             .addAddress(VpnConfig.TUN_IPV4_ADDRESS, VpnConfig.TUN_IPV4_PREFIX)
-            .addRoute("0.0.0.0", 0)
             .setBlocking(false)
 
-        val rawDns = config.customDns.trim()
-        val parsedDns = when {
-            rawDns.startsWith("[") -> rawDns.substringAfter("[").substringBefore("]")
-            rawDns.count { it == ':' } == 1 -> rawDns.substringBefore(':')
-            else -> rawDns
-        }
-        val isCustomV4 = parsedDns.count { it == '.' } == 3
-        val isCustomV6 = parsedDns.contains(':') && !isCustomV4
-        var dnsAdded = false
-        if (isCustomV4 || (isCustomV6 && config.ipv6Enabled)) {
-            val res = runCatching { builder.addDnsServer(parsedDns) }
-            if (res.isSuccess) {
-                dnsAdded = true
+        if (config.bypassIran) {
+            val iranCidrs = runCatching {
+                resources.openRawResource(R.raw.iran_cidrs).use { CidrRoutePlanner.parseCidrs(it) }
+            }.getOrDefault(emptyList())
+
+            if (iranCidrs.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                builder.addRoute("0.0.0.0", 0)
+                iranCidrs.forEach { cidr ->
+                    runCatching { builder.excludeRoute(IpPrefix(cidr.toInetAddress(), cidr.prefix)) }
+                }
+                DiagnosticsLog.record("Tunnel", "Iran Direct active (API 33+ excludeRoute: ${iranCidrs.size} CIDRs)")
+            } else if (iranCidrs.isNotEmpty()) {
+                val allowedRoutes = CidrRoutePlanner.invertCidrs(iranCidrs)
+                allowedRoutes.forEach { block ->
+                    builder.addRoute(block.addressString, block.prefix)
+                }
+                DiagnosticsLog.record("Tunnel", "Iran Direct active (inverted IPv4 routes: ${allowedRoutes.size} blocks)")
             } else {
-                DiagnosticsLog.record("System", "Custom DNS ($parsedDns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
+                builder.addRoute("0.0.0.0", 0)
             }
+        } else {
+            builder.addRoute("0.0.0.0", 0)
         }
-        if (!dnsAdded) {
-            builder.addDnsServer(VpnConfig.DNS_IPV4_PRIMARY)
-            builder.addDnsServer(VpnConfig.DNS_IPV4_SECONDARY)
+
+        if (config.useMapDns) {
+            builder.addDnsServer(VpnConfig.DNS_IPV4_MAPDNS)
+            DiagnosticsLog.record("Tunnel", "HEV mapdns active (${VpnConfig.DNS_IPV4_MAPDNS}:53)")
+        } else {
+            val rawDns = config.customDns.trim()
+            val parsedDns = when {
+                rawDns.startsWith("[") -> rawDns.substringAfter("[").substringBefore("]")
+                rawDns.count { it == ':' } == 1 -> rawDns.substringBefore(':')
+                else -> rawDns
+            }
+            val isCustomV4 = parsedDns.count { it == '.' } == 3
+            val isCustomV6 = parsedDns.contains(':') && !isCustomV4
+            var dnsAdded = false
+            if (isCustomV4 || (isCustomV6 && config.ipv6Enabled)) {
+                val res = runCatching { builder.addDnsServer(parsedDns) }
+                if (res.isSuccess) {
+                    dnsAdded = true
+                } else {
+                    DiagnosticsLog.record("System", "Custom DNS ($parsedDns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
+                }
+            }
+            if (!dnsAdded) {
+                builder.addDnsServer(VpnConfig.DNS_IPV4_PRIMARY)
+                builder.addDnsServer(VpnConfig.DNS_IPV4_SECONDARY)
+            }
         }
 
         // Always route ::/0 into TUN (routes IPv6 when enabled, blackholes IPv6 when disabled to prevent leaks)
@@ -654,28 +685,36 @@ class AetherVpnService : VpnService() {
     }
 
     private fun applyPerAppRouting(builder: Builder, config: VpnConfig) {
-        // Enforce true kernel-level TUN bypass for Aether itself
-        val bypassRes = runCatching { builder.addDisallowedApplication(packageName) }
-        if (bypassRes.isSuccess) {
-            DiagnosticsLog.record("Tunnel", "Kernel TUN bypass active ($packageName excluded from /dev/tun)")
-        } else {
-            DiagnosticsLog.record("Tunnel", "Warning: could not add disallowed app $packageName: ${bypassRes.exceptionOrNull()?.message}")
-        }
+        val plan = SplitTunnelPlanner.plan(
+            mode = config.splitTunnelMode,
+            selectedPackages = config.selectedPackages,
+            selfPackageName = packageName
+        )
 
-        when (config.splitTunnelMode) {
-            SplitTunnelMode.ALL_APPS -> Unit
-
-            SplitTunnelMode.EXCLUDE_SELECTED -> {
-                config.selectedPackages.forEach { pkg ->
-                    if (pkg != packageName) runCatching { builder.addDisallowedApplication(pkg) }
-                }
-            }
-
-            SplitTunnelMode.INCLUDE_ONLY_SELECTED -> {
-                val targets = config.selectedPackages.filter { it != packageName }
-                targets.forEach { pkg -> runCatching { builder.addAllowedApplication(pkg) } }
+        plan.disallowedPackages.forEach { pkg ->
+            val res = runCatching { builder.addDisallowedApplication(pkg) }
+            if (res.isFailure && pkg == packageName) {
+                DiagnosticsLog.record("Tunnel", "Warning: could not exclude $pkg: ${res.exceptionOrNull()?.message}")
             }
         }
+
+        plan.allowedPackages.forEach { pkg ->
+            val res = runCatching { builder.addAllowedApplication(pkg) }
+            if (res.isFailure) {
+                DiagnosticsLog.record("Tunnel", "Warning: could not allow $pkg: ${res.exceptionOrNull()?.message}")
+            }
+        }
+
+        val summary = when (config.splitTunnelMode) {
+            SplitTunnelMode.ALL_APPS -> "All apps (self $packageName excluded)"
+            SplitTunnelMode.BYPASS_SELECTED -> "Bypass ${plan.disallowedPackages.size - 1} app(s) + self excluded"
+            SplitTunnelMode.ONLY_SELECTED -> if (plan.allowedPackages.isNotEmpty()) {
+                "Only ${plan.allowedPackages.size} selected app(s) routed"
+            } else {
+                "Only-selected mode with 0 apps -> fallback to All apps"
+            }
+        }
+        DiagnosticsLog.record("Tunnel", "Split tunnel: $summary")
     }
 
     private fun registerNetworkCallback(socksPort: Int, psiphonMode: PsiphonMode) {

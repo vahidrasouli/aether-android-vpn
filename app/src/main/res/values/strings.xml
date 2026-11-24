@@ -28,7 +28,13 @@
     <string name="label_duration_idle">Duration: 00:00:00</string>
     <string name="error_vpn_permission_denied">Android VPN permission was denied.</string>
     <string name="battery_profile_note">Battery Efficient minimizes wakeups, disables scanning/obfuscation, and uses MASQUE HTTP/3 with 1-shot HTTP/2 fallback. Advanced options (Noize, Fragmentation, GOOL/MIM, Thorough/Ironclad scan) increase CPU and battery usage.</string>
-    <string name="saved_confirmation">Configuration saved. Reconnect to apply changes.</string>
+    <string name="saved_confirmation">Saved — reconnect to apply</string>
+    <string name="iran_direct_title">Iran Direct (Bypass .ir &amp; IR IPs)</string>
+    <string name="iran_direct_subtitle">Route Iranian IPv4 ranges directly outside the tunnel with zero extra RAM/CPU</string>
+    <string name="action_pick_apps">Select Apps</string>
+    <string name="title_app_picker">Select Apps for Split Tunnel</string>
+    <string name="hint_search_apps">Search app name or package…</string>
+    <string name="action_done">Done</string>
 
     <string name="title_psiphon_chain">Psiphon ↔ WARP Chaining</string>
     <string name="label_psiphon_mode">Psiphon Chaining Mode</string>

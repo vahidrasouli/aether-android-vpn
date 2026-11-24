@@ -61,10 +61,10 @@ enum class NoizeProfile(val cliValue: String, val label: String) {
     GFW("gfw", "Aggressive / GFW")
 }
 
-enum class SplitTunnelMode {
-    ALL_APPS,
-    EXCLUDE_SELECTED,
-    INCLUDE_ONLY_SELECTED
+enum class SplitTunnelMode(val label: String) {
+    ALL_APPS("All Apps (Full VPN)"),
+    ONLY_SELECTED("Only Selected Apps"),
+    BYPASS_SELECTED("Bypass Selected Apps")
 }
 
 enum class AppThemeMode(val label: String) {
@@ -109,6 +109,7 @@ data class VpnConfig(
     val tunMtu: Int = DEFAULT_TUN_MTU,
     val splitTunnelMode: SplitTunnelMode = SplitTunnelMode.ALL_APPS,
     val selectedPackages: Set<String> = emptySet(),
+    val bypassIran: Boolean = false,
     val statsRefreshIntervalMs: Long = 5_000L,
     val themeMode: AppThemeMode = AppThemeMode.DARK,
     val languageTag: String = "system"
@@ -132,6 +133,9 @@ data class VpnConfig(
 
     val enableUdp: Boolean
         get() = hevMode == HevMode.TCP_UDP
+
+    val useMapDns: Boolean
+        get() = !bypassIran && customDns.isBlank()
 
     val hasExitLocationPolicy: Boolean
         get() = exitLocation.isNotBlank() &&
@@ -214,6 +218,7 @@ data class VpnConfig(
             put("psiphonRegion", psiphonRegion.trim())
             put("splitTunnelMode", splitTunnelMode.name)
             put("selectedPackages", JSONArray(selectedPackages.sorted()))
+            put("bypassIran", bypassIran)
             put("statsRefreshIntervalMs", statsRefreshIntervalMs)
             put("themeMode", themeMode.name)
             put("languageTag", languageTag)
@@ -242,6 +247,9 @@ data class VpnConfig(
         const val TUN_IPV4_PREFIX = 30
         const val TUN_IPV6_ADDRESS = "fd00:ae7::1"
         const val TUN_IPV6_PREFIX = 126
+        const val DNS_IPV4_MAPDNS = "198.18.0.2"
+        const val MAPDNS_NETWORK = "240.0.0.0"
+        const val MAPDNS_NETMASK = "240.0.0.0"
         const val DNS_IPV4_PRIMARY = "1.1.1.1"
         const val DNS_IPV4_SECONDARY = "1.0.0.1"
         const val DNS_IPV6_PRIMARY = "2606:4700:4700::1111"
@@ -319,8 +327,9 @@ data class VpnConfig(
                 zeroTrustTeam = o.optString("zeroTrustTeam", "").trim(),
                 psiphonMode = enumOrDefault(o.optString("psiphonMode"), PsiphonMode.OFF),
                 psiphonRegion = o.optString("psiphonRegion", "").trim(),
-                splitTunnelMode = enumOrDefault(o.optString("splitTunnelMode"), SplitTunnelMode.ALL_APPS),
+                splitTunnelMode = parseSplitTunnelMode(o.optString("splitTunnelMode")),
                 selectedPackages = pkgs,
+                bypassIran = o.optBoolean("bypassIran", false),
                 statsRefreshIntervalMs = o.optLong("statsRefreshIntervalMs", 5_000L).coerceIn(2_000L, 15_000L),
                 themeMode = enumOrDefault(o.optString("themeMode"), AppThemeMode.DARK),
                 languageTag = o.optString("languageTag", "system")
@@ -357,8 +366,9 @@ data class VpnConfig(
                 zeroTrustTeam = p.getString("zerotrust_team", "").orEmpty(),
                 psiphonMode = enumOrDefault(p.getString("psiphon_mode", null), PsiphonMode.OFF),
                 psiphonRegion = p.getString("psiphon_region", "").orEmpty(),
-                splitTunnelMode = enumOrDefault(p.getString("split_mode", null), SplitTunnelMode.ALL_APPS),
+                splitTunnelMode = parseSplitTunnelMode(p.getString("split_mode", null)),
                 selectedPackages = p.getStringSet("selected_packages", emptySet())?.toSet() ?: emptySet(),
+                bypassIran = p.getBoolean("bypass_iran", false),
                 statsRefreshIntervalMs = p.getLong("stats_refresh_ms", 5_000L),
                 themeMode = enumOrDefault(p.getString("theme_mode", null), AppThemeMode.DARK),
                 languageTag = p.getString("language_tag", "system").orEmpty()
@@ -397,10 +407,17 @@ data class VpnConfig(
                 .putString("psiphon_region", config.psiphonRegion.trim())
                 .putString("split_mode", config.splitTunnelMode.name)
                 .putStringSet("selected_packages", config.selectedPackages)
+                .putBoolean("bypass_iran", config.bypassIran)
                 .putLong("stats_refresh_ms", config.statsRefreshIntervalMs)
                 .putString("theme_mode", config.themeMode.name)
                 .putString("language_tag", config.languageTag)
                 .apply()
+        }
+
+        fun parseSplitTunnelMode(raw: String?): SplitTunnelMode = when (raw?.trim()) {
+            "ONLY_SELECTED", "INCLUDE_ONLY_SELECTED" -> SplitTunnelMode.ONLY_SELECTED
+            "BYPASS_SELECTED", "EXCLUDE_SELECTED" -> SplitTunnelMode.BYPASS_SELECTED
+            else -> SplitTunnelMode.ALL_APPS
         }
 
         private inline fun <reified T : Enum<T>> enumOrDefault(raw: String?, fallback: T): T {

@@ -1,21 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="surface_bg">#F5F7FA</color>
-    <color name="card_bg">#FFFFFF</color>
-    <color name="text_primary">#161B22</color>
-    <color name="text_secondary">#57606A</color>
-    <color name="accent_primary">#0969DA</color>
-    <color name="error_text">#CF222E</color>
-    <color name="divider_line">#D0D7DE</color>
-    <color name="log_timestamp">#8C959F</color>
-    <color name="log_tag_aether">#0D9488</color>
-    <color name="log_tag_psiphon">#8250DF</color>
-    <color name="log_tag_tunnel">#0969DA</color>
-    <color name="log_tag_system">#57606A</color>
-    <color name="log_tag_native">#8250DF</color>
-    <color name="log_tag_vpn">#0969DA</color>
-    <color name="log_tag_other">#0550AE</color>
-    <color name="log_error">#CF222E</color>
-    <color name="log_success">#1A7F37</color>
-    <color name="log_text">#161B22</color>
+    <!-- Dark-first Material 3 Slate Surface Hierarchy -->
+    <color name="surface_bg">#0E1117</color>
+    <color name="card_bg">#161B22</color>
+    <color name="card_border">#262D38</color>
+    <color name="surface_elevated">#1C222B</color>
+    <color name="terminal_bg">#0A0D12</color>
+
+    <color name="text_primary">#F0F6FC</color>
+    <color name="text_secondary">#8B949E</color>
+
+    <color name="accent_primary">#00D4AA</color>
+    <color name="accent_primary_container">#103832</color>
+    <color name="accent_secondary">#3B82F6</color>
+    <color name="accent_secondary_container">#172B4D</color>
+
+    <color name="error_text">#F85149</color>
+    <color name="error_container">#3B1418</color>
+    <color name="warning_text">#D29922</color>
+    <color name="divider_line">#262D38</color>
+
+    <color name="log_timestamp">#6E7681</color>
+    <color name="log_tag_aether">#00D4AA</color>
+    <color name="log_tag_psiphon">#BC8CFF</color>
+    <color name="log_tag_tunnel">#3B82F6</color>
+    <color name="log_tag_system">#8B949E</color>
+    <color name="log_tag_native">#BC8CFF</color>
+    <color name="log_tag_vpn">#3B82F6</color>
+    <color name="log_tag_other">#79C0FF</color>
+    <color name="log_error">#F85149</color>
+    <color name="log_success">#3FB950</color>
+    <color name="log_text">#E6EDF3</color>
 </resources>
