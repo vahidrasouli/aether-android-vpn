@@ -24,6 +24,9 @@ if [ ! -d "${PSIPHON_SRC_DIR}/ConsoleClient" ]; then
   git clone --depth 1 --single-branch --branch "${PSIPHON_BRANCH}" "${PSIPHON_REPO}" "${PSIPHON_SRC_DIR}"
 fi
 
+# Ensure extraneous sample apps and nested wrapper JARs are purged
+rm -rf "${PSIPHON_SRC_DIR}/MobileLibrary"
+
 pushd "${PSIPHON_SRC_DIR}" >/dev/null
 
 LDFLAGS="-s -w"
