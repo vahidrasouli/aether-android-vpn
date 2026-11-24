@@ -327,10 +327,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnRunProbe.setOnClickListener {
             val egressPort = cachedConfig?.effectiveSocksPort ?: VpnConfig.DEFAULT_SOCKS_PORT
+            val psiphonMode = cachedConfig?.psiphonMode ?: PsiphonMode.OFF
             binding.tvDiagnosticsSummary.text = "Running on-demand tunnel probe..."
             uiScope.launch {
                 val res = withContext(Dispatchers.IO) {
-                    TunnelValidator.verifyThroughSocks(egressPort)
+                    TunnelValidator.verifyThroughSocks(egressPort, psiphonMode = psiphonMode)
                 }
                 res.onSuccess { v ->
                     DiagnosticsLog.record("System", "Probe OK: IP=${v.publicIp}, WARP=${v.warpStatus}, RTT=${v.latencyMs}ms")

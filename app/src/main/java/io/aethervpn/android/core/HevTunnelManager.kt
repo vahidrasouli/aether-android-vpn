@@ -31,10 +31,11 @@ class HevTunnelManager(private val cacheDir: File) {
             append("socks5:\n")
             append("  port: ").append(config.effectiveSocksPort).append('\n')
             append("  address: '").append(VpnConfig.LOOPBACK_HOST).append("'\n")
-            // RFC 1928 UDP ASSOCIATE - omitted in TCP-only mode to conserve battery & RAM.
-            // Also omitted when Psiphon is final egress (WARP -> Psiphon or Psiphon Only) since Psiphon is TCP-only.
+            // hev-socks5-tunnel defaults `udp` to 'tcp' (proprietary 0x05 UDP-in-TCP) when omitted.
+            // Psiphon's SOCKS5 server rejects 0x05 ("not 0x01 or 0x03"), so when Psiphon is final
+            // egress we must explicitly specify `udp: 'udp'` (RFC 1928 0x03) to prevent 0x05 spam.
             val isPsiphonEgress = config.psiphonMode == PsiphonMode.WARP_TO_PSIPHON || config.psiphonMode == PsiphonMode.PSIPHON_ONLY
-            if (config.enableUdp && !isPsiphonEgress) {
+            if (config.enableUdp || isPsiphonEgress) {
                 append("  udp: 'udp'\n")
             }
             append("\n")

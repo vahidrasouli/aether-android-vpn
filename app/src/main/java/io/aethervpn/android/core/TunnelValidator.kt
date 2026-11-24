@@ -31,11 +31,31 @@ object TunnelValidator {
 
     fun verifyThroughSocks(
         socksPort: Int,
-        timeoutMs: Int = 12_000
+        timeoutMs: Int = 12_000,
+        psiphonMode: PsiphonMode = PsiphonMode.OFF
+    ): Result<ValidationResult> {
+        return verifyThroughSocksInternal(
+            socksPort = socksPort,
+            timeoutMs = timeoutMs,
+            psiphonMode = psiphonMode
+        )
+    }
+
+    internal fun verifyThroughSocksInternal(
+        socksPort: Int,
+        timeoutMs: Int = 12_000,
+        psiphonMode: PsiphonMode = PsiphonMode.OFF,
+        tlsUpgrade: (Socket, Int) -> Socket = { raw, timeout ->
+            val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
+            (sslFactory.createSocket(raw, TRACE_HOST, TRACE_PORT, true) as SSLSocket).apply {
+                soTimeout = timeout
+                startHandshake()
+            }
+        }
     ): Result<ValidationResult> {
         val startNs = System.nanoTime()
         var rawSocket: Socket? = null
-        var sslSocket: SSLSocket? = null
+        var sslSocket: Socket? = null
 
         return try {
             rawSocket = Socket()
@@ -108,11 +128,8 @@ object TunnelValidator {
                 else -> return Result.failure(IllegalStateException("Unknown SOCKS5 address type: ${replyHeader[3]}"))
             }
 
-            // 4. Upgrade plain socket to SSLSocket
-            val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
-            sslSocket = sslFactory.createSocket(rawSocket, TRACE_HOST, TRACE_PORT, true) as SSLSocket
-            sslSocket.soTimeout = timeoutMs
-            sslSocket.startHandshake()
+            // 4. Upgrade plain socket to TLS socket
+            sslSocket = tlsUpgrade(rawSocket, timeoutMs)
 
             // 5. Minimal HTTP/1.1 GET /cdn-cgi/trace
             val sslOut = sslSocket.getOutputStream()
@@ -156,21 +173,28 @@ object TunnelValidator {
             val ip = fields["ip"].orEmpty()
             val warp = fields["warp"].orEmpty()
             val colo = fields["colo"].orEmpty()
+            val loc = fields["loc"].orEmpty()
 
             if (ip.isBlank()) {
                 return Result.failure(IllegalStateException("Trace response missing public IP"))
             }
-            if (warp != "on" && warp != "plus") {
-                return Result.failure(
-                    IllegalStateException("Traffic did not traverse Cloudflare WARP (warp=$warp)")
-                )
+
+            val requireWarp = psiphonMode == PsiphonMode.OFF || psiphonMode == PsiphonMode.PSIPHON_TO_WARP
+            if (requireWarp) {
+                if (warp != "on" && warp != "plus") {
+                    return Result.failure(
+                        IllegalStateException("Traffic did not traverse Cloudflare WARP (warp=$warp)")
+                    )
+                }
+            } else if (colo.isBlank() && loc.isBlank()) {
+                return Result.failure(IllegalStateException("Trace response missing exit location"))
             }
 
             Result.success(
                 ValidationResult(
                     publicIp = ip,
                     warpStatus = warp,
-                    colo = colo,
+                    colo = colo.ifBlank { loc },
                     latencyMs = latencyMs
                 )
             )
@@ -209,7 +233,10 @@ object TunnelValidator {
     }
 
     /** Fast 1-shot health probe before tearing down an existing tunnel on network change. */
-    fun isTunnelHealthy(socksPort: Int): Boolean {
-        return verifyThroughSocks(socksPort, timeoutMs = 4_000).isSuccess
+    fun isTunnelHealthy(
+        socksPort: Int,
+        psiphonMode: PsiphonMode = PsiphonMode.OFF
+    ): Boolean {
+        return verifyThroughSocks(socksPort, timeoutMs = 4_000, psiphonMode = psiphonMode).isSuccess
     }
 }

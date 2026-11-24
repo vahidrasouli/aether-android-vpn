@@ -55,16 +55,19 @@ class HevConfigGeneratorTest {
     }
 
     @Test
-    fun omitsUdpSectionWhenPsiphonIsEgress() {
+    fun usesStandardUdpAssociateAndNeverTcpModeWhenPsiphonIsEgress() {
         val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
-        val warpToPsi = manager.generateYamlConfig(VpnConfig(psiphonMode = PsiphonMode.WARP_TO_PSIPHON))
-        assertFalse(warpToPsi.contains("udp: 'udp'"))
+        for (mode in listOf(PsiphonMode.WARP_TO_PSIPHON, PsiphonMode.PSIPHON_ONLY)) {
+            for (hevMode in listOf(HevMode.TCP_ONLY, HevMode.TCP_UDP)) {
+                val yaml = manager.generateYamlConfig(VpnConfig(psiphonMode = mode, hevMode = hevMode))
+                assertFalse("Must never use udp: 'tcp' (0x05) for $mode", yaml.contains("udp: 'tcp'"))
+                assertTrue("Must explicitly set udp: 'udp' (0x03) for $mode so HEV does not default to 0x05", yaml.contains("udp: 'udp'"))
+            }
+        }
 
-        val psiOnly = manager.generateYamlConfig(VpnConfig(psiphonMode = PsiphonMode.PSIPHON_ONLY))
-        assertFalse(psiOnly.contains("udp: 'udp'"))
-
-        // When Psiphon is upstream but WARP is final egress (PSIPHON_TO_WARP), UDP is allowed
+        // When Psiphon is upstream but WARP is final egress (PSIPHON_TO_WARP), standard UDP is allowed
         val psiToWarp = manager.generateYamlConfig(VpnConfig(psiphonMode = PsiphonMode.PSIPHON_TO_WARP, hevMode = HevMode.TCP_UDP))
         assertTrue(psiToWarp.contains("udp: 'udp'"))
+        assertFalse(psiToWarp.contains("udp: 'tcp'"))
     }
 }

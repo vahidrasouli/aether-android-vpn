@@ -392,10 +392,13 @@ class AetherVpnService : VpnService() {
                 )
             )
 
-            // 4. End-to-end WARP verification before ever reporting VPN_CONNECTED
+            // 4. End-to-end tunnel verification before ever reporting VPN_CONNECTED
             updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
 
-            val validation = TunnelValidator.verifyThroughSocks(config.effectiveSocksPort)
+            val validation = TunnelValidator.verifyThroughSocks(
+                socksPort = config.effectiveSocksPort,
+                psiphonMode = config.psiphonMode
+            )
             if (validation.isFailure) {
                 return@withLock Result.failure(
                     validation.exceptionOrNull() ?: IllegalStateException("End-to-end validation failed")
@@ -408,7 +411,7 @@ class AetherVpnService : VpnService() {
                 identity.cachedGateway.ifBlank { identity.assignedEndpoint.ifBlank { "Auto (WARP)" } }
             }
 
-            registerNetworkCallback(config.effectiveSocksPort)
+            registerNetworkCallback(config.effectiveSocksPort, config.psiphonMode)
             DiagnosticsLog.record(
                 "System",
                 "Connected via ${protocol.label} | IP=${verified.publicIp} | WARP=${verified.warpStatus} | ${verified.latencyMs}ms"
@@ -675,7 +678,7 @@ class AetherVpnService : VpnService() {
         }
     }
 
-    private fun registerNetworkCallback(socksPort: Int) {
+    private fun registerNetworkCallback(socksPort: Int, psiphonMode: PsiphonMode) {
         unregisterNetworkCallback()
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
         val request = NetworkRequest.Builder()
@@ -698,7 +701,7 @@ class AetherVpnService : VpnService() {
                     activeNetworkId = netId
                     // Battery-first check: avoid tearing down a healthy tunnel on transient network events
                     serviceScope.launch {
-                        if (!recoveringFromLoss && TunnelValidator.isTunnelHealthy(socksPort)) {
+                        if (!recoveringFromLoss && TunnelValidator.isTunnelHealthy(socksPort, psiphonMode)) {
                             DiagnosticsLog.record("System", "Network changed but tunnel remains healthy; skipping reconnect")
                         } else {
                             DiagnosticsLog.record("System", "Network transition requires reconnect; scheduling backoff")
