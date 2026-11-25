@@ -165,7 +165,7 @@ class AetherEngineManager(private val privateDataDir: File) {
         overrideProtocol: AetherProtocol? = null
     ): Long {
         val proto = overrideProtocol ?: config.protocol
-        return when {
+        val baseTimeoutMs = when {
             // Thorough scan sweeps entire subnets (upstream Aether 300s budget + 10s margin)
             config.scanMode == ScanMode.THOROUGH -> 310_000L
             // Ironclad scan has 180s budget + 10s margin
@@ -184,6 +184,13 @@ class AetherEngineManager(private val privateDataDir: File) {
             proto == AetherProtocol.MASQUE_H2 -> 55_000L
 
             else -> 35_000L
+        }
+        return when (config.psiphonMode) {
+            // Psiphon needs extra time for initial Meek/CDN dial, tactics fetch, and (for PSIPHON_TO_WARP) WARP chaining
+            PsiphonMode.PSIPHON_ONLY -> maxOf(baseTimeoutMs, 120_000L)
+            PsiphonMode.PSIPHON_TO_WARP -> maxOf(baseTimeoutMs, 150_000L)
+            PsiphonMode.WARP_TO_PSIPHON,
+            PsiphonMode.OFF -> baseTimeoutMs
         }
     }
 

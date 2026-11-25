@@ -20,8 +20,8 @@ android {
         applicationId = "io.aethervpn.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         ndk {
             // Primary target: ARM64 Android devices (minimizes APK size)
@@ -90,6 +90,16 @@ android {
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
             }
         }
+    }
+
+    applicationVariants.all {
+        val variant = this
+        variant.outputs
+            .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { output ->
+                val suffix = if (variant.buildType.name == "release") "" else "-${variant.buildType.name}"
+                output.outputFileName = "aether-android-arm64-v${variant.versionName}$suffix.apk"
+            }
     }
 }
 

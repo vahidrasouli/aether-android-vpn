@@ -195,4 +195,43 @@ class PsiphonAndMobileOptimizationTest {
         assertEquals("socks5://127.0.0.1:10808", args[idx + 1])
         assertTrue(args.contains("--h2"))
     }
+
+    @Test
+    fun testPsiphonStartupTimeoutBudgets() {
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+
+        // PSIPHON_ONLY must receive at least 120s for initial Meek/CDN dial and tactics fetch
+        assertEquals(
+            120_000L,
+            mgr.calculateStartupTimeoutMs(
+                VpnConfig(
+                    protocol = io.aethervpn.android.core.AetherProtocol.MASQUE_H3,
+                    psiphonMode = PsiphonMode.PSIPHON_ONLY
+                )
+            )
+        )
+
+        // PSIPHON_TO_WARP must receive at least 150s for Psiphon bootstrap + WARP chaining
+        assertEquals(
+            150_000L,
+            mgr.calculateStartupTimeoutMs(
+                VpnConfig(
+                    protocol = io.aethervpn.android.core.AetherProtocol.MASQUE_H3,
+                    psiphonMode = PsiphonMode.PSIPHON_TO_WARP
+                )
+            )
+        )
+
+        // Larger scan budgets (e.g., THOROUGH = 310s) must still be preserved
+        assertEquals(
+            310_000L,
+            mgr.calculateStartupTimeoutMs(
+                VpnConfig(
+                    protocol = io.aethervpn.android.core.AetherProtocol.MASQUE_H2,
+                    scanMode = io.aethervpn.android.core.ScanMode.THOROUGH,
+                    psiphonMode = PsiphonMode.PSIPHON_TO_WARP
+                )
+            )
+        )
+    }
 }

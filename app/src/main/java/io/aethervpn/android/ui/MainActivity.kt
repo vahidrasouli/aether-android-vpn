@@ -7,10 +7,12 @@ import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Debug
+import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -22,11 +24,13 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import io.aethervpn.android.AetherApplication
+import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.AppThemeMode
@@ -38,11 +42,14 @@ import io.aethervpn.android.core.NoizeProfile
 import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.ScanMode
 import io.aethervpn.android.core.SplitTunnelMode
 import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.TunnelSnapshot
 import io.aethervpn.android.core.TunnelValidator
+import io.aethervpn.android.core.UpdateCheckResult
+import io.aethervpn.android.core.UpdateManager
 import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.core.VpnStateStore
 import io.aethervpn.android.databinding.ActivityMainBinding
@@ -120,6 +127,7 @@ class MainActivity : AppCompatActivity() {
         setupSpinners()
         setupAutoSaveListeners()
         setupLogRecyclerView()
+        setupAboutAndUpdater()
         bindActions()
 
         // Load configuration asynchronously off the main thread
@@ -772,6 +780,132 @@ class MainActivity : AppCompatActivity() {
             String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
         } else {
             String.format(Locale.US, "%02d:%02d", m, s)
+        }
+    }
+
+    private var pendingUpdateRelease: ReleaseInfo? = null
+    private var pendingInstallApkFile: java.io.File? = null
+
+    private fun setupAboutAndUpdater() {
+        val versionLabel = "v${BuildConfig.VERSION_NAME}"
+        binding.tvAppVersion.text = versionLabel
+        binding.tvAboutAppVersion.text = "${getString(R.string.app_name)} • $versionLabel"
+
+        binding.tvAboutGithub.setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateManager.GITHUB_REPO_URL)))
+            }.onFailure {
+                toast("Unable to open browser")
+            }
+        }
+
+        binding.btnCheckUpdates.setOnClickListener {
+            binding.btnCheckUpdates.isEnabled = false
+            binding.tvUpdateStatus.text = "Checking GitHub Releases..."
+            binding.layoutUpdateAvailable.visibility = View.GONE
+
+            uiScope.launch {
+                val result = UpdateManager.checkForUpdates(BuildConfig.VERSION_NAME)
+                binding.btnCheckUpdates.isEnabled = true
+                when (result) {
+                    is UpdateCheckResult.UpdateAvailable -> {
+                        val rel = result.release
+                        pendingUpdateRelease = rel
+                        binding.tvUpdateStatus.text = "New version available!"
+                        binding.tvUpdateVersion.text = "Update ${rel.tagName} (v${rel.versionName})"
+                        binding.tvUpdateNotes.text = rel.releaseNotes
+                        binding.progressUpdateDownload.visibility = View.GONE
+                        binding.btnDownloadInstallUpdate.isEnabled = true
+                        binding.btnDownloadInstallUpdate.text = if (rel.apkDownloadUrl != null) {
+                            getString(R.string.action_download_install)
+                        } else {
+                            "Open Release Page"
+                        }
+                        binding.layoutUpdateAvailable.visibility = View.VISIBLE
+                    }
+                    is UpdateCheckResult.UpToDate -> {
+                        pendingUpdateRelease = null
+                        binding.tvUpdateStatus.text = "You are on the latest version (v${result.currentVersion})."
+                    }
+                    is UpdateCheckResult.Unavailable -> {
+                        pendingUpdateRelease = null
+                        binding.tvUpdateStatus.text = result.message
+                    }
+                }
+            }
+        }
+
+        binding.btnDownloadInstallUpdate.setOnClickListener {
+            val rel = pendingUpdateRelease ?: return@setOnClickListener
+            val apkUrl = rel.apkDownloadUrl
+            if (apkUrl.isNullOrBlank()) {
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(rel.htmlUrl)))
+                }
+                return@setOnClickListener
+            }
+
+            val cachedApk = pendingInstallApkFile
+            if (cachedApk != null && cachedApk.exists()) {
+                installDownloadedApk(cachedApk)
+                return@setOnClickListener
+            }
+
+            binding.btnDownloadInstallUpdate.isEnabled = false
+            binding.progressUpdateDownload.visibility = View.VISIBLE
+            binding.progressUpdateDownload.isIndeterminate = false
+            binding.progressUpdateDownload.progress = 0
+            binding.tvUpdateStatus.text = "Downloading ${rel.apkFileName ?: "update"}..."
+
+            uiScope.launch {
+                val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
+                val downloadResult = UpdateManager.downloadApk(
+                    downloadUrl = apkUrl,
+                    fileName = fileName,
+                    cacheDir = cacheDir
+                ) { pct ->
+                    uiScope.launch {
+                        binding.progressUpdateDownload.progress = pct
+                    }
+                }
+
+                binding.btnDownloadInstallUpdate.isEnabled = true
+                downloadResult.onSuccess { file ->
+                    pendingInstallApkFile = file
+                    binding.tvUpdateStatus.text = "Download complete. Launching installer..."
+                    installDownloadedApk(file)
+                }.onFailure { err ->
+                    binding.progressUpdateDownload.visibility = View.GONE
+                    binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
+                }
+            }
+        }
+    }
+
+    private fun installDownloadedApk(apkFile: java.io.File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            toast("Please allow installing unknown apps, then tap Download & Install again")
+            val permIntent = Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:$packageName")
+            )
+            runCatching { startActivity(permIntent) }
+            return
+        }
+
+        val apkUri = FileProvider.getUriForFile(
+            this,
+            "${BuildConfig.APPLICATION_ID}.fileprovider",
+            apkFile
+        )
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching {
+            startActivity(installIntent)
+        }.onFailure { err ->
+            binding.tvUpdateStatus.text = "Unable to launch installer: ${err.message}"
         }
     }
 

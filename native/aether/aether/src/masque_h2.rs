@@ -212,6 +212,18 @@ fn upstream_note_for(peer: std::net::SocketAddr) -> Option<String> {
     }
 }
 
+fn is_via_upstream(peer: std::net::SocketAddr) -> bool {
+    crate::upstream::configured().is_some() && !crate::routing::is_private(peer.ip())
+}
+
+fn effective_sni_for<'a>(configured_sni: &'a str, via_upstream: bool) -> &'a str {
+    if via_upstream && configured_sni == consts::DEFAULT_MASQUE_SNI {
+        consts::CONNECT_SNI
+    } else {
+        configured_sni
+    }
+}
+
 /// Opens the TLS connection the HTTP/2 carrier runs on: dials the peer and shakes
 /// hands, offering the ECHConfigList of `cfg` when it has one. A server that turns that
 /// config down hands back the one it holds now; the handshake is made once more with
@@ -220,7 +232,18 @@ async fn connect_tls(
     cfg: &H2TunnelConfig,
     fragment: FragmentConfig,
 ) -> Result<tokio_boring::SslStream<FragmentingStream<TcpStream>>> {
-    let mut ech = cfg.ech_config_list.clone();
+    let via_upstream = is_via_upstream(cfg.peer);
+    let effective_sni = effective_sni_for(&cfg.sni, via_upstream);
+    let effective_fragment = if via_upstream {
+        FragmentConfig::disabled()
+    } else {
+        fragment
+    };
+    let mut ech = if via_upstream {
+        None
+    } else {
+        cfg.ech_config_list.clone()
+    };
     let mut retried = false;
     loop {
         let mut tls_config = build_tls(cfg)?;
@@ -233,8 +256,8 @@ async fn connect_tls(
         }
         let tcp = dial(cfg.peer).await?;
         let _ = tcp.set_nodelay(true);
-        let stream = FragmentingStream::new(tcp, fragment);
-        match tokio_boring::connect(tls_config, &cfg.sni, stream).await {
+        let stream = FragmentingStream::new(tcp, effective_fragment);
+        match tokio_boring::connect(tls_config, effective_sni, stream).await {
             Ok(tls) => {
                 if ech.is_some() {
                     // Nothing goes over a handshake that went without the key it was given.
@@ -399,7 +422,11 @@ pub async fn run(
         log_or_debug(quiet, note);
     }
 
-    let frag_cfg = FragmentConfig::from_env();
+    let frag_cfg = if is_via_upstream(cfg.peer) {
+        FragmentConfig::disabled()
+    } else {
+        FragmentConfig::from_env()
+    };
     if frag_cfg.enabled {
         log_or_debug(
             quiet,
@@ -809,5 +836,21 @@ mod tests {
         assert!(!rejected_ech("TLS handshake failed [WRONG_VERSION_NUMBER]"));
         assert!(!rejected_ech("unknown BoringSSL error"));
         assert!(!rejected_ech("the SSL session has been shut down"));
+    }
+
+    #[test]
+    fn upstream_h2_uses_direct_masque_sni_when_default_sni_is_active() {
+        assert_eq!(
+            effective_sni_for(consts::DEFAULT_MASQUE_SNI, true),
+            consts::CONNECT_SNI
+        );
+        assert_eq!(
+            effective_sni_for(consts::DEFAULT_MASQUE_SNI, false),
+            consts::DEFAULT_MASQUE_SNI
+        );
+        assert_eq!(
+            effective_sni_for("custom.example.com", true),
+            "custom.example.com"
+        );
     }
 }

@@ -608,7 +608,7 @@ pub async fn hunt_best_gateway_avoiding(
         if let Some(proxy) = &upstream_proxy {
             timeout = timeout.max(Duration::from_secs(10));
             log::info!(
-                "[*] MASQUE HTTP/2 probes dialing through upstream proxy {}",
+                "[*] MASQUE HTTP/2 probes dialing through upstream proxy {} (using direct MASQUE SNI without ECH/fragmentation)",
                 proxy.endpoint()
             );
         }
