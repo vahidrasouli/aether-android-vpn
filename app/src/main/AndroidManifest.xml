@@ -39,6 +39,12 @@
             android:label="@string/title_split_tunnel"
             android:parentActivityName=".ui.MainActivity" />
 
+        <activity
+            android:name=".ui.EngineLabActivity"
+            android:exported="false"
+            android:label="@string/title_engine_lab"
+            android:parentActivityName=".ui.MainActivity" />
+
         <service
             android:name=".vpn.AetherVpnService"
             android:exported="false"

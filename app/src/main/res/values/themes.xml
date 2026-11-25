@@ -56,4 +56,14 @@
         <item name="strokeColor">@color/card_border</item>
         <item name="android:textColor">@color/text_primary</item>
     </style>
+
+    <style name="Widget.Aether.Chip.Choice" parent="Widget.Material3.Chip.Filter">
+        <item name="checkedIconVisible">false</item>
+        <item name="chipBackgroundColor">@color/selector_chip_bg</item>
+        <item name="chipStrokeColor">@color/selector_chip_stroke</item>
+        <item name="chipStrokeWidth">1dp</item>
+        <item name="android:textColor">@color/selector_chip_text</item>
+        <item name="chipCornerRadius">12dp</item>
+        <item name="android:textSize">12sp</item>
+    </style>
 </resources>

@@ -144,6 +144,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        uiScope.launch {
+            val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@MainActivity) }
+            if (cfg != cachedConfig) {
+                cachedConfig = cfg
+                loadConfigIntoUi(cfg)
+            }
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         stateJob = uiScope.launch {
@@ -530,6 +541,8 @@ class MainActivity : AppCompatActivity() {
         isBindingUi = true
         try {
             updateHomeBadges(cfg)
+            binding.tvEngineLabSummary.text =
+                "${cfg.detectEngineLabPreset().label} • ${cfg.aetherMaxClients} clients • ${cfg.tunMtu} MTU"
 
             binding.spinnerProfile.setSelection(cfg.profileLevel.ordinal, false)
             binding.spinnerPerfProfile.setSelection(cfg.perfProfile.ordinal, false)
@@ -603,6 +616,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindActions() {
+        binding.cardEngineLab.setOnClickListener {
+            startActivity(Intent(this, EngineLabActivity::class.java))
+        }
+
         binding.btnToggleVpn.setOnClickListener {
             val phase = VpnStateStore.state.value.phase
             if (phase == TunnelPhase.VPN_CONNECTED || phase.isWorking) {

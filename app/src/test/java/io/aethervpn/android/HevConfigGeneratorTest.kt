@@ -78,7 +78,10 @@ class HevConfigGeneratorTest {
         val defaultYaml = manager.generateYamlConfig(VpnConfig())
         assertTrue(defaultYaml.contains("mapdns:"))
         assertTrue(defaultYaml.contains("address: 198.18.0.2"))
-        assertTrue(defaultYaml.contains("udp-read-write-timeout: 30000"))
+        assertTrue(defaultYaml.contains("udp-read-write-timeout: 5000"))
+
+        val customTimeoutYaml = manager.generateYamlConfig(VpnConfig(udpTimeoutMs = 30000))
+        assertTrue(customTimeoutYaml.contains("udp-read-write-timeout: 30000"))
 
         val psiphonYaml = manager.generateYamlConfig(VpnConfig(psiphonMode = PsiphonMode.WARP_TO_PSIPHON))
         assertTrue(psiphonYaml.contains("mapdns:"))

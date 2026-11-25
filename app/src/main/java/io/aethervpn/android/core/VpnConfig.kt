@@ -85,6 +85,13 @@ enum class AppThemeMode(val label: String) {
     LIGHT("Light")
 }
 
+enum class EngineLabPreset(val label: String) {
+    ECO("Eco (Battery)"),
+    BALANCED("Balanced (Default)"),
+    TURBO("Turbo (Media)"),
+    CUSTOM("Custom")
+}
+
 /**
  * Complete configuration model mapped 1:1 to verified CluvexStudio/Aether v2.4.0 capabilities.
  * Local SOCKS5 endpoint is permanently locked to loopback (127.0.0.1).
@@ -125,7 +132,18 @@ data class VpnConfig(
     val bypassIran: Boolean = false,
     val statsRefreshIntervalMs: Long = 5_000L,
     val themeMode: AppThemeMode = AppThemeMode.DARK,
-    val languageTag: String = "system"
+    val languageTag: String = "system",
+    // Engine & Performance Lab tunables (defaults match Balanced)
+    val aetherMaxClients: Int = 512,
+    val aetherMasqueH2KeepaliveSecs: Int = 45,
+    val aetherTcpKeepaliveSecs: Int = 60,
+    val aetherHalfCloseSecs: Int = 30,
+    val goMemLimit: String = "48MiB",
+    val goMaxProcs: String = "2",
+    val goGc: String = "50",
+    val taskStackSize: Int = 16384,
+    val udpTimeoutMs: Int = 5000,
+    val mapDnsEnabled: Boolean = true
 ) {
     val socksBindAddress: String
         get() = "$LOOPBACK_HOST:$socksPort"
@@ -148,7 +166,92 @@ data class VpnConfig(
         get() = hevMode == HevMode.TCP_UDP
 
     val useMapDns: Boolean
-        get() = !bypassIran && customDns.isBlank()
+        get() = mapDnsEnabled && !bypassIran && customDns.isBlank()
+
+    fun detectEngineLabPreset(): EngineLabPreset = when {
+        perfProfile == PerfProfile.LOW &&
+            goMemLimit == "32MiB" &&
+            goMaxProcs == "1" &&
+            goGc == "25" &&
+            aetherMaxClients == 256 &&
+            aetherMasqueH2KeepaliveSecs == 60 &&
+            aetherTcpKeepaliveSecs == 90 &&
+            aetherHalfCloseSecs == 15 &&
+            taskStackSize == 16384 &&
+            udpTimeoutMs == 5000 -> EngineLabPreset.ECO
+
+        perfProfile == PerfProfile.LOW &&
+            goMemLimit == "48MiB" &&
+            goMaxProcs == "2" &&
+            goGc == "50" &&
+            aetherMaxClients == 512 &&
+            aetherMasqueH2KeepaliveSecs == 45 &&
+            aetherTcpKeepaliveSecs == 60 &&
+            aetherHalfCloseSecs == 30 &&
+            taskStackSize == 16384 &&
+            udpTimeoutMs == 5000 -> EngineLabPreset.BALANCED
+
+        perfProfile == PerfProfile.MEDIUM &&
+            goMemLimit == "64MiB" &&
+            goMaxProcs == "4" &&
+            goGc == "100" &&
+            aetherMaxClients == 1024 &&
+            aetherMasqueH2KeepaliveSecs == 30 &&
+            aetherTcpKeepaliveSecs == 45 &&
+            aetherHalfCloseSecs == 30 &&
+            taskStackSize == 24576 &&
+            udpTimeoutMs == 5000 -> EngineLabPreset.TURBO
+
+        else -> EngineLabPreset.CUSTOM
+    }
+
+    fun applyEngineLabPreset(preset: EngineLabPreset): VpnConfig = when (preset) {
+        EngineLabPreset.ECO -> copy(
+            perfProfile = PerfProfile.LOW,
+            goMemLimit = "32MiB",
+            goMaxProcs = "1",
+            goGc = "25",
+            aetherMaxClients = 256,
+            aetherMasqueH2KeepaliveSecs = 60,
+            aetherTcpKeepaliveSecs = 90,
+            aetherHalfCloseSecs = 15,
+            taskStackSize = 16384,
+            udpTimeoutMs = 5000
+        )
+
+        EngineLabPreset.BALANCED -> copy(
+            perfProfile = PerfProfile.LOW,
+            goMemLimit = "48MiB",
+            goMaxProcs = "2",
+            goGc = "50",
+            aetherMaxClients = 512,
+            aetherMasqueH2KeepaliveSecs = 45,
+            aetherTcpKeepaliveSecs = 60,
+            aetherHalfCloseSecs = 30,
+            taskStackSize = 16384,
+            udpTimeoutMs = 5000
+        )
+
+        EngineLabPreset.TURBO -> copy(
+            perfProfile = PerfProfile.MEDIUM,
+            goMemLimit = "64MiB",
+            goMaxProcs = "4",
+            goGc = "100",
+            aetherMaxClients = 1024,
+            aetherMasqueH2KeepaliveSecs = 30,
+            aetherTcpKeepaliveSecs = 45,
+            aetherHalfCloseSecs = 30,
+            taskStackSize = 24576,
+            udpTimeoutMs = 5000
+        )
+
+        EngineLabPreset.CUSTOM -> this
+    }
+
+    fun resetEngineLabDefaults(): VpnConfig = applyEngineLabPreset(EngineLabPreset.BALANCED).copy(
+        tunMtu = DEFAULT_TUN_MTU,
+        mapDnsEnabled = true
+    )
 
     val hasExitLocationPolicy: Boolean
         get() = exitLocation.isNotBlank() &&
@@ -236,6 +339,17 @@ data class VpnConfig(
             put("statsRefreshIntervalMs", statsRefreshIntervalMs)
             put("themeMode", themeMode.name)
             put("languageTag", languageTag)
+            put("tunMtu", tunMtu)
+            put("aetherMaxClients", aetherMaxClients)
+            put("aetherMasqueH2KeepaliveSecs", aetherMasqueH2KeepaliveSecs)
+            put("aetherTcpKeepaliveSecs", aetherTcpKeepaliveSecs)
+            put("aetherHalfCloseSecs", aetherHalfCloseSecs)
+            put("goMemLimit", goMemLimit)
+            put("goMaxProcs", goMaxProcs)
+            put("goGc", goGc)
+            put("taskStackSize", taskStackSize)
+            put("udpTimeoutMs", udpTimeoutMs)
+            put("mapDnsEnabled", mapDnsEnabled)
         }.toString(2)
     }
 
@@ -347,7 +461,18 @@ data class VpnConfig(
                 bypassIran = o.optBoolean("bypassIran", false),
                 statsRefreshIntervalMs = o.optLong("statsRefreshIntervalMs", 5_000L).coerceIn(2_000L, 15_000L),
                 themeMode = enumOrDefault(o.optString("themeMode"), AppThemeMode.DARK),
-                languageTag = o.optString("languageTag", "system")
+                languageTag = o.optString("languageTag", "system"),
+                tunMtu = o.optInt("tunMtu", DEFAULT_TUN_MTU).coerceIn(1280, 1500),
+                aetherMaxClients = o.optInt("aetherMaxClients", 512).coerceIn(64, 4096),
+                aetherMasqueH2KeepaliveSecs = o.optInt("aetherMasqueH2KeepaliveSecs", 45).coerceIn(10, 300),
+                aetherTcpKeepaliveSecs = o.optInt("aetherTcpKeepaliveSecs", 60).coerceIn(10, 300),
+                aetherHalfCloseSecs = o.optInt("aetherHalfCloseSecs", 30).coerceIn(5, 300),
+                goMemLimit = o.optString("goMemLimit", "48MiB").ifBlank { "48MiB" },
+                goMaxProcs = o.optString("goMaxProcs", "2").ifBlank { "2" },
+                goGc = o.optString("goGc", "50").ifBlank { "50" },
+                taskStackSize = o.optInt("taskStackSize", 16384).coerceIn(8192, 65536),
+                udpTimeoutMs = o.optInt("udpTimeoutMs", 5000).coerceIn(1000, 120_000),
+                mapDnsEnabled = o.optBoolean("mapDnsEnabled", true)
             )
         }
 
@@ -387,7 +512,18 @@ data class VpnConfig(
                 bypassIran = p.getBoolean("bypass_iran", false),
                 statsRefreshIntervalMs = p.getLong("stats_refresh_ms", 5_000L),
                 themeMode = enumOrDefault(p.getString("theme_mode", null), AppThemeMode.DARK),
-                languageTag = p.getString("language_tag", "system").orEmpty()
+                languageTag = p.getString("language_tag", "system").orEmpty(),
+                tunMtu = p.getInt("tun_mtu", DEFAULT_TUN_MTU).coerceIn(1280, 1500),
+                aetherMaxClients = p.getInt("aether_max_clients", 512),
+                aetherMasqueH2KeepaliveSecs = p.getInt("aether_masque_h2_keepalive_secs", 45),
+                aetherTcpKeepaliveSecs = p.getInt("aether_tcp_keepalive_secs", 60),
+                aetherHalfCloseSecs = p.getInt("aether_half_close_secs", 30),
+                goMemLimit = p.getString("go_mem_limit", "48MiB").orEmpty().ifBlank { "48MiB" },
+                goMaxProcs = p.getString("go_max_procs", "2").orEmpty().ifBlank { "2" },
+                goGc = p.getString("go_gc", "50").orEmpty().ifBlank { "50" },
+                taskStackSize = p.getInt("task_stack_size", 16384),
+                udpTimeoutMs = p.getInt("udp_timeout_ms", 5000),
+                mapDnsEnabled = p.getBoolean("map_dns_enabled", true)
             )
         }
 
@@ -428,6 +564,17 @@ data class VpnConfig(
                 .putLong("stats_refresh_ms", config.statsRefreshIntervalMs)
                 .putString("theme_mode", config.themeMode.name)
                 .putString("language_tag", config.languageTag)
+                .putInt("tun_mtu", config.tunMtu)
+                .putInt("aether_max_clients", config.aetherMaxClients)
+                .putInt("aether_masque_h2_keepalive_secs", config.aetherMasqueH2KeepaliveSecs)
+                .putInt("aether_tcp_keepalive_secs", config.aetherTcpKeepaliveSecs)
+                .putInt("aether_half_close_secs", config.aetherHalfCloseSecs)
+                .putString("go_mem_limit", config.goMemLimit)
+                .putString("go_max_procs", config.goMaxProcs)
+                .putString("go_gc", config.goGc)
+                .putInt("task_stack_size", config.taskStackSize)
+                .putInt("udp_timeout_ms", config.udpTimeoutMs)
+                .putBoolean("map_dns_enabled", config.mapDnsEnabled)
                 .apply()
         }
 

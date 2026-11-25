@@ -49,15 +49,13 @@ class HevTunnelManager(private val cacheDir: File) {
                 append("\n")
             }
             append("misc:\n")
-            // Low-memory tuning per upstream hev-socks5-tunnel mobile guidelines (16KB stack per coroutine)
-            append("  task-stack-size: 16384\n")
+            // Bounded coroutine stack & UDP session lifetime from Engine & Performance Lab
+            append("  task-stack-size: ").append(config.taskStackSize).append('\n')
             append("  tcp-buffer-size: 65536\n")
             append("  max-session-count: 512\n")
             append("  connect-timeout: 5000\n")
             append("  read-write-timeout: 60000\n")
-            // Shorten UDP session lifetime on Psiphon egress so dropped QUIC/UDP probes
-            // release session slots immediately and YouTube falls back cleanly to HTTPS/TCP.
-            append("  udp-read-write-timeout: ").append(if (isPsiphonEgress) 5000 else 30000).append('\n')
+            append("  udp-read-write-timeout: ").append(config.udpTimeoutMs).append('\n')
             append("  log-file: 'stderr'\n")
             append("  log-level: 'warn'\n")
         }

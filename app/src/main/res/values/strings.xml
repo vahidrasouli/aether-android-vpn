@@ -60,4 +60,9 @@
     <string name="title_upstream_proxy">UPSTREAM PROXY (LOCAL / CHAIN)</string>
     <string name="enable_upstream_proxy">Enable Upstream Proxy</string>
     <string name="action_test_proxy">Test Proxy</string>
+
+    <string name="title_engine_lab">Engine &amp; Performance Lab</string>
+    <string name="engine_lab_entry_subtitle">Tune Aether Core, Psiphon Go runtime, HEV packet buffers &amp; presets</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_reconnect">Reconnect</string>
 </resources>

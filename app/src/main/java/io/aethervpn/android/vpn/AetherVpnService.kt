@@ -397,6 +397,10 @@ class AetherVpnService : VpnService() {
             tunInterface = pfd
 
             // 3. Start single managed HEV SOCKS5 Tunnel bridging TUN fd -> egress SOCKS5 port (1819 or 1821)
+            DiagnosticsLog.record(
+                "Tunnel",
+                "HEV config: mtu=${config.tunMtu}, stack=${config.taskStackSize}, udpTimeout=${config.udpTimeoutMs}ms, mapdns=${config.useMapDns}"
+            )
             val hevResult = hevManager.start(config, pfd.fd)
             if (hevResult.isFailure) {
                 return@withLock Result.failure(

@@ -232,6 +232,49 @@ class AetherEngineManager(private val privateDataDir: File) {
         }
     }
 
+    internal fun resolveEnvironmentVariables(config: VpnConfig): Map<String, String?> {
+        val env = linkedMapOf<String, String?>()
+        env["AETHER_ROUTE_SNIFF"] = "1"
+        env["AETHER_MAX_CLIENTS"] = config.aetherMaxClients.toString()
+        env["AETHER_HALF_CLOSE_SECS"] = config.aetherHalfCloseSecs.toString()
+        env["AETHER_TCP_KEEPALIVE_SECS"] = config.aetherTcpKeepaliveSecs.toString()
+        env["AETHER_MASQUE_H2_KEEPALIVE_SECS"] = if (config.psiphonMode != PsiphonMode.PSIPHON_ONLY) {
+            config.aetherMasqueH2KeepaliveSecs.toString()
+        } else {
+            null
+        }
+
+        if (config.psiphonMode != PsiphonMode.OFF) {
+            env["GOMEMLIMIT"] = if (config.goMemLimit.equals("Auto", ignoreCase = true) || config.goMemLimit.isBlank()) {
+                null
+            } else {
+                config.goMemLimit
+            }
+            env["GOGC"] = config.goGc.ifBlank { "50" }
+            env["GOMAXPROCS"] = if (config.goMaxProcs.equals("Auto", ignoreCase = true) || config.goMaxProcs.isBlank()) {
+                null
+            } else {
+                config.goMaxProcs
+            }
+        } else {
+            env["GOMEMLIMIT"] = null
+            env["GOGC"] = null
+            env["GOMAXPROCS"] = null
+        }
+        return env
+    }
+
+    internal fun formatActiveLimitsSummary(config: VpnConfig): String {
+        val goSummary = if (config.psiphonMode != PsiphonMode.OFF) {
+            ", Go[mem=${config.goMemLimit}, procs=${config.goMaxProcs}, gc=${config.goGc}]"
+        } else {
+            ""
+        }
+        return "Limits: perf=${config.perfProfile.cliValue}, clients=${config.aetherMaxClients}, " +
+            "h2ka=${config.aetherMasqueH2KeepaliveSecs}s, tcpka=${config.aetherTcpKeepaliveSecs}s, " +
+            "halfClose=${config.aetherHalfCloseSecs}s$goSummary"
+    }
+
     suspend fun start(
         config: VpnConfig,
         protector: SocketProtectorCallback,
@@ -258,36 +301,21 @@ class AetherEngineManager(private val privateDataDir: File) {
         val proto = overrideProtocol ?: config.protocol
         val cliArgs = buildCoreArguments(config, overrideProtocol, psiphonBinaryPath)
 
-        // Mobile runtime tuning for Rust engine (allow cellular radio idle, low memory footprint)
+        // Mobile runtime tuning for Rust & Go engines from Engine & Performance Lab
+        val envVars = resolveEnvironmentVariables(config)
         runCatching {
-            android.system.Os.setenv("AETHER_ROUTE_SNIFF", "1", true)
-            android.system.Os.setenv("AETHER_MAX_CLIENTS", MAX_CLIENTS.toString(), true)
-            android.system.Os.setenv("AETHER_HALF_CLOSE_SECS", "30", true)
-            android.system.Os.setenv("AETHER_TCP_KEEPALIVE_SECS", "60", true)
-            if (config.psiphonMode != PsiphonMode.PSIPHON_ONLY) {
-                android.system.Os.setenv("AETHER_MASQUE_H2_KEEPALIVE_SECS", "45", true)
-            } else {
-                android.system.Os.unsetenv("AETHER_MASQUE_H2_KEEPALIVE_SECS")
-            }
-        }
-
-        // Apply mobile Go runtime caps when Psiphon is enabled to prevent Android LMK kills
-        if (config.psiphonMode != PsiphonMode.OFF) {
-            runCatching {
-                android.system.Os.setenv("GOMEMLIMIT", "64MiB", true)
-                android.system.Os.setenv("GOGC", "50", true)
-                android.system.Os.setenv("GOMAXPROCS", "2", true)
-            }
-        } else {
-            runCatching {
-                android.system.Os.unsetenv("GOMEMLIMIT")
-                android.system.Os.unsetenv("GOGC")
-                android.system.Os.unsetenv("GOMAXPROCS")
+            envVars.forEach { (key, value) ->
+                if (value != null) {
+                    android.system.Os.setenv(key, value, true)
+                } else {
+                    android.system.Os.unsetenv(key)
+                }
             }
         }
 
         val logStartCount = DiagnosticsLog.entries().size
         DiagnosticsLog.record("Aether", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
+        DiagnosticsLog.record("Aether", formatActiveLimitsSummary(config))
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
         val parsed = runCatching { JSONObject(rawReply) }.getOrNull()
