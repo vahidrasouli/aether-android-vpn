@@ -156,17 +156,23 @@ data class VpnConfig(
     val goGc: String = "50",
     val taskStackSize: Int = 16384,
     val udpTimeoutMs: Int = 5000,
-    val mapDnsEnabled: Boolean = true
+    val mapDnsEnabled: Boolean = true,
+    // Sing-box integration (Phase 1)
+    val singBoxEnabled: Boolean = false,
+    val singBoxOnly: Boolean = false
 ) {
+    val isSingBoxOnlyActive: Boolean
+        get() = singBoxEnabled && singBoxOnly
+
     val socksBindAddress: String
         get() = "$LOOPBACK_HOST:$socksPort"
 
     val effectiveSocksPort: Int
-        get() = when (psiphonMode) {
-            PsiphonMode.WARP_TO_PSIPHON,
-            PsiphonMode.PSIPHON_ONLY -> PSIPHON_SOCKS_PORT
-            PsiphonMode.OFF,
-            PsiphonMode.PSIPHON_TO_WARP -> DEFAULT_SOCKS_PORT
+        get() = when {
+            isSingBoxOnlyActive -> SING_BOX_SOCKS_PORT
+            psiphonMode == PsiphonMode.WARP_TO_PSIPHON ||
+                psiphonMode == PsiphonMode.PSIPHON_ONLY -> PSIPHON_SOCKS_PORT
+            else -> DEFAULT_SOCKS_PORT
         }
 
     val effectiveSocksBindAddress: String
@@ -364,6 +370,8 @@ data class VpnConfig(
             put("taskStackSize", taskStackSize)
             put("udpTimeoutMs", udpTimeoutMs)
             put("mapDnsEnabled", mapDnsEnabled)
+            put("singBoxEnabled", singBoxEnabled)
+            put("singBoxOnly", singBoxOnly)
         }.toString(2)
     }
 
@@ -384,6 +392,7 @@ data class VpnConfig(
 
         const val DEFAULT_SOCKS_PORT = 1819
         const val PSIPHON_SOCKS_PORT = 1821
+        const val SING_BOX_SOCKS_PORT = 1825
         const val DEFAULT_TUN_MTU = 1280
         const val TUN_IPV4_ADDRESS = "198.18.0.1"
         const val TUN_IPV4_PREFIX = 30
@@ -494,7 +503,9 @@ data class VpnConfig(
                 goGc = o.optString("goGc", "50").ifBlank { "50" },
                 taskStackSize = o.optInt("taskStackSize", 16384).coerceIn(8192, 65536),
                 udpTimeoutMs = o.optInt("udpTimeoutMs", 5000).coerceIn(1000, 120_000),
-                mapDnsEnabled = o.optBoolean("mapDnsEnabled", true)
+                mapDnsEnabled = o.optBoolean("mapDnsEnabled", true),
+                singBoxEnabled = o.optBoolean("singBoxEnabled", false),
+                singBoxOnly = o.optBoolean("singBoxOnly", false)
             )
         }
 
@@ -546,7 +557,9 @@ data class VpnConfig(
                 goGc = p.getString("go_gc", "50").orEmpty().ifBlank { "50" },
                 taskStackSize = p.getInt("task_stack_size", 16384),
                 udpTimeoutMs = p.getInt("udp_timeout_ms", 5000),
-                mapDnsEnabled = p.getBoolean("map_dns_enabled", true)
+                mapDnsEnabled = p.getBoolean("map_dns_enabled", true),
+                singBoxEnabled = p.getBoolean("sing_box_enabled", false),
+                singBoxOnly = p.getBoolean("sing_box_only", false)
             )
         }
 
@@ -599,6 +612,8 @@ data class VpnConfig(
                 .putInt("task_stack_size", config.taskStackSize)
                 .putInt("udp_timeout_ms", config.udpTimeoutMs)
                 .putBoolean("map_dns_enabled", config.mapDnsEnabled)
+                .putBoolean("sing_box_enabled", config.singBoxEnabled)
+                .putBoolean("sing_box_only", config.singBoxOnly)
                 .apply()
         }
 

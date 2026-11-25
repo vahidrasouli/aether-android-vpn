@@ -43,6 +43,7 @@ import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.ProxyTestResult
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.PsiphonProtocol
 import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.ScanMode
@@ -151,6 +152,9 @@ class MainActivity : AppCompatActivity() {
             if (cfg != cachedConfig) {
                 cachedConfig = cfg
                 loadConfigIntoUi(cfg)
+            } else {
+                refreshSingBoxSummary(cfg)
+                updateHomeBadges(cfg)
             }
         }
     }
@@ -498,6 +502,8 @@ class MainActivity : AppCompatActivity() {
             masqueSni = binding.etMasqueSni.text.toString().trim(),
             echEnabled = binding.switchEch.isChecked,
             tlsVerify = binding.switchTlsVerify.isChecked,
+            singBoxEnabled = binding.switchSingBoxEnabled.isChecked,
+            singBoxOnly = if (binding.switchSingBoxEnabled.isChecked) base.singBoxOnly else false,
             wgKeepaliveSecs = keepalive,
             zeroTrustTeam = binding.etZeroTrustTeam.text.toString().trim(),
             themeMode = theme,
@@ -555,6 +561,8 @@ class MainActivity : AppCompatActivity() {
         isBindingUi = true
         try {
             updateHomeBadges(cfg)
+            binding.switchSingBoxEnabled.isChecked = cfg.singBoxEnabled
+            refreshSingBoxSummary(cfg)
             binding.tvEngineLabSummary.text =
                 "${cfg.detectEngineLabPreset().label} • ${cfg.aetherMaxClients} clients • ${cfg.tunMtu} MTU"
 
@@ -628,14 +636,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshSingBoxSummary(cfg: VpnConfig) {
+        val activeProfile = runCatching { SingBoxProfileRepository.load(filesDir).activeProfile }.getOrNull()
+        val summary = when {
+            !cfg.singBoxEnabled -> "OFF • Zero overhead (tap to manage profiles)"
+            cfg.singBoxOnly && activeProfile != null ->
+                "ON • Sing-box Only • ${activeProfile.protocol}: ${activeProfile.name}"
+            cfg.singBoxOnly ->
+                "ON • Sing-box Only • No profile selected"
+            activeProfile != null ->
+                "ON • Ready (${activeProfile.protocol}: ${activeProfile.name})"
+            else ->
+                "ON • No profile added yet"
+        }
+        binding.tvSingBoxSummary.text = summary
+    }
+
     private fun updateHomeBadges(cfg: VpnConfig) {
+        val iranTag = if (cfg.bypassIran) " • IR Direct" else ""
+        if (cfg.isSingBoxOnlyActive) {
+            val activeProfile = runCatching { SingBoxProfileRepository.load(filesDir).activeProfile }.getOrNull()
+            val profLabel = activeProfile?.let { "${it.protocol}: ${it.name}" } ?: "No Profile"
+            binding.tvChainPill.text = "Sing-box Only$iranTag"
+            binding.tvActiveProfileBadge.text = "Engine: Sing-box ($profLabel) • 127.0.0.1:${VpnConfig.SING_BOX_SOCKS_PORT}"
+            return
+        }
         val psiphonSummary = when (cfg.psiphonMode) {
             PsiphonMode.OFF -> "WARP Only"
             PsiphonMode.WARP_TO_PSIPHON -> "WARP → Psiphon" + if (cfg.psiphonRegion.isNotBlank()) " (${cfg.psiphonRegion})" else ""
             PsiphonMode.PSIPHON_TO_WARP -> "Psiphon → WARP" + if (cfg.psiphonRegion.isNotBlank()) " (${cfg.psiphonRegion})" else ""
             PsiphonMode.PSIPHON_ONLY -> "Psiphon Only" + if (cfg.psiphonRegion.isNotBlank()) " (${cfg.psiphonRegion})" else ""
         }
-        val iranTag = if (cfg.bypassIran) " • IR Direct" else ""
         binding.tvChainPill.text = "$psiphonSummary$iranTag"
         binding.tvActiveProfileBadge.text =
             "Profile: ${cfg.profileLevel.label} • ${cfg.protocol.label} • Perf: ${cfg.perfProfile.label}"
@@ -644,6 +675,20 @@ class MainActivity : AppCompatActivity() {
     private fun bindActions() {
         binding.cardEngineLab.setOnClickListener {
             startActivity(Intent(this, EngineLabActivity::class.java))
+        }
+
+        binding.cardSingBox.setOnClickListener {
+            startActivity(Intent(this, SingBoxProfilesActivity::class.java))
+        }
+
+        binding.switchSingBoxEnabled.setOnCheckedChangeListener { _, _ ->
+            if (!isBindingUi) {
+                saveFromUiImmediate()
+                cachedConfig?.let {
+                    refreshSingBoxSummary(it)
+                    updateHomeBadges(it)
+                }
+            }
         }
 
         binding.btnToggleVpn.setOnClickListener {
@@ -724,10 +769,15 @@ class MainActivity : AppCompatActivity() {
         binding.btnRunProbe.setOnClickListener {
             val egressPort = cachedConfig?.effectiveSocksPort ?: VpnConfig.DEFAULT_SOCKS_PORT
             val psiphonMode = cachedConfig?.psiphonMode ?: PsiphonMode.OFF
+            val requireWarpOverride = if (cachedConfig?.isSingBoxOnlyActive == true) false else null
             binding.tvDiagnosticsSummary.text = "Running on-demand tunnel probe..."
             uiScope.launch {
                 val res = withContext(Dispatchers.IO) {
-                    TunnelValidator.verifyThroughSocks(egressPort, psiphonMode = psiphonMode)
+                    TunnelValidator.verifyThroughSocks(
+                        egressPort,
+                        psiphonMode = psiphonMode,
+                        requireWarpOverride = requireWarpOverride
+                    )
                 }
                 res.onSuccess { v ->
                     DiagnosticsLog.record("System", "Probe OK: IP=${v.publicIp}, WARP=${v.warpStatus}, RTT=${v.latencyMs}ms")

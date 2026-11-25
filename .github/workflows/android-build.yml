@@ -24,6 +24,7 @@ jobs:
       ANDROID_NDK_VERSION: "26.3.11579264"
       GRADLE_VERSION: "8.9"
       HEV_VERSION: "2.20.0"
+      SINGBOX_VERSION: "v1.12.25"
       BUILD_JOBS: "2"
 
     steps:
@@ -116,6 +117,19 @@ jobs:
       - name: Build ARM64 Psiphon tunnel core (Go layer)
         run: bash scripts/build-psiphon.sh
 
+      - name: Cache compiled ARM64 libsing-box.so
+        id: cache-singbox
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/jniLibs/arm64-v8a/libsing-box.so
+          key: sing-box-${{ env.SINGBOX_VERSION }}-go-1.26.3-arm64-v1
+
+      - name: Build ARM64 sing-box core (Go layer)
+        if: steps.cache-singbox.outputs.cache-hit != 'true'
+        env:
+          SINGBOX_VERSION: "${{ env.SINGBOX_VERSION }}"
+        run: bash scripts/build-singbox.sh
+
       - name: Fail-fast smoke test Psiphon TLS initialization
         run: |
           echo "[*] Running host-native ConsoleClient -version smoke test to verify psiphon-tls init..."
@@ -136,25 +150,32 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
           test -s app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so
+          test -s app/src/main/jniLibs/arm64-v8a/libsing-box.so
           file app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libc++_shared.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so | grep -E -i -q "aarch64"
+          file app/src/main/jniLibs/arm64-v8a/libsing-box.so | grep -E -i -q "aarch64"
           echo "ARM64 shared libraries verified successfully."
 
       - name: Verify 16KB ELF alignment and DT_NEEDED dependency resolution
         run: |
-          echo "=== 1. Checking 16KB PT_LOAD segment alignment for libaether_jni.so ==="
+          echo "=== 1. Checking 16KB PT_LOAD segment alignment for libaether_jni.so and libsing-box.so ==="
           readelf -l app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep LOAD
           if readelf -l app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep LOAD | grep -q "0x1000$"; then
             echo "ERROR: libaether_jni.so has 4KB (0x1000) PT_LOAD alignment instead of 16KB" >&2
+            exit 1
+          fi
+          readelf -l app/src/main/jniLibs/arm64-v8a/libsing-box.so | grep LOAD
+          if readelf -l app/src/main/jniLibs/arm64-v8a/libsing-box.so | grep LOAD | grep -q "0x1000$"; then
+            echo "ERROR: libsing-box.so has 4KB (0x1000) PT_LOAD alignment instead of 16KB" >&2
             exit 1
           fi
           echo "16KB ELF segment alignment verified."
 
           echo "=== 2. Verifying DT_NEEDED dependencies for all packaged shared libraries ==="
           ALLOWED_SYSTEM_LIBS="libc.so libm.so libdl.so liblog.so libz.so libandroid.so libjnigraphics.so libEGL.so libGLESv2.so libOpenSLES.so libmediandk.so"
-          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so libpsiphon-tunnel-core.so"
+          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so libpsiphon-tunnel-core.so libsing-box.so"
           for so in app/src/main/jniLibs/arm64-v8a/*.so; do
             echo "Checking dependencies of $(basename "$so")..."
             NEEDED=$(readelf -d "$so" 2>/dev/null | grep "(NEEDED)" | sed -E 's/.*\[(.*)\]/\1/' || true)
@@ -239,6 +260,7 @@ jobs:
           unzip -l "$APK" | grep "lib/arm64-v8a/libhev-socks5-tunnel.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libc++_shared.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libpsiphon-tunnel-core.so"
+          unzip -l "$APK" | grep "lib/arm64-v8a/libsing-box.so"
           if unzip -l "$APK" | grep -E "lib/(armeabi|x86|x86_64)/"; then
             echo "ERROR: Unwanted ABIs packaged into APK"
             exit 1
@@ -266,6 +288,17 @@ jobs:
                   print("ERROR: libpsiphon-tunnel-core.so inside APK missing FRONTED-MEEK-CDN-OSSH string!")
                   sys.exit(1)
               print(f"SUCCESS: libpsiphon-tunnel-core.so inside APK verified (size={info.file_size} bytes, ELFCLASS64, EM_AARCH64, FRONTED-MEEK-CDN-OSSH).")
+
+              sb_info = z.getinfo('lib/arm64-v8a/libsing-box.so')
+              if sb_info.file_size == 0:
+                  print("ERROR: libsing-box.so inside APK is empty!")
+                  sys.exit(1)
+              sb_raw = z.read('lib/arm64-v8a/libsing-box.so')
+              sb_hdr = sb_raw[:64]
+              if sb_hdr[:4] != b'\x7fELF' or sb_hdr[4] != 2 or int.from_bytes(sb_hdr[18:20], 'little') != 0xb7:
+                  print("ERROR: libsing-box.so invalid ELF header")
+                  sys.exit(1)
+              print(f"SUCCESS: libsing-box.so inside APK verified (size={sb_info.file_size} bytes, ELFCLASS64, EM_AARCH64).")
           EOF
 
           echo "APK ARM64-v8a packaging verified successfully."

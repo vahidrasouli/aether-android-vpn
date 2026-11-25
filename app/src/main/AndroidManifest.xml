@@ -45,6 +45,12 @@
             android:label="@string/title_engine_lab"
             android:parentActivityName=".ui.MainActivity" />
 
+        <activity
+            android:name=".ui.SingBoxProfilesActivity"
+            android:exported="false"
+            android:label="@string/title_singbox_profiles"
+            android:parentActivityName=".ui.MainActivity" />
+
         <service
             android:name=".vpn.AetherVpnService"
             android:exported="false"

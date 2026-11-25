@@ -17,6 +17,7 @@ target/
 native/**/target/
 native/hev-socks5-tunnel/
 native/psiphon-tunnel-core/
+native/sing-box/
 app/src/main/jniLibs/
 
 # Release and verification artifacts

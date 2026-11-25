@@ -66,4 +66,12 @@
     <string name="engine_lab_entry_subtitle">Tune Aether Core, Psiphon Go runtime, HEV packet buffers &amp; presets</string>
     <string name="action_reset">Reset</string>
     <string name="action_reconnect">Reconnect</string>
+
+    <string name="title_singbox_profiles">Sing-box Profiles</string>
+    <string name="singbox_entry_title">Sing-box Core</string>
+    <string name="singbox_entry_subtitle">Manage VLESS, VMess, Trojan, SS, HY2, WireGuard &amp; JSON profiles</string>
+    <string name="action_add_profile">Add Profile</string>
+    <string name="action_paste_clipboard">Paste from Clipboard</string>
+    <string name="action_test">Test</string>
+    <string name="action_delete">Delete</string>
 </resources>

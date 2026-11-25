@@ -35,7 +35,7 @@ class HevTunnelManager(private val cacheDir: File) {
             // Psiphon's SOCKS5 server rejects 0x05 ("not 0x01 or 0x03"), so when Psiphon is final
             // egress we must explicitly specify `udp: 'udp'` (RFC 1928 0x03) to prevent 0x05 spam.
             val isPsiphonEgress = config.psiphonMode == PsiphonMode.WARP_TO_PSIPHON || config.psiphonMode == PsiphonMode.PSIPHON_ONLY
-            if (config.enableUdp || isPsiphonEgress) {
+            if (config.enableUdp || isPsiphonEgress || config.isSingBoxOnlyActive) {
                 append("  udp: 'udp'\n")
             }
             append("\n")

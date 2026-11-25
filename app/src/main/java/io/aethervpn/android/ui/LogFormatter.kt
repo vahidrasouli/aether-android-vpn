@@ -52,6 +52,7 @@ object LogFormatter {
         val colorTimestamp = ContextCompat.getColor(context, R.color.log_timestamp)
         val colorTagAether = ContextCompat.getColor(context, R.color.log_tag_aether)
         val colorTagPsiphon = ContextCompat.getColor(context, R.color.log_tag_psiphon)
+        val colorTagSingBox = ContextCompat.getColor(context, R.color.log_tag_singbox)
         val colorTagTunnel = ContextCompat.getColor(context, R.color.log_tag_tunnel)
         val colorTagSystem = ContextCompat.getColor(context, R.color.log_tag_system)
         val colorTagOther = ContextCompat.getColor(context, R.color.log_tag_other)
@@ -82,6 +83,7 @@ object LogFormatter {
             val tagColor = when {
                 tag.equals("Aether", ignoreCase = true) -> colorTagAether
                 tag.equals("Psiphon", ignoreCase = true) -> colorTagPsiphon
+                tag.equals("SingBox", ignoreCase = true) -> colorTagSingBox
                 tag.equals("Tunnel", ignoreCase = true) || tag.equals("VPN", ignoreCase = true) -> colorTagTunnel
                 tag.equals("System", ignoreCase = true) || tag.equals("Net", ignoreCase = true) -> colorTagSystem
                 tag.contains("Native", ignoreCase = true) || tag.contains("JNI", ignoreCase = true) -> colorTagAether

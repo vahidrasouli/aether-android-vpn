@@ -23,6 +23,9 @@
     <color name="log_timestamp">#6E7681</color>
     <color name="log_tag_aether">#00D4AA</color>
     <color name="log_tag_psiphon">#BC8CFF</color>
+    <color name="log_tag_singbox">#F06292</color>
+    <color name="singbox_accent">#E91E63</color>
+    <color name="singbox_accent_light">#F06292</color>
     <color name="log_tag_tunnel">#3B82F6</color>
     <color name="log_tag_system">#8B949E</color>
     <color name="log_tag_native">#BC8CFF</color>

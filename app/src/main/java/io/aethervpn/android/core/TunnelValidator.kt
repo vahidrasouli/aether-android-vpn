@@ -37,14 +37,16 @@ object TunnelValidator {
         timeoutMs: Int = 12_000,
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
         maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
-        retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS
+        retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS,
+        requireWarpOverride: Boolean? = null
     ): Result<ValidationResult> {
         return verifyThroughSocksInternal(
             socksPort = socksPort,
             timeoutMs = timeoutMs,
             psiphonMode = psiphonMode,
             maxAttempts = maxAttempts,
-            retryDelayMs = retryDelayMs
+            retryDelayMs = retryDelayMs,
+            requireWarpOverride = requireWarpOverride
         )
     }
 
@@ -54,6 +56,7 @@ object TunnelValidator {
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
         maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
         retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS,
+        requireWarpOverride: Boolean? = null,
         tlsUpgrade: (Socket, Int) -> Socket = { raw, timeout ->
             val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
             (sslFactory.createSocket(raw, TRACE_HOST, TRACE_PORT, true) as SSLSocket).apply {
@@ -69,6 +72,7 @@ object TunnelValidator {
                 socksPort = socksPort,
                 timeoutMs = timeoutMs,
                 psiphonMode = psiphonMode,
+                requireWarpOverride = requireWarpOverride,
                 tlsUpgrade = tlsUpgrade
             )
             if (res.isSuccess) return res
@@ -93,6 +97,7 @@ object TunnelValidator {
         socksPort: Int,
         timeoutMs: Int,
         psiphonMode: PsiphonMode,
+        requireWarpOverride: Boolean? = null,
         tlsUpgrade: (Socket, Int) -> Socket
     ): Result<ValidationResult> {
         val startNs = System.nanoTime()
@@ -220,7 +225,7 @@ object TunnelValidator {
                 return Result.failure(IllegalStateException("Trace response missing public IP"))
             }
 
-            val requireWarp = psiphonMode == PsiphonMode.OFF || psiphonMode == PsiphonMode.PSIPHON_TO_WARP
+            val requireWarp = requireWarpOverride ?: (psiphonMode == PsiphonMode.OFF || psiphonMode == PsiphonMode.PSIPHON_TO_WARP)
             if (requireWarp) {
                 if (warp != "on" && warp != "plus") {
                     return Result.failure(
@@ -276,13 +281,15 @@ object TunnelValidator {
     /** Fast 1-shot health probe before tearing down an existing tunnel on network change. */
     fun isTunnelHealthy(
         socksPort: Int,
-        psiphonMode: PsiphonMode = PsiphonMode.OFF
+        psiphonMode: PsiphonMode = PsiphonMode.OFF,
+        requireWarpOverride: Boolean? = null
     ): Boolean {
         return verifyThroughSocks(
             socksPort = socksPort,
             timeoutMs = 4_000,
             psiphonMode = psiphonMode,
-            maxAttempts = 1
+            maxAttempts = 1,
+            requireWarpOverride = requireWarpOverride
         ).isSuccess
     }
 }
