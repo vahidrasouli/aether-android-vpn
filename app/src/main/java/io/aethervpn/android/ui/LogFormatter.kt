@@ -14,6 +14,40 @@ import io.aethervpn.android.R
 object LogFormatter {
     private val TAG_REGEX = Regex("""^(\d{2}:\d{2}:\d{2})\s+\[([^\]]+)\]\s*(.*)$""")
 
+    enum class LogSeverity {
+        NORMAL,
+        ERROR,
+        SUCCESS
+    }
+
+    fun classifySeverity(body: String): LogSeverity {
+        val isBenignPsiphonNotice =
+            (body.contains("psiphon.boltdb", ignoreCase = true) &&
+                body.contains("old path does not exist", ignoreCase = true)) ||
+                body.contains("socks5ReadCommand: EOF", ignoreCase = true) ||
+                body.contains("socks5ReadAuthMethods: EOF", ignoreCase = true) ||
+                (body.contains("SOCKS proxy accept error", ignoreCase = true) &&
+                    body.contains("EOF", ignoreCase = true))
+
+        if (isBenignPsiphonNotice) {
+            return LogSeverity.NORMAL
+        }
+
+        return when {
+            body.contains("Error", ignoreCase = true) ||
+                body.contains("fail", ignoreCase = true) ||
+                body.contains("Exception", ignoreCase = true) ||
+                body.contains("cannot locate symbol", ignoreCase = true) -> LogSeverity.ERROR
+
+            body.contains("Connected", ignoreCase = true) ||
+                body.contains("Ready", ignoreCase = true) ||
+                body.contains("verified", ignoreCase = true) ||
+                body.contains("success", ignoreCase = true) -> LogSeverity.SUCCESS
+
+            else -> LogSeverity.NORMAL
+        }
+    }
+
     fun formatLine(context: Context, line: String): CharSequence {
         val colorTimestamp = ContextCompat.getColor(context, R.color.log_timestamp)
         val colorTagAether = ContextCompat.getColor(context, R.color.log_tag_aether)
@@ -78,18 +112,10 @@ object LogFormatter {
             // 3. Message Body (color-coded by severity)
             val bodyStart = builder.length
             builder.append(body)
-            val bodyColor = when {
-                body.contains("Error", ignoreCase = true) ||
-                body.contains("fail", ignoreCase = true) ||
-                body.contains("Exception", ignoreCase = true) ||
-                body.contains("cannot locate symbol", ignoreCase = true) -> colorError
-
-                body.contains("Connected", ignoreCase = true) ||
-                body.contains("Ready", ignoreCase = true) ||
-                body.contains("verified", ignoreCase = true) ||
-                body.contains("success", ignoreCase = true) -> colorSuccess
-
-                else -> colorText
+            val bodyColor = when (classifySeverity(body)) {
+                LogSeverity.ERROR -> colorError
+                LogSeverity.SUCCESS -> colorSuccess
+                LogSeverity.NORMAL -> colorText
             }
             builder.setSpan(
                 ForegroundColorSpan(bodyColor),
@@ -100,7 +126,7 @@ object LogFormatter {
         } else {
             val start = builder.length
             builder.append(line)
-            val color = if (line.contains("Error", ignoreCase = true) || line.contains("fail", ignoreCase = true)) {
+            val color = if (classifySeverity(line) == LogSeverity.ERROR) {
                 colorError
             } else {
                 colorText

@@ -116,17 +116,18 @@ class VpnConfigTest {
         assertEquals(60_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MIM)))
         assertEquals(60_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.GOOL_CLASSIC)))
 
-        // MASQUE HTTP/3 requires 55s for QUIC scan
+        // MASQUE HTTP/3 and HTTP/2 both have a 45s Turbo scan budget -> 55s startup timeout
         assertEquals(55_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H3)))
+        assertEquals(55_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.TURBO)))
 
-        // Non-turbo scan (balanced) requires 55s
-        assertEquals(55_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.BALANCED)))
-
-        // Thorough scan requires 310s budget (aligns with upstream Aether 300s sweep)
+        // Balanced (120s budget), Verified (60s budget), Ironclad (180s budget), Thorough (300s budget) + 10s margin
+        assertEquals(130_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.BALANCED)))
+        assertEquals(70_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.VERIFIED)))
+        assertEquals(190_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.IRONCLAD)))
         assertEquals(310_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.THOROUGH)))
 
-        // Turbo MASQUE_H2 uses 35s budget
-        assertEquals(35_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.MASQUE_H2, scanMode = ScanMode.TURBO)))
+        // WireGuard Turbo uses 35s budget
+        assertEquals(35_000L, mgr.calculateStartupTimeoutMs(VpnConfig(protocol = AetherProtocol.WIREGUARD, scanMode = ScanMode.TURBO)))
     }
 
     @Test

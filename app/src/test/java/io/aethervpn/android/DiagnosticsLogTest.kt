@@ -120,4 +120,29 @@ class DiagnosticsLogTest {
         assertTrue(trimmed.last().contains("Event 100"))
         assertEquals(25, DiagnosticsLog.logsFlow.value.size)
     }
+
+    @Test
+    fun testLogFormatterExcludesBenignPsiphonMigrationAndProbeEofFromErrorStyling() {
+        val boltdbNotice = "psiphon.boltdb old path does not exist; skipping migration"
+        val probeEof = "SOCKS proxy accept error: socks5ReadCommand: EOF"
+        val realError = "Aether engine exited: handshake failed"
+        val readyMsg = "Connected via MASQUE | IP=1.2.3.4"
+
+        assertEquals(
+            io.aethervpn.android.ui.LogFormatter.LogSeverity.NORMAL,
+            io.aethervpn.android.ui.LogFormatter.classifySeverity(boltdbNotice)
+        )
+        assertEquals(
+            io.aethervpn.android.ui.LogFormatter.LogSeverity.NORMAL,
+            io.aethervpn.android.ui.LogFormatter.classifySeverity(probeEof)
+        )
+        assertEquals(
+            io.aethervpn.android.ui.LogFormatter.LogSeverity.ERROR,
+            io.aethervpn.android.ui.LogFormatter.classifySeverity(realError)
+        )
+        assertEquals(
+            io.aethervpn.android.ui.LogFormatter.LogSeverity.SUCCESS,
+            io.aethervpn.android.ui.LogFormatter.classifySeverity(readyMsg)
+        )
+    }
 }

@@ -134,4 +134,65 @@ class PsiphonAndMobileOptimizationTest {
         assertNotNull("TProxyStopService must exist", tproxyStop)
         assertTrue("TProxyStopService must be native", Modifier.isNative(tproxyStop!!.modifiers))
     }
+
+    @Test
+    fun testPsiphonEgressReadinessSkipsSocks5ProbeOn1821() {
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+
+        // WARP -> Psiphon and Psiphon Only must NOT probe 1821 (avoids socks5ReadCommand: EOF)
+        for (mode in listOf(PsiphonMode.WARP_TO_PSIPHON, PsiphonMode.PSIPHON_ONLY)) {
+            val cfg = VpnConfig(psiphonMode = mode)
+            var probeCalled = false
+            val notReady = mgr.isEndpointReady(
+                config = cfg,
+                logStartIndex = 1,
+                logEntriesProvider = { listOf("12:00:00 [Aether] Starting Aether") },
+                socksProbe = { probeCalled = true; true }
+            )
+            assertFalse("Should not be ready before psiphon ready log for $mode", notReady)
+            assertFalse("Must not probe port 1821 for $mode", probeCalled)
+
+            val ready = mgr.isEndpointReady(
+                config = cfg,
+                logStartIndex = 1,
+                logEntriesProvider = {
+                    listOf(
+                        "12:00:00 [Aether] Starting Aether",
+                        "12:00:05 [Aether] [+] psiphon is ready; 127.0.0.1:1821 leaves through psiphon"
+                    )
+                },
+                socksProbe = { probeCalled = true; true }
+            )
+            assertTrue("Should be ready once psiphon ready log appears for $mode", ready)
+            assertFalse("Must not probe port 1821 even when ready for $mode", probeCalled)
+        }
+
+        // OFF and Psiphon -> WARP use Aether's Rust SOCKS5 listener on 1819
+        for (mode in listOf(PsiphonMode.OFF, PsiphonMode.PSIPHON_TO_WARP)) {
+            val cfg = VpnConfig(psiphonMode = mode)
+            var probedPort = -1
+            val ready = mgr.isEndpointReady(
+                config = cfg,
+                logStartIndex = 0,
+                logEntriesProvider = { emptyList() },
+                socksProbe = { port -> probedPort = port; true }
+            )
+            assertTrue(ready)
+            assertEquals(1819, probedPort)
+        }
+    }
+
+    @Test
+    fun testUpstreamProxyPassedWithMasqueH2() {
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+        val cfg = VpnConfig(
+            protocol = io.aethervpn.android.core.AetherProtocol.MASQUE_H2,
+            upstreamProxy = "socks5://127.0.0.1:10808"
+        )
+        val args = mgr.buildCoreArguments(cfg)
+        val idx = args.indexOf("--upstream")
+        assertTrue(idx >= 0)
+        assertEquals("socks5://127.0.0.1:10808", args[idx + 1])
+        assertTrue(args.contains("--h2"))
+    }
 }

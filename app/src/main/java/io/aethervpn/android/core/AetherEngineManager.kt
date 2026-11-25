@@ -168,13 +168,21 @@ class AetherEngineManager(private val privateDataDir: File) {
         return when {
             // Thorough scan sweeps entire subnets (upstream Aether 300s budget + 10s margin)
             config.scanMode == ScanMode.THOROUGH -> 310_000L
+            // Ironclad scan has 180s budget + 10s margin
+            config.scanMode == ScanMode.IRONCLAD -> 190_000L
+            // Balanced scan has 120s budget + 10s margin
+            config.scanMode == ScanMode.BALANCED -> 130_000L
+            // Verified scan has 60s budget + 10s margin
+            config.scanMode == ScanMode.VERIFIED -> 70_000L
 
             proto == AetherProtocol.GOOL ||
             proto == AetherProtocol.GOOL_CLASSIC ||
             proto == AetherProtocol.MIM -> 60_000L
 
-            proto == AetherProtocol.MASQUE_H3 -> 55_000L
-            config.scanMode != ScanMode.TURBO -> 55_000L
+            // MASQUE H2 & H3 Turbo scans both have a 45s budget; give 55s (45s + 10s margin)
+            proto == AetherProtocol.MASQUE_H3 ||
+            proto == AetherProtocol.MASQUE_H2 -> 55_000L
+
             else -> 35_000L
         }
     }
@@ -229,6 +237,7 @@ class AetherEngineManager(private val privateDataDir: File) {
             }
         }
 
+        val logStartCount = DiagnosticsLog.entries().size
         DiagnosticsLog.record("Aether", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
@@ -254,7 +263,7 @@ class AetherEngineManager(private val privateDataDir: File) {
                 stop()
                 return Result.failure(IllegalStateException("Aether engine exited: $exitError"))
             }
-            if (isSocks5Ready(config.effectiveSocksPort)) {
+            if (isEndpointReady(config, logStartCount)) {
                 return Result.success(jobId)
             }
             delay(backoffMs)
@@ -304,6 +313,25 @@ class AetherEngineManager(private val privateDataDir: File) {
                 ?: "stopped"
         }
         return null
+    }
+
+    /**
+     * Checks readiness without spamming raw TCP/SOCKS5 connect-and-close probes against
+     * Psiphon's SOCKS5 port (1821), which triggers benign `socks5ReadCommand: EOF` noise.
+     */
+    internal fun isEndpointReady(
+        config: VpnConfig,
+        logStartIndex: Int,
+        logEntriesProvider: () -> List<String> = { DiagnosticsLog.entries() },
+        socksProbe: (Int) -> Boolean = ::isSocks5Ready
+    ): Boolean {
+        val usesPsiphonEgress = config.psiphonMode == PsiphonMode.WARP_TO_PSIPHON ||
+            config.psiphonMode == PsiphonMode.PSIPHON_ONLY
+        if (usesPsiphonEgress) {
+            val entries = logEntriesProvider()
+            return entries.drop(logStartIndex).any { it.contains("psiphon is ready", ignoreCase = true) }
+        }
+        return socksProbe(config.effectiveSocksPort)
     }
 
     private fun isSocks5Ready(port: Int): Boolean {

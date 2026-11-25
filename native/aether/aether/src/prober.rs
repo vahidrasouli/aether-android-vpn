@@ -601,7 +601,18 @@ pub async fn hunt_best_gateway_avoiding(
 ) -> Result<ProbeResult> {
     let mut st = mode.strategy();
     st.concurrency = crate::sysprofile::cap_concurrency(st.concurrency);
-    let timeout = st.per_probe_timeout;
+    let mut timeout = st.per_probe_timeout;
+    let h2_mode = crate::masque_h2::enabled();
+    let upstream_proxy = crate::upstream::configured();
+    if h2_mode {
+        if let Some(proxy) = &upstream_proxy {
+            timeout = timeout.max(Duration::from_secs(10));
+            log::info!(
+                "[*] MASQUE HTTP/2 probes dialing through upstream proxy {}",
+                proxy.endpoint()
+            );
+        }
+    }
     let mut effective_ip = probe.ip;
     if probe.ip.want_v6() && !host_has_ipv6().await {
         if probe.ip.want_v4() {
@@ -635,11 +646,21 @@ pub async fn hunt_best_gateway_avoiding(
     );
 
     let ironclad = mode == ScanMode::Ironclad;
+    let logged_h2_err = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let stream = futures::stream::iter(
         candidates
             .into_iter()
-            .map(|(ip, port)| verify_one(probe, ip, port, timeout, ironclad)),
+            .map(|(ip, port)| {
+                verify_one(
+                    probe,
+                    ip,
+                    port,
+                    timeout,
+                    ironclad,
+                    logged_h2_err.clone(),
+                )
+            }),
     )
     .buffer_unordered(st.concurrency);
     tokio::pin!(stream);
@@ -733,6 +754,7 @@ async fn verify_one(
     port: u16,
     timeout: Duration,
     ironclad: bool,
+    logged_h2_err: Arc<std::sync::atomic::AtomicBool>,
 ) -> Option<ProbeResult> {
     if ironclad {
         let params = crate::tunnelping::MasquePingParams {
@@ -780,7 +802,11 @@ async fn verify_one(
         return match crate::masque_h2::verify_h2(&cfg, timeout).await {
             Ok(rtt) => Some(ProbeResult { ip, port, rtt }),
             Err(e) => {
-                log::trace!("h2 probe {ip}:{port} -> {e}");
+                if !logged_h2_err.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    log::warn!("[-] MASQUE HTTP/2 probe {ip}:{port} failed: {e}");
+                } else {
+                    log::trace!("h2 probe {ip}:{port} -> {e}");
+                }
                 None
             }
         };

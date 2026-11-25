@@ -202,6 +202,16 @@ pub async fn dial(peer: std::net::SocketAddr) -> Result<TcpStream> {
     }
 }
 
+fn upstream_note_for(peer: std::net::SocketAddr) -> Option<String> {
+    match crate::upstream::configured() {
+        Some(proxy) if !crate::routing::is_private(peer.ip()) => Some(format!(
+            "[+] {peer} is reached through the upstream proxy at {}",
+            proxy.endpoint()
+        )),
+        _ => None,
+    }
+}
+
 /// Opens the TLS connection the HTTP/2 carrier runs on: dials the peer and shakes
 /// hands, offering the ECHConfigList of `cfg` when it has one. A server that turns that
 /// config down hands back the one it holds now; the handshake is made once more with
@@ -385,6 +395,9 @@ pub async fn run(
     let mut validate_successes: u32 = 0;
 
     log_or_debug(quiet, format!("[h2] connecting tcp to {}", cfg.peer));
+    if let Some(note) = upstream_note_for(cfg.peer) {
+        log_or_debug(quiet, note);
+    }
 
     let frag_cfg = FragmentConfig::from_env();
     if frag_cfg.enabled {

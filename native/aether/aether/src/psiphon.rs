@@ -47,6 +47,7 @@ pub enum PsiphonError {
 const DEFAULT_BIND: &str = "127.0.0.1:1821";
 const READY_TIMEOUT_SECS: u64 = 180;
 const BINARY_NAMES: &[&str] = &["psiphon-tunnel-core", "psiphon"];
+const DEFAULT_ANDROID_DNS_SERVERS: &[&str] = &["1.1.1.1", "8.8.8.8", "9.9.9.9"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -699,6 +700,8 @@ fn build_config(
         map.insert("UpstreamProxyURL".into(), serde_json::Value::from(url));
     }
 
+    apply_direct_dns_config(&mut map, cfg!(target_os = "android"), through_proxy);
+
     log::info!(
         "[*] psiphon shape: {chosen:?}{}",
         proxy_note(through_proxy, &map)
@@ -706,6 +709,51 @@ fn build_config(
 
     serde_json::to_string(&serde_json::Value::Object(map))
         .map_err(|e| PsiphonError::ConfigNotWritten(e).into())
+}
+
+fn configured_dns_servers() -> Vec<String> {
+    if let Ok(raw) = crate::settings::var("AETHER_PSIPHON_DNS") {
+        let custom = cdn_candidates(&raw);
+        if !custom.is_empty() {
+            return custom;
+        }
+    }
+    DEFAULT_ANDROID_DNS_SERVERS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
+/// Injects explicit DNS servers into Psiphon's config when dialing directly on Android,
+/// because Android has no `/etc/resolv.conf` and Go's pure resolver (`CGO_ENABLED=0`)
+/// otherwise falls back to `127.0.0.1:53` and fails every lookup with connection refused.
+fn apply_direct_dns_config(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    is_android: bool,
+    through_proxy: bool,
+) {
+    if !is_android || through_proxy {
+        return;
+    }
+
+    let servers = configured_dns_servers();
+    let has_key = |target: &str| map.keys().any(|k| k.eq_ignore_ascii_case(target));
+
+    if !has_key("DNSResolverAlternateServers") {
+        map.insert("DNSResolverAlternateServers".into(), serde_json::json!(servers));
+    }
+    if !has_key("DNSResolverPreferredAlternateServers") {
+        map.insert(
+            "DNSResolverPreferredAlternateServers".into(),
+            serde_json::json!(servers),
+        );
+    }
+    if !has_key("DNSResolverPreferAlternateServerProbability") {
+        map.insert(
+            "DNSResolverPreferAlternateServerProbability".into(),
+            serde_json::json!(1.0),
+        );
+    }
 }
 
 fn proxy_note(
@@ -1685,6 +1733,55 @@ mod tests {
         assert_eq!(listen_address().port(), 1821);
         assert!(http_listen_address().is_none());
 
+        clear();
+    }
+
+    #[test]
+    fn android_direct_psiphon_injects_explicit_dns_servers() {
+        let _held = hold();
+        clear();
+
+        let mut map = serde_json::Map::new();
+        apply_direct_dns_config(&mut map, true, false);
+        assert_eq!(
+            map["DNSResolverAlternateServers"],
+            serde_json::json!(["1.1.1.1", "8.8.8.8", "9.9.9.9"])
+        );
+        assert_eq!(
+            map["DNSResolverPreferredAlternateServers"],
+            serde_json::json!(["1.1.1.1", "8.8.8.8", "9.9.9.9"])
+        );
+        assert_eq!(map["DNSResolverPreferAlternateServerProbability"], 1.0);
+
+        // When carried through an upstream proxy (e.g. WARP -> Psiphon), DNS injection is skipped.
+        let mut proxied = serde_json::Map::new();
+        apply_direct_dns_config(&mut proxied, true, true);
+        assert!(!proxied.contains_key("DNSResolverAlternateServers"));
+        assert!(!proxied.contains_key("DNSResolverPreferredAlternateServers"));
+
+        // Non-Android hosts leave DNS config untouched.
+        let mut desktop = serde_json::Map::new();
+        apply_direct_dns_config(&mut desktop, false, false);
+        assert!(!desktop.contains_key("DNSResolverAlternateServers"));
+
+        // Custom AETHER_PSIPHON_DNS overrides defaults, while explicit config keys take precedence.
+        crate::settings::set("AETHER_PSIPHON_DNS", "9.9.9.9, 1.0.0.1");
+        let mut custom = serde_json::Map::new();
+        custom.insert(
+            "DNSResolverAlternateServers".into(),
+            serde_json::json!(["4.2.2.4"]),
+        );
+        apply_direct_dns_config(&mut custom, true, false);
+        assert_eq!(
+            custom["DNSResolverAlternateServers"],
+            serde_json::json!(["4.2.2.4"])
+        );
+        assert_eq!(
+            custom["DNSResolverPreferredAlternateServers"],
+            serde_json::json!(["9.9.9.9", "1.0.0.1"])
+        );
+
+        crate::settings::remove("AETHER_PSIPHON_DNS");
         clear();
     }
 }
