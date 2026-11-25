@@ -13,6 +13,8 @@ import android.os.ParcelFileDescriptor
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherEngineManager
 import io.aethervpn.android.core.AetherProtocol
+import io.aethervpn.android.core.ChainMode
+import io.aethervpn.android.core.ChainOrchestrator
 import io.aethervpn.android.core.CidrRoutePlanner
 import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.HevTunnelManager
@@ -71,7 +73,11 @@ class AetherVpnService : VpnService() {
             userRequestedStop: Boolean
         ): Boolean {
             if (userRequestedStop) return false
-            if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) return false
+            if (config.singBoxEnabled) {
+                if (!config.chainMode.requiresWarp) return false
+            } else if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) {
+                return false
+            }
             if (primaryProtocol == AetherProtocol.MASQUE_H2) return false
             return config.upstreamProxy.isNotBlank() ||
                 (primaryProtocol == AetherProtocol.MASQUE_H3 && config.autoFallbackToH2)
@@ -147,6 +153,9 @@ class AetherVpnService : VpnService() {
 
     @Volatile
     private var userRequestedStop: Boolean = false
+
+    @Volatile
+    private var lastSingBoxStartedFirst: Boolean = true
 
     override fun onCreate() {
         super.onCreate()
@@ -260,8 +269,7 @@ class AetherVpnService : VpnService() {
         unregisterNetworkCallback()
         hevManager.stop()
         closeTun()
-        engineManager.stop()
-        singBoxManager.stop()
+        stopEnginesInReverseOrder()
         isCoreRunning = false
         isTunRunning = false
         runCatching { setUnderlyingNetworks(null) }
@@ -282,17 +290,28 @@ class AetherVpnService : VpnService() {
 
     private suspend fun connectPipeline(isReconnect: Boolean) {
         val config = VpnConfig.load(this)
-        if (config.isSingBoxOnlyActive) {
-            val sbAttempt = attemptSingBoxOnly(config, isReconnect)
+        val primaryProtocol = config.protocol
+
+        if (config.singBoxEnabled) {
+            val sbAttempt = attemptSingBoxChain(config, primaryProtocol, isReconnect)
             if (sbAttempt.isSuccess) return
+            if (shouldFallbackToMasqueH2(config, primaryProtocol, userRequestedStop)) {
+                val firstErr = formatException(sbAttempt.exceptionOrNull())
+                DiagnosticsLog.record("Aether", "Chain ${config.chainMode.label} failed with ${primaryProtocol.label} ($firstErr); trying 1-shot MASQUE HTTP/2 fallback")
+                val fallbackAttempt = attemptSingBoxChain(config, AetherProtocol.MASQUE_H2, isReconnect)
+                if (fallbackAttempt.isSuccess) return
+                failClosed(
+                    formatException(fallbackAttempt.exceptionOrNull()),
+                    "${config.chainMode.label} (${AetherProtocol.MASQUE_H2.label})"
+                )
+                return
+            }
             failClosed(
                 formatException(sbAttempt.exceptionOrNull()),
-                "Sing-box Only"
+                config.chainMode.label
             )
             return
         }
-
-        val primaryProtocol = config.protocol
 
         val firstAttempt = attemptSingleProtocol(config, primaryProtocol, isReconnect)
         if (firstAttempt.isSuccess) return
@@ -324,8 +343,9 @@ class AetherVpnService : VpnService() {
         )
     }
 
-    private suspend fun attemptSingBoxOnly(
+    private suspend fun attemptSingBoxChain(
         config: VpnConfig,
+        protocol: AetherProtocol,
         isReconnect: Boolean
     ): Result<Unit> = lifecycleMutex.withLock {
         try {
@@ -337,7 +357,7 @@ class AetherVpnService : VpnService() {
                 VpnStateStore.update(
                     TunnelSnapshot(
                         phase = TunnelPhase.WAITING_FOR_INTERNET,
-                        protocolLabel = "Sing-box Only"
+                        protocolLabel = config.chainMode.label
                     )
                 )
                 updateNotification(getString(R.string.app_name), "Waiting for Internet")
@@ -348,39 +368,101 @@ class AetherVpnService : VpnService() {
                 ?: return@withLock Result.failure(
                     IllegalStateException("No Sing-box profile selected. Add or select a profile in Sing-box Profiles.")
                 )
-            val protoLabel = "Sing-box (${activeProfile.protocol})"
+            val plan = ChainOrchestrator.plan(config, activeProfile.protocol)
+
+            val psiphonBin = if (plan.chainMode.requiresPsiphon) {
+                val bin = AetherEngineManager.findPsiphonBinary(this@AetherVpnService)
+                if (bin == null) {
+                    val msg = "Psiphon binary (libpsiphon-tunnel-core.so) not found in nativeLibraryDir. External ARM64 binary required for Psiphon chaining."
+                    DiagnosticsLog.record("Psiphon", msg)
+                    VpnStateStore.reportError(msg, plan.protocolLabel)
+                    return@withLock Result.failure(IllegalStateException(msg))
+                }
+                bin.absolutePath
+            } else null
 
             VpnStateStore.update(
                 TunnelSnapshot(
                     phase = if (isReconnect) TunnelPhase.RECONNECTING else TunnelPhase.STARTING_CORE,
-                    protocolLabel = protoLabel,
+                    protocolLabel = plan.protocolLabel,
                     coreActive = false,
                     tunActive = isTunRunning
                 )
             )
             updateNotification(
                 getString(R.string.app_name),
-                if (isReconnect) getString(R.string.status_reconnecting) else "Starting Sing-box Core"
+                if (isReconnect) getString(R.string.status_reconnecting) else "Starting ${plan.chainMode.label}"
             )
 
             hevManager.stop()
             closeTun()
-            engineManager.stop()
-            singBoxManager.stop()
+            stopEnginesInReverseOrder()
             isCoreRunning = false
             isTunRunning = false
 
-            // Start ONLY libsing-box.so (127.0.0.1:1825), skipping Aether/WARP and Psiphon completely
-            val sbResult = singBoxManager.start(
-                context = this@AetherVpnService,
-                config = config,
-                rawUriOrJson = activeProfile.rawUriOrJson,
-                listenPort = VpnConfig.SING_BOX_SOCKS_PORT
-            )
-            if (sbResult.isFailure) {
-                return@withLock Result.failure(
-                    sbResult.exceptionOrNull() ?: IllegalStateException("Sing-box core failed")
+            lastSingBoxStartedFirst = plan.startSingBoxFirst
+            val protector = SocketProtectorCallback { fd -> protect(fd) }
+
+            if (plan.startSingBoxFirst) {
+                // Upstream Sing-box starts first on 127.0.0.1:1825
+                val sbResult = singBoxManager.start(
+                    context = this@AetherVpnService,
+                    config = config,
+                    rawUriOrJson = activeProfile.rawUriOrJson,
+                    listenPort = VpnConfig.SING_BOX_SOCKS_PORT,
+                    upstreamSocksPort = null
                 )
+                if (sbResult.isFailure) {
+                    return@withLock Result.failure(
+                        sbResult.exceptionOrNull() ?: IllegalStateException("Sing-box core failed")
+                    )
+                }
+
+                // Downstream Aether/WARP/Psiphon starts after Sing-box is ready
+                if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
+                    val engineResult = engineManager.start(
+                        config = plan.aetherEffectiveConfig,
+                        protector = protector,
+                        overrideProtocol = protocol,
+                        psiphonBinaryPath = psiphonBin
+                    )
+                    if (engineResult.isFailure) {
+                        singBoxManager.stop()
+                        return@withLock Result.failure(
+                            engineResult.exceptionOrNull() ?: IllegalStateException("Aether engine failed")
+                        )
+                    }
+                }
+            } else {
+                // Upstream Aether/WARP or Psiphon starts first (1819 or 1821)
+                if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
+                    val engineResult = engineManager.start(
+                        config = plan.aetherEffectiveConfig,
+                        protector = protector,
+                        overrideProtocol = protocol,
+                        psiphonBinaryPath = psiphonBin
+                    )
+                    if (engineResult.isFailure) {
+                        return@withLock Result.failure(
+                            engineResult.exceptionOrNull() ?: IllegalStateException("Aether engine failed")
+                        )
+                    }
+                }
+
+                // Downstream Sing-box starts after upstream SOCKS5 is ready, with detour -> upstream-socks
+                val sbResult = singBoxManager.start(
+                    context = this@AetherVpnService,
+                    config = config,
+                    rawUriOrJson = activeProfile.rawUriOrJson,
+                    listenPort = VpnConfig.SING_BOX_SOCKS_PORT,
+                    upstreamSocksPort = plan.singBoxUpstreamSocksPort
+                )
+                if (sbResult.isFailure) {
+                    engineManager.stop()
+                    return@withLock Result.failure(
+                        sbResult.exceptionOrNull() ?: IllegalStateException("Sing-box core failed")
+                    )
+                }
             }
             isCoreRunning = true
 
@@ -404,7 +486,7 @@ class AetherVpnService : VpnService() {
 
             DiagnosticsLog.record(
                 "Tunnel",
-                "HEV config (Sing-box Only): mtu=${config.tunMtu}, socks=127.0.0.1:${config.effectiveSocksPort}, mapdns=${config.useMapDns}"
+                "HEV config (${plan.chainMode.label}): mtu=${config.tunMtu}, socks=127.0.0.1:${plan.tunTargetPort}, mapdns=${config.useMapDns}"
             )
             val hevResult = hevManager.start(config, pfd.fd)
             if (hevResult.isFailure) {
@@ -423,30 +505,34 @@ class AetherVpnService : VpnService() {
 
             updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
             val validation = TunnelValidator.verifyThroughSocks(
-                socksPort = VpnConfig.SING_BOX_SOCKS_PORT,
-                psiphonMode = config.psiphonMode,
-                requireWarpOverride = false
+                socksPort = plan.tunTargetPort,
+                psiphonMode = plan.aetherEffectiveConfig?.psiphonMode ?: PsiphonMode.OFF,
+                chainMode = plan.chainMode
             )
             if (validation.isFailure) {
                 return@withLock Result.failure(
-                    validation.exceptionOrNull() ?: IllegalStateException("Sing-box end-to-end validation failed")
+                    validation.exceptionOrNull() ?: IllegalStateException("Chain end-to-end validation failed")
                 )
             }
 
             val verified = validation.getOrThrow()
-            registerNetworkCallback(VpnConfig.SING_BOX_SOCKS_PORT, config.psiphonMode, requireWarpOverride = false)
+            registerNetworkCallback(
+                socksPort = plan.tunTargetPort,
+                psiphonMode = plan.aetherEffectiveConfig?.psiphonMode ?: PsiphonMode.OFF,
+                chainMode = plan.chainMode
+            )
             DiagnosticsLog.record(
                 "SingBox",
-                "Connected (${activeProfile.name}) | IP=${verified.publicIp} | Colo=${verified.colo} | ${verified.latencyMs}ms"
+                "Connected (${plan.chainMode.label} • ${activeProfile.name}) | IP=${verified.publicIp} | WARP=${verified.warpStatus} | Colo=${verified.colo} | ${verified.latencyMs}ms"
             )
 
             VpnStateStore.update(
                 TunnelSnapshot(
                     phase = TunnelPhase.VPN_CONNECTED,
-                    protocolLabel = protoLabel,
+                    protocolLabel = plan.protocolLabel,
                     gatewayLabel = activeProfile.name,
                     verifiedPublicIp = verified.publicIp,
-                    warpStatus = "sing-box",
+                    warpStatus = if (plan.requireWarpValidation) verified.warpStatus else "sing-box",
                     colo = verified.colo,
                     latencyMs = verified.latencyMs,
                     connectedSinceMs = System.currentTimeMillis(),
@@ -456,7 +542,7 @@ class AetherVpnService : VpnService() {
             )
             updateNotification(
                 getString(R.string.status_connected),
-                "${verified.publicIp} • ${activeProfile.name}"
+                "${verified.publicIp} • ${plan.chainMode.label}"
             )
             Result.success(Unit)
         } catch (ce: CancellationException) {
@@ -635,30 +721,78 @@ class AetherVpnService : VpnService() {
                     coreActive = false
                 )
             )
-            engineManager.stop()
-            singBoxManager.stop()
-            if (config.isSingBoxOnlyActive) {
+            stopEnginesInReverseOrder()
+            if (config.singBoxEnabled) {
                 val activeProfile = SingBoxProfileRepository.load(filesDir).activeProfile
                 if (activeProfile == null) {
                     val msg = "No Sing-box profile selected"
                     DiagnosticsLog.record("SingBox", msg)
-                    VpnStateStore.reportError(msg, "Sing-box Only")
+                    VpnStateStore.reportError(msg, config.chainMode.label)
                     if (!isTunRunning) {
                         stopForegroundCompat()
                         stopSelf()
                     }
                     return@withLock
                 }
-                val sbResult = singBoxManager.start(
-                    context = this@AetherVpnService,
-                    config = config,
-                    rawUriOrJson = activeProfile.rawUriOrJson,
-                    listenPort = VpnConfig.SING_BOX_SOCKS_PORT
-                )
-                if (sbResult.isFailure) {
-                    val err = formatException(sbResult.exceptionOrNull())
+                val plan = ChainOrchestrator.plan(config, activeProfile.protocol)
+                val psiphonBin = if (plan.chainMode.requiresPsiphon) {
+                    val bin = AetherEngineManager.findPsiphonBinary(this@AetherVpnService)
+                    if (bin == null) {
+                        val msg = "Psiphon binary (libpsiphon-tunnel-core.so) not found in nativeLibraryDir."
+                        DiagnosticsLog.record("Psiphon", msg)
+                        VpnStateStore.reportError(msg, plan.protocolLabel)
+                        if (!isTunRunning) {
+                            stopForegroundCompat()
+                            stopSelf()
+                        }
+                        return@withLock
+                    }
+                    bin.absolutePath
+                } else null
+                lastSingBoxStartedFirst = plan.startSingBoxFirst
+                val protector = SocketProtectorCallback { fd -> protect(fd) }
+                val chainError: Throwable? = if (plan.startSingBoxFirst) {
+                    val sbRes = singBoxManager.start(
+                        context = this@AetherVpnService,
+                        config = config,
+                        rawUriOrJson = activeProfile.rawUriOrJson,
+                        listenPort = VpnConfig.SING_BOX_SOCKS_PORT,
+                        upstreamSocksPort = null
+                    )
+                    if (sbRes.isFailure) {
+                        sbRes.exceptionOrNull()
+                    } else if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
+                        engineManager.start(
+                            config = plan.aetherEffectiveConfig,
+                            protector = protector,
+                            psiphonBinaryPath = psiphonBin
+                        ).exceptionOrNull()
+                    } else null
+                } else {
+                    val engRes = if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
+                        engineManager.start(
+                            config = plan.aetherEffectiveConfig,
+                            protector = protector,
+                            psiphonBinaryPath = psiphonBin
+                        )
+                    } else Result.success(0L)
+                    if (engRes.isFailure) {
+                        engRes.exceptionOrNull()
+                    } else {
+                        singBoxManager.start(
+                            context = this@AetherVpnService,
+                            config = config,
+                            rawUriOrJson = activeProfile.rawUriOrJson,
+                            listenPort = VpnConfig.SING_BOX_SOCKS_PORT,
+                            upstreamSocksPort = plan.singBoxUpstreamSocksPort
+                        ).exceptionOrNull()
+                    }
+                }
+                if (chainError != null) {
+                    stopEnginesInReverseOrder()
+                    val err = formatException(chainError)
                     DiagnosticsLog.record("SingBox", "Standalone Core failed: $err")
-                    VpnStateStore.reportError(err, "Sing-box Only")
+                    VpnStateStore.reportError(err, plan.protocolLabel)
                     if (!isTunRunning) {
                         stopForegroundCompat()
                         stopSelf()
@@ -669,11 +803,11 @@ class AetherVpnService : VpnService() {
                 VpnStateStore.update(
                     VpnStateStore.state.value.copy(
                         phase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.SOCKS5_READY,
-                        protocolLabel = "Sing-box (${activeProfile.protocol})",
+                        protocolLabel = plan.protocolLabel,
                         coreActive = true
                     )
                 )
-                updateNotification("Sing-box Core Ready", "127.0.0.1:${VpnConfig.SING_BOX_SOCKS_PORT}")
+                updateNotification("${plan.chainMode.label} Ready", "127.0.0.1:${plan.tunTargetPort}")
                 return@withLock
             }
             val psiphonBin = if (config.psiphonMode != PsiphonMode.OFF) {
@@ -730,8 +864,7 @@ class AetherVpnService : VpnService() {
     }
 
     private suspend fun stopCoreStandalone() = lifecycleMutex.withLock {
-        engineManager.stop()
-        singBoxManager.stop()
+        stopEnginesInReverseOrder()
         isCoreRunning = false
         DiagnosticsLog.record("Aether", "Standalone Core stopped")
         val newPhase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.STOPPED
@@ -949,7 +1082,8 @@ class AetherVpnService : VpnService() {
     private fun registerNetworkCallback(
         socksPort: Int,
         psiphonMode: PsiphonMode,
-        requireWarpOverride: Boolean? = null
+        requireWarpOverride: Boolean? = null,
+        chainMode: ChainMode? = null
     ) {
         unregisterNetworkCallback()
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
@@ -973,7 +1107,7 @@ class AetherVpnService : VpnService() {
                     activeNetworkId = netId
                     // Battery-first check: avoid tearing down a healthy tunnel on transient network events
                     serviceScope.launch {
-                        if (!recoveringFromLoss && TunnelValidator.isTunnelHealthy(socksPort, psiphonMode, requireWarpOverride)) {
+                        if (!recoveringFromLoss && TunnelValidator.isTunnelHealthy(socksPort, psiphonMode, requireWarpOverride, chainMode)) {
                             DiagnosticsLog.record("System", "Network changed but tunnel remains healthy; skipping reconnect")
                         } else {
                             DiagnosticsLog.record("System", "Network transition requires reconnect; scheduling backoff")
@@ -1036,8 +1170,7 @@ class AetherVpnService : VpnService() {
         unregisterNetworkCallback()
         hevManager.stop()
         closeTun()
-        engineManager.stop()
-        singBoxManager.stop()
+        stopEnginesInReverseOrder()
         isCoreRunning = false
         isTunRunning = false
         runCatching { setUnderlyingNetworks(null) }
@@ -1052,14 +1185,25 @@ class AetherVpnService : VpnService() {
             unregisterNetworkCallback()
             hevManager.stop()
             closeTun()
-            engineManager.stop()
-            singBoxManager.stop()
+            stopEnginesInReverseOrder()
             isCoreRunning = false
             isTunRunning = false
             runCatching { setUnderlyingNetworks(null) }
             if (clearError) {
                 VpnStateStore.resetDisconnected()
             }
+        }
+    }
+
+    private fun stopEnginesInReverseOrder() {
+        if (lastSingBoxStartedFirst) {
+            // Sing-box was upstream, Aether was downstream -> stop downstream Aether first
+            engineManager.stop()
+            singBoxManager.stop()
+        } else {
+            // Aether was upstream, Sing-box was downstream -> stop downstream Sing-box first
+            singBoxManager.stop()
+            engineManager.stop()
         }
     }
 

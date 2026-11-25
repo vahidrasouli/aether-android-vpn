@@ -34,6 +34,7 @@ import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.AppThemeMode
+import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.HevMode
 import io.aethervpn.android.core.IdentityRepository
@@ -254,6 +255,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerPerfProfile.adapter = simpleAdapter(PerfProfile.entries.map { it.label })
         binding.spinnerHevMode.adapter = simpleAdapter(HevMode.entries.map { it.label })
         binding.spinnerProtocol.adapter = simpleAdapter(AetherProtocol.entries.map { it.label })
+        binding.spinnerChainMode.adapter = simpleAdapter(ChainMode.entries.map { it.label })
         binding.spinnerPsiphonMode.adapter = simpleAdapter(PsiphonMode.entries.map { it.label })
         binding.spinnerPsiphonRegion.adapter = simpleAdapter(VpnConfig.PSIPHON_REGIONS.map { it.second })
         binding.spinnerPsiphonProtocol.adapter = simpleAdapter(PsiphonProtocol.entries.map { it.label })
@@ -287,6 +289,7 @@ class MainActivity : AppCompatActivity() {
             binding.spinnerPerfProfile,
             binding.spinnerHevMode,
             binding.spinnerProtocol,
+            binding.spinnerChainMode,
             binding.spinnerPsiphonMode,
             binding.spinnerPsiphonRegion,
             binding.spinnerPsiphonProtocol,
@@ -503,7 +506,16 @@ class MainActivity : AppCompatActivity() {
             echEnabled = binding.switchEch.isChecked,
             tlsVerify = binding.switchTlsVerify.isChecked,
             singBoxEnabled = binding.switchSingBoxEnabled.isChecked,
-            singBoxOnly = if (binding.switchSingBoxEnabled.isChecked) base.singBoxOnly else false,
+            chainMode = ChainMode.entries[
+                binding.spinnerChainMode.selectedItemPosition.coerceIn(0, ChainMode.entries.lastIndex)
+            ],
+            singBoxOnly = if (binding.switchSingBoxEnabled.isChecked) {
+                ChainMode.entries[
+                    binding.spinnerChainMode.selectedItemPosition.coerceIn(0, ChainMode.entries.lastIndex)
+                ] == ChainMode.SINGBOX_ONLY
+            } else {
+                false
+            },
             wgKeepaliveSecs = keepalive,
             zeroTrustTeam = binding.etZeroTrustTeam.text.toString().trim(),
             themeMode = theme,
@@ -562,6 +574,7 @@ class MainActivity : AppCompatActivity() {
         try {
             updateHomeBadges(cfg)
             binding.switchSingBoxEnabled.isChecked = cfg.singBoxEnabled
+            binding.spinnerChainMode.setSelection(cfg.chainMode.ordinal, false)
             refreshSingBoxSummary(cfg)
             binding.tvEngineLabSummary.text =
                 "${cfg.detectEngineLabPreset().label} • ${cfg.aetherMaxClients} clients • ${cfg.tunMtu} MTU"
@@ -638,27 +651,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshSingBoxSummary(cfg: VpnConfig) {
         val activeProfile = runCatching { SingBoxProfileRepository.load(filesDir).activeProfile }.getOrNull()
+        binding.layoutSingBoxChain.visibility = if (cfg.singBoxEnabled) View.VISIBLE else View.GONE
+        binding.tvChainModeDetail.text = cfg.chainMode.description
         val summary = when {
             !cfg.singBoxEnabled -> "OFF • Zero overhead (tap to manage profiles)"
-            cfg.singBoxOnly && activeProfile != null ->
-                "ON • Sing-box Only • ${activeProfile.protocol}: ${activeProfile.name}"
-            cfg.singBoxOnly ->
-                "ON • Sing-box Only • No profile selected"
             activeProfile != null ->
-                "ON • Ready (${activeProfile.protocol}: ${activeProfile.name})"
+                "ON • ${cfg.chainMode.label} • ${activeProfile.protocol}: ${activeProfile.name}"
             else ->
-                "ON • No profile added yet"
+                "ON • ${cfg.chainMode.label} • No profile selected"
         }
         binding.tvSingBoxSummary.text = summary
     }
 
     private fun updateHomeBadges(cfg: VpnConfig) {
         val iranTag = if (cfg.bypassIran) " • IR Direct" else ""
-        if (cfg.isSingBoxOnlyActive) {
+        if (cfg.singBoxEnabled) {
             val activeProfile = runCatching { SingBoxProfileRepository.load(filesDir).activeProfile }.getOrNull()
             val profLabel = activeProfile?.let { "${it.protocol}: ${it.name}" } ?: "No Profile"
-            binding.tvChainPill.text = "Sing-box Only$iranTag"
-            binding.tvActiveProfileBadge.text = "Engine: Sing-box ($profLabel) • 127.0.0.1:${VpnConfig.SING_BOX_SOCKS_PORT}"
+            binding.tvChainPill.text = "${cfg.chainMode.label}$iranTag"
+            binding.tvActiveProfileBadge.text = "Engine: ${cfg.chainMode.label} ($profLabel) • 127.0.0.1:${cfg.effectiveSocksPort}"
             return
         }
         val psiphonSummary = when (cfg.psiphonMode) {
@@ -681,12 +692,13 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SingBoxProfilesActivity::class.java))
         }
 
-        binding.switchSingBoxEnabled.setOnCheckedChangeListener { _, _ ->
+        binding.switchSingBoxEnabled.setOnCheckedChangeListener { _, isChecked ->
             if (!isBindingUi) {
+                binding.layoutSingBoxChain.visibility = if (isChecked) View.VISIBLE else View.GONE
                 saveFromUiImmediate()
                 cachedConfig?.let {
-                    refreshSingBoxSummary(it)
-                    updateHomeBadges(it)
+                    refreshSingBoxSummary(it.copy(singBoxEnabled = isChecked))
+                    updateHomeBadges(it.copy(singBoxEnabled = isChecked))
                 }
             }
         }
@@ -767,16 +779,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnRunProbe.setOnClickListener {
-            val egressPort = cachedConfig?.effectiveSocksPort ?: VpnConfig.DEFAULT_SOCKS_PORT
-            val psiphonMode = cachedConfig?.psiphonMode ?: PsiphonMode.OFF
-            val requireWarpOverride = if (cachedConfig?.isSingBoxOnlyActive == true) false else null
+            val cfg = cachedConfig
+            val egressPort = cfg?.effectiveSocksPort ?: VpnConfig.DEFAULT_SOCKS_PORT
+            val psiphonMode = cfg?.psiphonMode ?: PsiphonMode.OFF
+            val activeChain = if (cfg?.singBoxEnabled == true) cfg.chainMode else null
             binding.tvDiagnosticsSummary.text = "Running on-demand tunnel probe..."
             uiScope.launch {
                 val res = withContext(Dispatchers.IO) {
                     TunnelValidator.verifyThroughSocks(
                         egressPort,
                         psiphonMode = psiphonMode,
-                        requireWarpOverride = requireWarpOverride
+                        chainMode = activeChain
                     )
                 }
                 res.onSuccess { v ->

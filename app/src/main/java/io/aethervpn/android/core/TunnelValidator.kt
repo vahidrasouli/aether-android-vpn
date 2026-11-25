@@ -32,13 +32,24 @@ object TunnelValidator {
     private const val DEFAULT_MAX_ATTEMPTS = 3
     private const val DEFAULT_RETRY_BACKOFF_MS = 600L
 
+    fun requiresWarpEgress(
+        psiphonMode: PsiphonMode = PsiphonMode.OFF,
+        chainMode: ChainMode? = null
+    ): Boolean {
+        if (chainMode != null) {
+            return chainMode.isWarpFinalEgress
+        }
+        return psiphonMode == PsiphonMode.OFF || psiphonMode == PsiphonMode.PSIPHON_TO_WARP
+    }
+
     fun verifyThroughSocks(
         socksPort: Int,
         timeoutMs: Int = 12_000,
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
         maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
         retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS,
-        requireWarpOverride: Boolean? = null
+        requireWarpOverride: Boolean? = null,
+        chainMode: ChainMode? = null
     ): Result<ValidationResult> {
         return verifyThroughSocksInternal(
             socksPort = socksPort,
@@ -46,7 +57,8 @@ object TunnelValidator {
             psiphonMode = psiphonMode,
             maxAttempts = maxAttempts,
             retryDelayMs = retryDelayMs,
-            requireWarpOverride = requireWarpOverride
+            requireWarpOverride = requireWarpOverride,
+            chainMode = chainMode
         )
     }
 
@@ -57,6 +69,7 @@ object TunnelValidator {
         maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
         retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS,
         requireWarpOverride: Boolean? = null,
+        chainMode: ChainMode? = null,
         tlsUpgrade: (Socket, Int) -> Socket = { raw, timeout ->
             val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
             (sslFactory.createSocket(raw, TRACE_HOST, TRACE_PORT, true) as SSLSocket).apply {
@@ -73,6 +86,7 @@ object TunnelValidator {
                 timeoutMs = timeoutMs,
                 psiphonMode = psiphonMode,
                 requireWarpOverride = requireWarpOverride,
+                chainMode = chainMode,
                 tlsUpgrade = tlsUpgrade
             )
             if (res.isSuccess) return res
@@ -98,6 +112,7 @@ object TunnelValidator {
         timeoutMs: Int,
         psiphonMode: PsiphonMode,
         requireWarpOverride: Boolean? = null,
+        chainMode: ChainMode? = null,
         tlsUpgrade: (Socket, Int) -> Socket
     ): Result<ValidationResult> {
         val startNs = System.nanoTime()
@@ -225,7 +240,7 @@ object TunnelValidator {
                 return Result.failure(IllegalStateException("Trace response missing public IP"))
             }
 
-            val requireWarp = requireWarpOverride ?: (psiphonMode == PsiphonMode.OFF || psiphonMode == PsiphonMode.PSIPHON_TO_WARP)
+            val requireWarp = requireWarpOverride ?: requiresWarpEgress(psiphonMode, chainMode)
             if (requireWarp) {
                 if (warp != "on" && warp != "plus") {
                     return Result.failure(
@@ -282,14 +297,16 @@ object TunnelValidator {
     fun isTunnelHealthy(
         socksPort: Int,
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
-        requireWarpOverride: Boolean? = null
+        requireWarpOverride: Boolean? = null,
+        chainMode: ChainMode? = null
     ): Boolean {
         return verifyThroughSocks(
             socksPort = socksPort,
             timeoutMs = 4_000,
             psiphonMode = psiphonMode,
             maxAttempts = 1,
-            requireWarpOverride = requireWarpOverride
+            requireWarpOverride = requireWarpOverride,
+            chainMode = chainMode
         ).isSuccess
     }
 }

@@ -313,8 +313,11 @@ class AetherEngineManager(private val privateDataDir: File) {
             }
         }
 
+        val usesPsiphonEgress = config.psiphonMode == PsiphonMode.WARP_TO_PSIPHON ||
+            config.psiphonMode == PsiphonMode.PSIPHON_ONLY
+        val listenPort = if (usesPsiphonEgress) VpnConfig.PSIPHON_SOCKS_PORT else VpnConfig.DEFAULT_SOCKS_PORT
         val logStartCount = DiagnosticsLog.entries().size
-        DiagnosticsLog.record("Aether", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: ${config.effectiveSocksPort}]")
+        DiagnosticsLog.record("Aether", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: $listenPort]")
         DiagnosticsLog.record("Aether", formatActiveLimitsSummary(config))
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
@@ -349,7 +352,7 @@ class AetherEngineManager(private val privateDataDir: File) {
 
         stop()
         return Result.failure(
-            IllegalStateException("Timed out waiting for Aether SOCKS5 listener on 127.0.0.1:${config.effectiveSocksPort} after ${effectiveTimeoutMs / 1000}s")
+            IllegalStateException("Timed out waiting for Aether SOCKS5 listener on 127.0.0.1:$listenPort after ${effectiveTimeoutMs / 1000}s")
         )
     }
 
@@ -408,7 +411,7 @@ class AetherEngineManager(private val privateDataDir: File) {
             val entries = logEntriesProvider()
             return entries.drop(logStartIndex).any { it.contains("psiphon is ready", ignoreCase = true) }
         }
-        return socksProbe(config.effectiveSocksPort)
+        return socksProbe(VpnConfig.DEFAULT_SOCKS_PORT)
     }
 
     private fun isSocks5Ready(port: Int): Boolean {

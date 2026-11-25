@@ -347,56 +347,100 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
+                        android:orientation="vertical"
                         android:padding="16dp">
 
-                        <ImageView
-                            android:layout_width="36dp"
-                            android:layout_height="36dp"
-                            android:background="@drawable/bg_icon_badge"
-                            android:contentDescription="@null"
-                            android:padding="7dp"
-                            android:src="@drawable/ic_protocol_24"
-                            app:tint="@color/singbox_accent_light" />
-
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
 
-                            <TextView
+                            <ImageView
+                                android:layout_width="36dp"
+                                android:layout_height="36dp"
+                                android:background="@drawable/bg_icon_badge"
+                                android:contentDescription="@null"
+                                android:padding="7dp"
+                                android:src="@drawable/ic_protocol_24"
+                                app:tint="@color/singbox_accent_light" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="12dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/singbox_entry_title"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvSingBoxSummary"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="@string/singbox_entry_subtitle"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/switchSingBoxEnabled"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/singbox_entry_title"
-                                android:textColor="@color/text_primary"
-                                android:textSize="15sp"
-                                android:textStyle="bold" />
+                                android:layout_marginEnd="6dp" />
 
-                            <TextView
-                                android:id="@+id/tvSingBoxSummary"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="@string/singbox_entry_subtitle"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="12sp" />
+                            <ImageView
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right_24"
+                                app:tint="@color/text_secondary" />
                         </LinearLayout>
 
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switchSingBoxEnabled"
-                            android:layout_width="wrap_content"
+                        <!-- Unified Routing Chain Selector (hidden when Sing-box Master Switch is OFF) -->
+                        <LinearLayout
+                            android:id="@+id/layoutSingBoxChain"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginEnd="6dp" />
+                            android:orientation="vertical"
+                            android:visibility="gone">
 
-                        <ImageView
-                            android:layout_width="20dp"
-                            android:layout_height="20dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_chevron_right_24"
-                            app:tint="@color/text_secondary" />
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:layout_marginVertical="12dp"
+                                android:background="@color/divider_line" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="ROUTING CHAIN"
+                                android:textColor="@color/singbox_accent_light"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Spinner
+                                android:id="@+id/spinnerChainMode"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginTop="4dp" />
+
+                            <TextView
+                                android:id="@+id/tvChainModeDetail"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

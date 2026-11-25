@@ -54,6 +54,96 @@ enum class PsiphonMode(val label: String, val cliValue: String) {
     PSIPHON_ONLY("Psiphon Only", "only")
 }
 
+enum class ChainMode(
+    val label: String,
+    val description: String,
+    val tunTargetPort: Int,
+    val startSingBoxFirst: Boolean,
+    val requiresWarp: Boolean,
+    val requiresPsiphon: Boolean,
+    val isWarpFinalEgress: Boolean,
+    val isPsiphonFinalEgress: Boolean,
+    val isSingBoxFinalEgress: Boolean
+) {
+    SINGBOX_ONLY(
+        label = "Sing-box Only",
+        description = "TUN → Sing-box:1825",
+        tunTargetPort = 1825,
+        startSingBoxFirst = true,
+        requiresWarp = false,
+        requiresPsiphon = false,
+        isWarpFinalEgress = false,
+        isPsiphonFinalEgress = false,
+        isSingBoxFinalEgress = true
+    ),
+    SINGBOX_TO_WARP(
+        label = "Sing-box → WARP",
+        description = "TUN → WARP:1819 --upstream socks5://127.0.0.1:1825",
+        tunTargetPort = 1819,
+        startSingBoxFirst = true,
+        requiresWarp = true,
+        requiresPsiphon = false,
+        isWarpFinalEgress = true,
+        isPsiphonFinalEgress = false,
+        isSingBoxFinalEgress = false
+    ),
+    SINGBOX_TO_PSIPHON(
+        label = "Sing-box → Psiphon",
+        description = "TUN → Psiphon:1821 --upstream socks5://127.0.0.1:1825",
+        tunTargetPort = 1821,
+        startSingBoxFirst = true,
+        requiresWarp = false,
+        requiresPsiphon = true,
+        isWarpFinalEgress = false,
+        isPsiphonFinalEgress = true,
+        isSingBoxFinalEgress = false
+    ),
+    SINGBOX_TO_WARP_TO_PSIPHON(
+        label = "Sing-box → WARP → Psiphon",
+        description = "TUN → Psiphon:1821 → WARP:1819 --upstream socks5://127.0.0.1:1825",
+        tunTargetPort = 1821,
+        startSingBoxFirst = true,
+        requiresWarp = true,
+        requiresPsiphon = true,
+        isWarpFinalEgress = false,
+        isPsiphonFinalEgress = true,
+        isSingBoxFinalEgress = false
+    ),
+    SINGBOX_TO_PSIPHON_TO_WARP(
+        label = "Sing-box → Psiphon → WARP",
+        description = "TUN → WARP:1819 → Psiphon:1821 --upstream socks5://127.0.0.1:1825",
+        tunTargetPort = 1819,
+        startSingBoxFirst = true,
+        requiresWarp = true,
+        requiresPsiphon = true,
+        isWarpFinalEgress = true,
+        isPsiphonFinalEgress = false,
+        isSingBoxFinalEgress = false
+    ),
+    WARP_TO_SINGBOX(
+        label = "WARP → Sing-box",
+        description = "TUN → Sing-box:1825 (detour → WARP socks 127.0.0.1:1819)",
+        tunTargetPort = 1825,
+        startSingBoxFirst = false,
+        requiresWarp = true,
+        requiresPsiphon = false,
+        isWarpFinalEgress = false,
+        isPsiphonFinalEgress = false,
+        isSingBoxFinalEgress = true
+    ),
+    PSIPHON_TO_SINGBOX(
+        label = "Psiphon → Sing-box",
+        description = "TUN → Sing-box:1825 (detour → Psiphon socks 127.0.0.1:1821)",
+        tunTargetPort = 1825,
+        startSingBoxFirst = false,
+        requiresWarp = false,
+        requiresPsiphon = true,
+        isWarpFinalEgress = false,
+        isPsiphonFinalEgress = false,
+        isSingBoxFinalEgress = true
+    )
+}
+
 enum class PsiphonProtocol(val cliValue: String, val label: String) {
     AUTO("auto", "Auto (Best Available)"),
     FRONTED_MEEK_CDN_OSSH("FRONTED-MEEK-CDN-OSSH", "Fronted Meek CDN (OSSH)"),
@@ -157,19 +247,20 @@ data class VpnConfig(
     val taskStackSize: Int = 16384,
     val udpTimeoutMs: Int = 5000,
     val mapDnsEnabled: Boolean = true,
-    // Sing-box integration (Phase 1)
+    // Sing-box integration (Phase 1 & Phase 2 multi-hop chaining)
     val singBoxEnabled: Boolean = false,
-    val singBoxOnly: Boolean = false
+    val singBoxOnly: Boolean = false,
+    val chainMode: ChainMode = ChainMode.SINGBOX_ONLY
 ) {
     val isSingBoxOnlyActive: Boolean
-        get() = singBoxEnabled && singBoxOnly
+        get() = singBoxEnabled && chainMode == ChainMode.SINGBOX_ONLY
 
     val socksBindAddress: String
         get() = "$LOOPBACK_HOST:$socksPort"
 
     val effectiveSocksPort: Int
         get() = when {
-            isSingBoxOnlyActive -> SING_BOX_SOCKS_PORT
+            singBoxEnabled -> chainMode.tunTargetPort
             psiphonMode == PsiphonMode.WARP_TO_PSIPHON ||
                 psiphonMode == PsiphonMode.PSIPHON_ONLY -> PSIPHON_SOCKS_PORT
             else -> DEFAULT_SOCKS_PORT
@@ -371,7 +462,8 @@ data class VpnConfig(
             put("udpTimeoutMs", udpTimeoutMs)
             put("mapDnsEnabled", mapDnsEnabled)
             put("singBoxEnabled", singBoxEnabled)
-            put("singBoxOnly", singBoxOnly)
+            put("singBoxOnly", chainMode == ChainMode.SINGBOX_ONLY)
+            put("chainMode", chainMode.name)
         }.toString(2)
     }
 
@@ -505,7 +597,8 @@ data class VpnConfig(
                 udpTimeoutMs = o.optInt("udpTimeoutMs", 5000).coerceIn(1000, 120_000),
                 mapDnsEnabled = o.optBoolean("mapDnsEnabled", true),
                 singBoxEnabled = o.optBoolean("singBoxEnabled", false),
-                singBoxOnly = o.optBoolean("singBoxOnly", false)
+                singBoxOnly = o.optBoolean("singBoxOnly", false),
+                chainMode = enumOrDefault(o.optString("chainMode"), ChainMode.SINGBOX_ONLY)
             )
         }
 
@@ -559,7 +652,8 @@ data class VpnConfig(
                 udpTimeoutMs = p.getInt("udp_timeout_ms", 5000),
                 mapDnsEnabled = p.getBoolean("map_dns_enabled", true),
                 singBoxEnabled = p.getBoolean("sing_box_enabled", false),
-                singBoxOnly = p.getBoolean("sing_box_only", false)
+                singBoxOnly = p.getBoolean("sing_box_only", false),
+                chainMode = enumOrDefault(p.getString("chain_mode", null), ChainMode.SINGBOX_ONLY)
             )
         }
 
@@ -613,7 +707,8 @@ data class VpnConfig(
                 .putInt("udp_timeout_ms", config.udpTimeoutMs)
                 .putBoolean("map_dns_enabled", config.mapDnsEnabled)
                 .putBoolean("sing_box_enabled", config.singBoxEnabled)
-                .putBoolean("sing_box_only", config.singBoxOnly)
+                .putBoolean("sing_box_only", config.chainMode == ChainMode.SINGBOX_ONLY)
+                .putString("chain_mode", config.chainMode.name)
                 .apply()
         }
 

@@ -72,7 +72,8 @@ object SingBoxConfigParser {
 
     fun buildRuntimeConfig(
         rawUriOrJson: String,
-        listenPort: Int = VpnConfig.SING_BOX_SOCKS_PORT
+        listenPort: Int = VpnConfig.SING_BOX_SOCKS_PORT,
+        upstreamSocksPort: Int? = null
     ): Result<String> = runCatching {
         val parsed = parse(rawUriOrJson).getOrThrow()
         val root = if (parsed.isFullConfig) {
@@ -94,10 +95,43 @@ object SingBoxConfigParser {
                     }
                 }
                 put("inbounds", newInbounds)
+
+                if (upstreamSocksPort != null) {
+                    val existingOutbounds = optJSONArray("outbounds") ?: JSONArray()
+                    val finalTag = optJSONObject("route")?.optString("final")?.takeIf { it.isNotBlank() }
+                    val newOutbounds = JSONArray()
+                    var detourApplied = false
+                    for (i in 0 until existingOutbounds.length()) {
+                        val ob = existingOutbounds.optJSONObject(i) ?: continue
+                        val tag = ob.optString("tag")
+                        val type = ob.optString("type")
+                        if (tag == UPSTREAM_SOCKS_TAG) continue
+                        val isSystemType = type in SYSTEM_OUTBOUND_TYPES
+                        if (!isSystemType && (finalTag == null || tag == finalTag || !ob.has("detour"))) {
+                            ob.put("detour", UPSTREAM_SOCKS_TAG)
+                            detourApplied = true
+                        }
+                        newOutbounds.put(ob)
+                    }
+                    if (!detourApplied) {
+                        for (i in 0 until newOutbounds.length()) {
+                            val ob = newOutbounds.optJSONObject(i) ?: continue
+                            if (ob.optString("type") !in SYSTEM_OUTBOUND_TYPES) {
+                                ob.put("detour", UPSTREAM_SOCKS_TAG)
+                                break
+                            }
+                        }
+                    }
+                    newOutbounds.put(buildUpstreamSocksOutbound(upstreamSocksPort))
+                    put("outbounds", newOutbounds)
+                }
             }
         } else {
             val outbound = JSONObject(parsed.outboundOrFullJson.toString()).apply {
                 put("tag", "proxy")
+                if (upstreamSocksPort != null) {
+                    put("detour", UPSTREAM_SOCKS_TAG)
+                }
             }
             JSONObject().apply {
                 put("log", JSONObject().apply {
@@ -124,6 +158,9 @@ object SingBoxConfigParser {
                 })
                 put("outbounds", JSONArray().apply {
                     put(outbound)
+                    if (upstreamSocksPort != null) {
+                        put(buildUpstreamSocksOutbound(upstreamSocksPort))
+                    }
                     put(JSONObject().apply {
                         put("type", "direct")
                         put("tag", "direct")
@@ -136,6 +173,17 @@ object SingBoxConfigParser {
             }
         }
         root.toString(2)
+    }
+
+    private const val UPSTREAM_SOCKS_TAG = "upstream-socks"
+    private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
+
+    private fun buildUpstreamSocksOutbound(upstreamSocksPort: Int): JSONObject = JSONObject().apply {
+        put("type", "socks")
+        put("tag", UPSTREAM_SOCKS_TAG)
+        put("server", VpnConfig.LOOPBACK_HOST)
+        put("server_port", upstreamSocksPort)
+        put("version", "5")
     }
 
     private fun buildMixedInbound(listenPort: Int): JSONObject = JSONObject().apply {

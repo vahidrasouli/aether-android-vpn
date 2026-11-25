@@ -7,6 +7,8 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -14,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.snackbar.Snackbar
 import io.aethervpn.android.R
+import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.SingBoxConfigParser
 import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfile
@@ -64,30 +67,42 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     }
 
     private fun bindSwitches() {
+        binding.spinnerRoutingChain.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            ChainMode.entries.map { it.label }
+        )
+
         binding.switchSingBoxMaster.setOnCheckedChangeListener { _, isChecked ->
             if (isBindingSwitches) return@setOnCheckedChangeListener
             uiScope.launch {
                 val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
                 val updated = cfg.copy(
                     singBoxEnabled = isChecked,
-                    singBoxOnly = if (!isChecked) false else cfg.singBoxOnly
+                    singBoxOnly = if (!isChecked) false else cfg.chainMode == ChainMode.SINGBOX_ONLY
                 )
                 withContext(Dispatchers.IO) { VpnConfig.save(this@SingBoxProfilesActivity, updated) }
                 syncSwitches(updated)
             }
         }
 
-        binding.switchSingBoxOnly.setOnCheckedChangeListener { _, isChecked ->
-            if (isBindingSwitches) return@setOnCheckedChangeListener
-            uiScope.launch {
-                val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
-                val updated = cfg.copy(
-                    singBoxEnabled = if (isChecked) true else cfg.singBoxEnabled,
-                    singBoxOnly = isChecked
-                )
-                withContext(Dispatchers.IO) { VpnConfig.save(this@SingBoxProfilesActivity, updated) }
-                syncSwitches(updated)
+        binding.spinnerRoutingChain.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                if (isBindingSwitches) return
+                val selectedChain = ChainMode.entries[pos]
+                uiScope.launch {
+                    val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
+                    val updated = cfg.copy(
+                        singBoxEnabled = true,
+                        chainMode = selectedChain,
+                        singBoxOnly = selectedChain == ChainMode.SINGBOX_ONLY
+                    )
+                    withContext(Dispatchers.IO) { VpnConfig.save(this@SingBoxProfilesActivity, updated) }
+                    syncSwitches(updated)
+                }
             }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
@@ -95,8 +110,9 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         isBindingSwitches = true
         try {
             binding.switchSingBoxMaster.isChecked = cfg.singBoxEnabled
-            binding.switchSingBoxOnly.isChecked = cfg.singBoxOnly
-            binding.switchSingBoxOnly.isEnabled = cfg.singBoxEnabled
+            binding.layoutRoutingChain.visibility = if (cfg.singBoxEnabled) View.VISIBLE else View.GONE
+            binding.spinnerRoutingChain.setSelection(cfg.chainMode.ordinal, false)
+            binding.tvRoutingChainDetail.text = cfg.chainMode.description
         } finally {
             isBindingSwitches = false
         }

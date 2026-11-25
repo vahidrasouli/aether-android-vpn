@@ -39,6 +39,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         config: VpnConfig,
         rawUriOrJson: String,
         listenPort: Int = VpnConfig.SING_BOX_SOCKS_PORT,
+        upstreamSocksPort: Int? = null,
         readinessTimeoutMs: Long = 15_000L
     ): Result<Unit> {
         if (!config.singBoxEnabled) {
@@ -52,7 +53,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
         val runtimeJsonResult = SingBoxConfigParser.buildRuntimeConfig(
             rawUriOrJson = rawUriOrJson,
-            listenPort = listenPort
+            listenPort = listenPort,
+            upstreamSocksPort = upstreamSocksPort
         )
         if (runtimeJsonResult.isFailure) {
             return Result.failure(
