@@ -218,6 +218,179 @@ class TunnelValidatorTest {
         assertEquals("104.28.1.2", result.getOrThrow().publicIp)
     }
 
+    @Test
+    fun retriesTransientGeneralSocksFailureUpToFiveAttemptsAndRecovers() {
+        val server = ServerSocket(0)
+        val port = server.localPort
+        var attemptCount = 0
+
+        val thread = Thread {
+            try {
+                server.soTimeout = 5_000
+                repeat(5) { idx ->
+                    val client = server.accept()
+                    attemptCount++
+                    val inStream = client.getInputStream()
+                    val outStream = client.getOutputStream()
+
+                    val greeting = ByteArray(3)
+                    inStream.read(greeting)
+                    outStream.write(byteArrayOf(0x05, 0x00))
+                    outStream.flush()
+
+                    val cmdHeader = ByteArray(4)
+                    inStream.read(cmdHeader)
+                    val addrAndPort = ByteArray(6)
+                    inStream.read(addrAndPort)
+
+                    if (idx < 4) {
+                        outStream.write(byteArrayOf(0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                        outStream.flush()
+                        client.close()
+                    } else {
+                        outStream.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
+                        outStream.flush()
+                        val reader = BufferedReader(InputStreamReader(inStream, Charsets.US_ASCII))
+                        var line = reader.readLine()
+                        while (!line.isNullOrEmpty()) {
+                            line = reader.readLine()
+                        }
+                        val resp = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nip=104.28.1.5\ncolo=AMS\nloc=NL\nwarp=on\n"
+                        outStream.write(resp.toByteArray(Charsets.UTF_8))
+                        outStream.flush()
+                        client.close()
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+
+        val result = TunnelValidator.verifyThroughSocksInternal(
+            socksPort = port,
+            timeoutMs = 2_000,
+            psiphonMode = PsiphonMode.OFF,
+            retryDelayMs = 15L,
+            tlsUpgrade = { raw, _ -> raw }
+        )
+        thread.join(4_000)
+
+        assertTrue("Expected 0x01 retry window to recover on 5th attempt: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(5, attemptCount)
+        assertEquals("104.28.1.5", result.getOrThrow().publicIp)
+    }
+
+    @Test
+    fun failsCleanlyAfterExhaustingFiveTransientGeneralSocksFailureAttempts() {
+        val server = ServerSocket(0)
+        val port = server.localPort
+        var attemptCount = 0
+
+        val thread = Thread {
+            try {
+                server.soTimeout = 5_000
+                repeat(5) {
+                    val client = server.accept()
+                    attemptCount++
+                    val inStream = client.getInputStream()
+                    val outStream = client.getOutputStream()
+
+                    val greeting = ByteArray(3)
+                    inStream.read(greeting)
+                    outStream.write(byteArrayOf(0x05, 0x00))
+                    outStream.flush()
+
+                    val cmdHeader = ByteArray(4)
+                    inStream.read(cmdHeader)
+                    val addrAndPort = ByteArray(6)
+                    inStream.read(addrAndPort)
+
+                    outStream.write(byteArrayOf(0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                    outStream.flush()
+                    client.close()
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+
+        val result = TunnelValidator.verifyThroughSocksInternal(
+            socksPort = port,
+            timeoutMs = 2_000,
+            psiphonMode = PsiphonMode.PSIPHON_ONLY,
+            retryDelayMs = 15L,
+            tlsUpgrade = { raw, _ -> raw }
+        )
+        thread.join(4_000)
+
+        assertTrue("Expected failure after exhausting 5 transient 0x01 attempts", result.isFailure)
+        assertEquals(5, attemptCount)
+        assertTrue(TunnelValidator.isTransientSocksFailure(result.exceptionOrNull()))
+        assertTrue(
+            result.exceptionOrNull()?.message?.contains("General SOCKS server failure") == true
+        )
+    }
+
+    @Test
+    fun permanentSocksFailureDoesNotExpandToFiveAttempts() {
+        val server = ServerSocket(0)
+        val port = server.localPort
+        var attemptCount = 0
+
+        val thread = Thread {
+            try {
+                server.soTimeout = 4_000
+                repeat(5) {
+                    val client = server.accept()
+                    attemptCount++
+                    val inStream = client.getInputStream()
+                    val outStream = client.getOutputStream()
+
+                    val greeting = ByteArray(3)
+                    inStream.read(greeting)
+                    outStream.write(byteArrayOf(0x05, 0x00))
+                    outStream.flush()
+
+                    val cmdHeader = ByteArray(4)
+                    inStream.read(cmdHeader)
+                    val addrAndPort = ByteArray(6)
+                    inStream.read(addrAndPort)
+
+                    outStream.write(byteArrayOf(0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                    outStream.flush()
+                    client.close()
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+
+        val result = TunnelValidator.verifyThroughSocksInternal(
+            socksPort = port,
+            timeoutMs = 2_000,
+            psiphonMode = PsiphonMode.OFF,
+            retryDelayMs = 15L,
+            tlsUpgrade = { raw, _ -> raw }
+        )
+        thread.join(3_000)
+
+        assertTrue(result.isFailure)
+        assertEquals(3, attemptCount)
+        assertFalse(TunnelValidator.isTransientSocksFailure(result.exceptionOrNull()))
+        assertTrue(
+            result.exceptionOrNull()?.message?.contains("Connection refused") == true
+        )
+    }
+
     private fun startMockTraceSocksServer(traceBody: String): Pair<Int, Thread> {
         val server = ServerSocket(0)
         val port = server.localPort

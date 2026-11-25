@@ -473,6 +473,30 @@ class AetherVpnService : VpnService() {
                 )
             )
 
+            val psiphonMode = plan.aetherEffectiveConfig?.psiphonMode ?: PsiphonMode.OFF
+            val validateBeforeTun = config.upstreamProxy.isNotBlank() ||
+                plan.aetherEffectiveConfig?.upstreamProxy?.isNotBlank() == true ||
+                plan.chainMode.requiresPsiphon
+            val hasLoopbackUpstream = SplitTunnelPlanner.isLoopbackUpstream(config.upstreamProxy) ||
+                SplitTunnelPlanner.isLoopbackUpstream(plan.aetherEffectiveConfig?.upstreamProxy.orEmpty())
+
+            var preTunVerified = if (validateBeforeTun) {
+                updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
+                val preValidation = TunnelValidator.verifyThroughSocks(
+                    socksPort = plan.tunTargetPort,
+                    psiphonMode = psiphonMode,
+                    chainMode = plan.chainMode
+                )
+                if (preValidation.isFailure) {
+                    return@withLock Result.failure(
+                        preValidation.exceptionOrNull() ?: IllegalStateException("Chain end-to-end validation failed")
+                    )
+                }
+                preValidation.getOrThrow()
+            } else {
+                null
+            }
+
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
                     phase = TunnelPhase.STARTING_HEV
@@ -503,23 +527,27 @@ class AetherVpnService : VpnService() {
                 )
             )
 
-            updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
-            val validation = TunnelValidator.verifyThroughSocks(
-                socksPort = plan.tunTargetPort,
-                psiphonMode = plan.aetherEffectiveConfig?.psiphonMode ?: PsiphonMode.OFF,
-                chainMode = plan.chainMode
-            )
-            if (validation.isFailure) {
-                return@withLock Result.failure(
-                    validation.exceptionOrNull() ?: IllegalStateException("Chain end-to-end validation failed")
+            val verified = if (preTunVerified != null) {
+                preTunVerified
+            } else {
+                updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
+                val validation = TunnelValidator.verifyThroughSocks(
+                    socksPort = plan.tunTargetPort,
+                    psiphonMode = psiphonMode,
+                    chainMode = plan.chainMode
                 )
+                if (validation.isFailure) {
+                    return@withLock Result.failure(
+                        validation.exceptionOrNull() ?: IllegalStateException("Chain end-to-end validation failed")
+                    )
+                }
+                validation.getOrThrow()
             }
-
-            val verified = validation.getOrThrow()
             registerNetworkCallback(
                 socksPort = plan.tunTargetPort,
-                psiphonMode = plan.aetherEffectiveConfig?.psiphonMode ?: PsiphonMode.OFF,
-                chainMode = plan.chainMode
+                psiphonMode = psiphonMode,
+                chainMode = plan.chainMode,
+                hasLoopbackUpstream = hasLoopbackUpstream
             )
             DiagnosticsLog.record(
                 "SingBox",
@@ -628,6 +656,25 @@ class AetherVpnService : VpnService() {
                 )
             )
 
+            val validateBeforeTun = config.upstreamProxy.isNotBlank() || config.psiphonMode != PsiphonMode.OFF
+            val hasLoopbackUpstream = SplitTunnelPlanner.isLoopbackUpstream(config.upstreamProxy)
+
+            val preTunVerified = if (validateBeforeTun) {
+                updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
+                val preValidation = TunnelValidator.verifyThroughSocks(
+                    socksPort = config.effectiveSocksPort,
+                    psiphonMode = config.psiphonMode
+                )
+                if (preValidation.isFailure) {
+                    return@withLock Result.failure(
+                        preValidation.exceptionOrNull() ?: IllegalStateException("End-to-end validation failed")
+                    )
+                }
+                preValidation.getOrThrow()
+            } else {
+                null
+            }
+
             // 2. Establish dual-stack Android TUN interface
             VpnStateStore.update(
                 VpnStateStore.state.value.copy(
@@ -661,25 +708,31 @@ class AetherVpnService : VpnService() {
             )
 
             // 4. End-to-end tunnel verification before ever reporting VPN_CONNECTED
-            updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
-
-            val validation = TunnelValidator.verifyThroughSocks(
-                socksPort = config.effectiveSocksPort,
-                psiphonMode = config.psiphonMode
-            )
-            if (validation.isFailure) {
-                return@withLock Result.failure(
-                    validation.exceptionOrNull() ?: IllegalStateException("End-to-end validation failed")
+            val verified = if (preTunVerified != null) {
+                preTunVerified
+            } else {
+                updateNotification(getString(R.string.app_name), getString(R.string.status_validating))
+                val validation = TunnelValidator.verifyThroughSocks(
+                    socksPort = config.effectiveSocksPort,
+                    psiphonMode = config.psiphonMode
                 )
+                if (validation.isFailure) {
+                    return@withLock Result.failure(
+                        validation.exceptionOrNull() ?: IllegalStateException("End-to-end validation failed")
+                    )
+                }
+                validation.getOrThrow()
             }
-
-            val verified = validation.getOrThrow()
             val identity = IdentityRepository.load(filesDir)
             val gateway = config.manualPeer.ifBlank {
                 identity.cachedGateway.ifBlank { identity.assignedEndpoint.ifBlank { "Auto (WARP)" } }
             }
 
-            registerNetworkCallback(config.effectiveSocksPort, config.psiphonMode)
+            registerNetworkCallback(
+                socksPort = config.effectiveSocksPort,
+                psiphonMode = config.psiphonMode,
+                hasLoopbackUpstream = hasLoopbackUpstream
+            )
             DiagnosticsLog.record(
                 "System",
                 "Connected via ${protocol.label} | IP=${verified.publicIp} | WARP=${verified.warpStatus} | ${verified.latencyMs}ms"
@@ -1083,7 +1136,8 @@ class AetherVpnService : VpnService() {
         socksPort: Int,
         psiphonMode: PsiphonMode,
         requireWarpOverride: Boolean? = null,
-        chainMode: ChainMode? = null
+        chainMode: ChainMode? = null,
+        hasLoopbackUpstream: Boolean = false
     ) {
         unregisterNetworkCallback()
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
@@ -1107,12 +1161,39 @@ class AetherVpnService : VpnService() {
                     activeNetworkId = netId
                     // Battery-first check: avoid tearing down a healthy tunnel on transient network events
                     serviceScope.launch {
-                        if (!recoveringFromLoss && TunnelValidator.isTunnelHealthy(socksPort, psiphonMode, requireWarpOverride, chainMode)) {
-                            DiagnosticsLog.record("System", "Network changed but tunnel remains healthy; skipping reconnect")
-                        } else {
-                            DiagnosticsLog.record("System", "Network transition requires reconnect; scheduling backoff")
-                            scheduleReconnectWithBackoff()
+                        if (!recoveringFromLoss) {
+                            val health = TunnelValidator.probeHealth(
+                                socksPort = socksPort,
+                                psiphonMode = psiphonMode,
+                                requireWarpOverride = requireWarpOverride,
+                                chainMode = chainMode
+                            )
+                            if (health.isSuccess) {
+                                DiagnosticsLog.record("System", "Network changed but tunnel remains healthy; skipping reconnect")
+                                return@launch
+                            }
+                            if (hasLoopbackUpstream && TunnelValidator.isTransientSocksFailure(health.exceptionOrNull())) {
+                                DiagnosticsLog.record(
+                                    "System",
+                                    "Transient SOCKS5 0x01 health-check blip on local proxy chain; allowing upstream auto-reconnect to recover"
+                                )
+                                delay(4_000)
+                                if (userRequestedStop) return@launch
+                                val recovered = TunnelValidator.verifyThroughSocks(
+                                    socksPort = socksPort,
+                                    timeoutMs = 6_000,
+                                    psiphonMode = psiphonMode,
+                                    requireWarpOverride = requireWarpOverride,
+                                    chainMode = chainMode
+                                )
+                                if (recovered.isSuccess) {
+                                    DiagnosticsLog.record("System", "Local proxy chain recovered after transient 0x01; keeping session active")
+                                    return@launch
+                                }
+                            }
                         }
+                        DiagnosticsLog.record("System", "Network transition requires reconnect; scheduling backoff")
+                        scheduleReconnectWithBackoff()
                     }
                 }
             }

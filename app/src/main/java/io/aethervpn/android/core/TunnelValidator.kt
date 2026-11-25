@@ -30,7 +30,18 @@ object TunnelValidator {
     private const val TRACE_HOST = "cloudflare.com"
     private const val TRACE_PORT = 443
     private const val DEFAULT_MAX_ATTEMPTS = 3
+    private const val TRANSIENT_SOCKS_MAX_ATTEMPTS = 5
     private const val DEFAULT_RETRY_BACKOFF_MS = 600L
+    private const val TRANSIENT_SOCKS_BASE_BACKOFF_MS = 1_000L
+
+    internal class Socks5ReplyException(
+        val repCode: Int,
+        message: String
+    ) : IllegalStateException(message)
+
+    fun isTransientSocksFailure(error: Throwable?): Boolean {
+        return error is Socks5ReplyException && error.repCode == 0x01
+    }
 
     fun requiresWarpEgress(
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
@@ -78,9 +89,11 @@ object TunnelValidator {
             }
         }
     ): Result<ValidationResult> {
-        val attempts = maxAttempts.coerceAtLeast(1)
+        val initialAttempts = maxAttempts.coerceAtLeast(1)
+        var effectiveMaxAttempts = initialAttempts
         var lastFailure: Result<ValidationResult>? = null
-        for (attempt in 1..attempts) {
+        var attempt = 1
+        while (attempt <= effectiveMaxAttempts) {
             val res = verifySingleAttempt(
                 socksPort = socksPort,
                 timeoutMs = timeoutMs,
@@ -92,17 +105,32 @@ object TunnelValidator {
             if (res.isSuccess) return res
             // Preserve a descriptive SOCKS/TLS failure over a subsequent ConnectException if port closed
             val err = res.exceptionOrNull()
+            val isTransientSocks01 = isTransientSocksFailure(err)
+            if (isTransientSocks01 && initialAttempts > 1) {
+                effectiveMaxAttempts = maxOf(effectiveMaxAttempts, TRANSIENT_SOCKS_MAX_ATTEMPTS)
+            }
             if (lastFailure == null || err !is java.net.ConnectException) {
                 lastFailure = res
             }
-            if (attempt < attempts && retryDelayMs > 0L) {
+            if (attempt < effectiveMaxAttempts && retryDelayMs > 0L) {
+                val sleepMs = if (isTransientSocks01) {
+                    val baseDelay = if (retryDelayMs == DEFAULT_RETRY_BACKOFF_MS) {
+                        TRANSIENT_SOCKS_BASE_BACKOFF_MS
+                    } else {
+                        retryDelayMs
+                    }
+                    baseDelay shl (attempt - 1)
+                } else {
+                    retryDelayMs * attempt
+                }
                 try {
-                    Thread.sleep(retryDelayMs * attempt)
+                    Thread.sleep(sleepMs)
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
                 }
             }
+            attempt++
         }
         return lastFailure ?: Result.failure(IllegalStateException("End-to-end validation failed"))
     }
@@ -174,7 +202,7 @@ object TunnelValidator {
                     0x08 -> "Address type not supported"
                     else -> "SOCKS error code 0x%02X".format(repCode)
                 }
-                return Result.failure(IllegalStateException("SOCKS5 CONNECT failed: $repDesc"))
+                return Result.failure(Socks5ReplyException(repCode, "SOCKS5 CONNECT failed: $repDesc"))
             }
 
             // Skip BND.ADDR and BND.PORT per ATYP
@@ -294,17 +322,32 @@ object TunnelValidator {
     }
 
     /** Fast 1-shot health probe before tearing down an existing tunnel on network change. */
+    fun probeHealth(
+        socksPort: Int,
+        psiphonMode: PsiphonMode = PsiphonMode.OFF,
+        requireWarpOverride: Boolean? = null,
+        chainMode: ChainMode? = null
+    ): Result<ValidationResult> {
+        return verifyThroughSocks(
+            socksPort = socksPort,
+            timeoutMs = 4_000,
+            psiphonMode = psiphonMode,
+            maxAttempts = 1,
+            requireWarpOverride = requireWarpOverride,
+            chainMode = chainMode
+        )
+    }
+
+    /** Fast 1-shot health probe before tearing down an existing tunnel on network change. */
     fun isTunnelHealthy(
         socksPort: Int,
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
         requireWarpOverride: Boolean? = null,
         chainMode: ChainMode? = null
     ): Boolean {
-        return verifyThroughSocks(
+        return probeHealth(
             socksPort = socksPort,
-            timeoutMs = 4_000,
             psiphonMode = psiphonMode,
-            maxAttempts = 1,
             requireWarpOverride = requireWarpOverride,
             chainMode = chainMode
         ).isSuccess
