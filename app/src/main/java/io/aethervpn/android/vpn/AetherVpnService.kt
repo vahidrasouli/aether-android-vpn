@@ -367,46 +367,6 @@ class AetherVpnService : VpnService() {
             closeTun()
             engineManager.stop()
             singBoxManager.stop()
-            if (config.isSingBoxOnlyActive) {
-                val activeProfile = SingBoxProfileRepository.load(filesDir).activeProfile
-                if (activeProfile == null) {
-                    val msg = "No Sing-box profile selected"
-                    DiagnosticsLog.record("SingBox", msg)
-                    VpnStateStore.reportError(msg, "Sing-box Only")
-                    if (!isTunRunning) {
-                        stopForegroundCompat()
-                        stopSelf()
-                    }
-                    return@withLock
-                }
-                val sbResult = singBoxManager.start(
-                    context = this@AetherVpnService,
-                    config = config,
-                    rawUriOrJson = activeProfile.rawUriOrJson,
-                    listenPort = VpnConfig.SING_BOX_SOCKS_PORT
-                )
-                if (sbResult.isFailure) {
-                    val err = formatException(sbResult.exceptionOrNull())
-                    DiagnosticsLog.record("SingBox", "Standalone Core failed: $err")
-                    VpnStateStore.reportError(err, "Sing-box Only")
-                    if (!isTunRunning) {
-                        stopForegroundCompat()
-                        stopSelf()
-                    }
-                    return@withLock
-                }
-                isCoreRunning = true
-                VpnStateStore.update(
-                    VpnStateStore.state.value.copy(
-                        phase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.SOCKS5_READY,
-                        protocolLabel = "Sing-box (${activeProfile.protocol})",
-                        coreActive = true
-                    )
-                )
-                updateNotification("Sing-box Core Ready", "127.0.0.1:${VpnConfig.SING_BOX_SOCKS_PORT}")
-                return@withLock
-            }
-            singBoxManager.stop()
             isCoreRunning = false
             isTunRunning = false
 
@@ -544,46 +504,6 @@ class AetherVpnService : VpnService() {
             hevManager.stop()
             closeTun()
             engineManager.stop()
-            singBoxManager.stop()
-            if (config.isSingBoxOnlyActive) {
-                val activeProfile = SingBoxProfileRepository.load(filesDir).activeProfile
-                if (activeProfile == null) {
-                    val msg = "No Sing-box profile selected"
-                    DiagnosticsLog.record("SingBox", msg)
-                    VpnStateStore.reportError(msg, "Sing-box Only")
-                    if (!isTunRunning) {
-                        stopForegroundCompat()
-                        stopSelf()
-                    }
-                    return@withLock
-                }
-                val sbResult = singBoxManager.start(
-                    context = this@AetherVpnService,
-                    config = config,
-                    rawUriOrJson = activeProfile.rawUriOrJson,
-                    listenPort = VpnConfig.SING_BOX_SOCKS_PORT
-                )
-                if (sbResult.isFailure) {
-                    val err = formatException(sbResult.exceptionOrNull())
-                    DiagnosticsLog.record("SingBox", "Standalone Core failed: $err")
-                    VpnStateStore.reportError(err, "Sing-box Only")
-                    if (!isTunRunning) {
-                        stopForegroundCompat()
-                        stopSelf()
-                    }
-                    return@withLock
-                }
-                isCoreRunning = true
-                VpnStateStore.update(
-                    VpnStateStore.state.value.copy(
-                        phase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.SOCKS5_READY,
-                        protocolLabel = "Sing-box (${activeProfile.protocol})",
-                        coreActive = true
-                    )
-                )
-                updateNotification("Sing-box Core Ready", "127.0.0.1:${VpnConfig.SING_BOX_SOCKS_PORT}")
-                return@withLock
-            }
             singBoxManager.stop()
             isCoreRunning = false
             isTunRunning = false
@@ -1133,46 +1053,6 @@ class AetherVpnService : VpnService() {
             hevManager.stop()
             closeTun()
             engineManager.stop()
-            singBoxManager.stop()
-            if (config.isSingBoxOnlyActive) {
-                val activeProfile = SingBoxProfileRepository.load(filesDir).activeProfile
-                if (activeProfile == null) {
-                    val msg = "No Sing-box profile selected"
-                    DiagnosticsLog.record("SingBox", msg)
-                    VpnStateStore.reportError(msg, "Sing-box Only")
-                    if (!isTunRunning) {
-                        stopForegroundCompat()
-                        stopSelf()
-                    }
-                    return@withLock
-                }
-                val sbResult = singBoxManager.start(
-                    context = this@AetherVpnService,
-                    config = config,
-                    rawUriOrJson = activeProfile.rawUriOrJson,
-                    listenPort = VpnConfig.SING_BOX_SOCKS_PORT
-                )
-                if (sbResult.isFailure) {
-                    val err = formatException(sbResult.exceptionOrNull())
-                    DiagnosticsLog.record("SingBox", "Standalone Core failed: $err")
-                    VpnStateStore.reportError(err, "Sing-box Only")
-                    if (!isTunRunning) {
-                        stopForegroundCompat()
-                        stopSelf()
-                    }
-                    return@withLock
-                }
-                isCoreRunning = true
-                VpnStateStore.update(
-                    VpnStateStore.state.value.copy(
-                        phase = if (isTunRunning) TunnelPhase.TUN_ACTIVE else TunnelPhase.SOCKS5_READY,
-                        protocolLabel = "Sing-box (${activeProfile.protocol})",
-                        coreActive = true
-                    )
-                )
-                updateNotification("Sing-box Core Ready", "127.0.0.1:${VpnConfig.SING_BOX_SOCKS_PORT}")
-                return@withLock
-            }
             singBoxManager.stop()
             isCoreRunning = false
             isTunRunning = false
