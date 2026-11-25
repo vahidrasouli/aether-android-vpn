@@ -25,6 +25,7 @@ import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.SocketProtectorCallback
 import io.aethervpn.android.core.SplitTunnelMode
 import io.aethervpn.android.core.SplitTunnelPlanner
+import io.aethervpn.android.core.StructuredUpstreamProxy
 import io.aethervpn.android.core.TrafficStats
 import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.TunnelSnapshot
@@ -42,6 +43,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.lang.ref.WeakReference
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Battery-first native Android full-device VpnService:
@@ -144,6 +149,8 @@ class AetherVpnService : VpnService() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var activeNetworkId: Long = -1L
     private var networkLostDuringSession: Boolean = false
+    private var upstreamWatchdog: UpstreamProxyWatchdog? = null
+    private var watchdogListener: ((String, String) -> Unit)? = null
 
     @Volatile
     private var isCoreRunning: Boolean = false
@@ -266,6 +273,7 @@ class AetherVpnService : VpnService() {
         userRequestedStop = true
         activeJob?.cancel()
         reconnectJob?.cancel()
+        stopUpstreamWatchdog()
         unregisterNetworkCallback()
         hevManager.stop()
         closeTun()
@@ -396,6 +404,7 @@ class AetherVpnService : VpnService() {
 
             hevManager.stop()
             closeTun()
+            stopUpstreamWatchdog()
             stopEnginesInReverseOrder()
             isCoreRunning = false
             isTunRunning = false
@@ -549,6 +558,7 @@ class AetherVpnService : VpnService() {
                 chainMode = plan.chainMode,
                 hasLoopbackUpstream = hasLoopbackUpstream
             )
+            startUpstreamWatchdog(config)
             DiagnosticsLog.record(
                 "SingBox",
                 "Connected (${plan.chainMode.label} • ${activeProfile.name}) | IP=${verified.publicIp} | WARP=${verified.warpStatus} | Colo=${verified.colo} | ${verified.latencyMs}ms"
@@ -617,6 +627,7 @@ class AetherVpnService : VpnService() {
 
             hevManager.stop()
             closeTun()
+            stopUpstreamWatchdog()
             engineManager.stop()
             singBoxManager.stop()
             isCoreRunning = false
@@ -733,6 +744,7 @@ class AetherVpnService : VpnService() {
                 psiphonMode = config.psiphonMode,
                 hasLoopbackUpstream = hasLoopbackUpstream
             )
+            startUpstreamWatchdog(config)
             DiagnosticsLog.record(
                 "System",
                 "Connected via ${protocol.label} | IP=${verified.publicIp} | WARP=${verified.warpStatus} | ${verified.latencyMs}ms"
@@ -1248,6 +1260,7 @@ class AetherVpnService : VpnService() {
 
     private suspend fun failClosed(reason: String, protocolLabel: String) {
         reconnectJob?.cancel()
+        stopUpstreamWatchdog()
         unregisterNetworkCallback()
         hevManager.stop()
         closeTun()
@@ -1263,9 +1276,11 @@ class AetherVpnService : VpnService() {
     private suspend fun teardownAll(clearError: Boolean) {
         lifecycleMutex.withLock {
             reconnectJob?.cancel()
+            stopUpstreamWatchdog()
             unregisterNetworkCallback()
             hevManager.stop()
             closeTun()
+            stopUpstreamWatchdog()
             stopEnginesInReverseOrder()
             isCoreRunning = false
             isTunRunning = false
@@ -1314,5 +1329,119 @@ class AetherVpnService : VpnService() {
 
     private fun stopForegroundCompat() {
         stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    private fun startUpstreamWatchdog(config: VpnConfig) {
+        stopUpstreamWatchdog()
+        if (!SplitTunnelPlanner.isLoopbackUpstream(config.upstreamProxy)) return
+        val parsed = StructuredUpstreamProxy.parse(config.upstreamProxy)
+        if (!parsed.enabled || parsed.port !in 1..65535) return
+        val displayHost = if (parsed.host.equals("localhost", ignoreCase = true)) {
+            "127.0.0.1"
+        } else {
+            parsed.host
+        }
+        val watchdog = UpstreamProxyWatchdog(
+            proxyHost = displayHost,
+            proxyPort = parsed.port,
+            scope = serviceScope,
+            onUnreachable = { host, port ->
+                DiagnosticsLog.record("System", "Upstream proxy $host:$port appears stopped or unreachable")
+            }
+        )
+        val listener: (String, String) -> Unit = { tag, message ->
+            if (isCoreRunning &&
+                isTunRunning &&
+                !userRequestedStop &&
+                VpnStateStore.state.value.phase == TunnelPhase.VPN_CONNECTED
+            ) {
+                watchdog.onEngineLog(tag, message)
+            }
+        }
+        upstreamWatchdog = watchdog
+        watchdogListener = listener
+        DiagnosticsLog.addListener(listener)
+    }
+
+    private fun stopUpstreamWatchdog() {
+        watchdogListener?.let { DiagnosticsLog.removeListener(it) }
+        watchdogListener = null
+        upstreamWatchdog = null
+    }
+}
+
+/**
+ * Watches engine error logs when a local loopback upstream proxy is active.
+ * After repeated engine errors, probes the local proxy port once and emits a
+ * single clear [System] warning if the upstream proxy refuses connections.
+ */
+internal class UpstreamProxyWatchdog(
+    private val proxyHost: String,
+    private val proxyPort: Int,
+    private val scope: CoroutineScope,
+    private val portProbe: (String, Int, Int) -> Boolean = ::isTcpPortReachable,
+    private val onUnreachable: (String, Int) -> Unit
+) {
+    private val consecutiveErrors = AtomicInteger(0)
+    private val warnedForOutage = AtomicBoolean(false)
+    private val probeInFlight = AtomicBoolean(false)
+
+    fun onEngineLog(tag: String, message: String) {
+        if (tag !in ENGINE_TAGS) return
+        if (!isEngineErrorLine(message)) return
+        if (consecutiveErrors.incrementAndGet() < ERROR_THRESHOLD) return
+        if (warnedForOutage.get()) return
+        if (!probeInFlight.compareAndSet(false, true)) return
+
+        scope.launch {
+            try {
+                val reachable = portProbe(proxyHost, proxyPort, PROBE_TIMEOUT_MS)
+                if (!reachable) {
+                    if (warnedForOutage.compareAndSet(false, true)) {
+                        onUnreachable(proxyHost, proxyPort)
+                    }
+                } else {
+                    consecutiveErrors.set(0)
+                    warnedForOutage.set(false)
+                }
+            } finally {
+                probeInFlight.set(false)
+            }
+        }
+    }
+
+    companion object {
+        private const val ERROR_THRESHOLD = 3
+        private const val PROBE_TIMEOUT_MS = 800
+        private val ENGINE_TAGS = setOf("Aether", "Psiphon", "SingBox")
+        private val ERROR_KEYWORDS = listOf(
+            "error",
+            "fail",
+            "refused",
+            "reset",
+            "eof",
+            "timeout",
+            "timed out",
+            "closed",
+            "unreachable",
+            "broken pipe",
+            "socks"
+        )
+
+        internal fun isEngineErrorLine(message: String): Boolean {
+            val lower = message.lowercase()
+            return ERROR_KEYWORDS.any { lower.contains(it) }
+        }
+
+        internal fun isTcpPortReachable(host: String, port: Int, timeoutMs: Int): Boolean {
+            return try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(host, port), timeoutMs)
+                    true
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 }

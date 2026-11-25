@@ -162,12 +162,15 @@ sealed interface ProxyTestResult {
         val colo: String,
         val warpStatus: String,
         val masqueEdgeOk: Boolean,
-        val masqueEdgeDetail: String
+        val masqueEdgeDetail: String,
+        val s3Reachable: Boolean = false,
+        val s3Detail: String = "Unchecked"
     ) : ProxyTestResult {
         fun formatSummary(): String {
             val region = listOf(loc, colo).filter { it.isNotBlank() }.joinToString("/").ifBlank { "??" }
             val masqueLabel = if (masqueEdgeOk) "OK" else masqueEdgeDetail
-            return "OK • IP: $publicIp ($region) • ${rttMs}ms • WARP: $warpStatus • MASQUE Edge: $masqueLabel"
+            val s3Label = if (s3Reachable) "OK" else s3Detail
+            return "OK • IP: $publicIp ($region) • ${rttMs}ms • WARP: $warpStatus • MASQUE Edge: $masqueLabel • Psiphon(S3): $s3Label"
         }
     }
 
@@ -180,6 +183,8 @@ object UpstreamProxyTester {
     private const val MASQUE_EDGE_IP = "162.159.198.1"
     private const val MASQUE_EDGE_SNI = "cloudflareaccess.com"
     private const val MASQUE_EDGE_PORT = 443
+    private const val S3_HOST = "s3.amazonaws.com"
+    private const val S3_PORT = 443
 
     internal fun parseCloudflareTrace(body: String): CloudflareTraceInfo? {
         val fields = mutableMapOf<String, String>()
@@ -245,6 +250,17 @@ object UpstreamProxyTester {
                 tlsUpgrade = tlsUpgrade
             )
 
+            // Stage 4: Psiphon Bootstrap (AWS S3) Reachability (s3.amazonaws.com:443)
+            val (s3Ok, s3Detail) = probeS3ThroughProxy(
+                protocol = protocol,
+                proxyHost = cleanHost,
+                proxyPort = port,
+                timeoutMs = timeoutMs,
+                username = username,
+                password = password,
+                tlsUpgrade = tlsUpgrade
+            )
+
             ProxyTestResult.Success(
                 rttMs = rtt,
                 publicIp = trace.ip,
@@ -252,7 +268,9 @@ object UpstreamProxyTester {
                 colo = trace.colo,
                 warpStatus = trace.warp,
                 masqueEdgeOk = masqueOk,
-                masqueEdgeDetail = masqueDetail
+                masqueEdgeDetail = masqueDetail,
+                s3Reachable = s3Ok,
+                s3Detail = s3Detail
             )
         } catch (e: Exception) {
             ProxyTestResult.Failure(e.message?.take(80) ?: e.javaClass.simpleName)
@@ -445,6 +463,56 @@ object UpstreamProxyTester {
             )
             tlsSocket = tlsUpgrade(rawSocket, MASQUE_EDGE_SNI, MASQUE_EDGE_PORT, timeoutMs, true)
             true to "OK"
+        } catch (e: Exception) {
+            false to (e.message?.take(28)?.ifBlank { null } ?: "Unreachable")
+        } finally {
+            runCatching { tlsSocket?.close() }
+            runCatching { rawSocket?.close() }
+        }
+    }
+
+    private fun probeS3ThroughProxy(
+        protocol: UpstreamProxyProtocol,
+        proxyHost: String,
+        proxyPort: Int,
+        timeoutMs: Int,
+        username: String,
+        password: String,
+        tlsUpgrade: (Socket, String, Int, Int, Boolean) -> Socket
+    ): Pair<Boolean, String> {
+        var rawSocket: Socket? = null
+        var tlsSocket: Socket? = null
+        val s3TimeoutMs = timeoutMs.coerceAtMost(4_000)
+        return try {
+            rawSocket = openTunneledSocket(
+                protocol = protocol,
+                proxyHost = proxyHost,
+                proxyPort = proxyPort,
+                targetHost = S3_HOST,
+                targetPort = S3_PORT,
+                isIpLiteral = false,
+                timeoutMs = s3TimeoutMs,
+                username = username,
+                password = password
+            )
+            tlsSocket = tlsUpgrade(rawSocket, S3_HOST, S3_PORT, s3TimeoutMs, false)
+            val out = tlsSocket.getOutputStream()
+            val req = "HEAD / HTTP/1.1\r\n" +
+                "Host: $S3_HOST\r\n" +
+                "User-Agent: AetherAndroid/2.4.0\r\n" +
+                "Connection: close\r\n\r\n"
+            out.write(req.toByteArray(Charsets.US_ASCII))
+            out.flush()
+
+            val reader = BufferedReader(InputStreamReader(tlsSocket.getInputStream(), Charsets.UTF_8))
+            val statusLine = reader.readLine()
+                ?: throw IllegalStateException("Empty S3 response")
+            val code = statusLine.split(" ", limit = 3).getOrNull(1)?.toIntOrNull() ?: 0
+            if (code in 200..499) {
+                true to "OK"
+            } else {
+                false to "HTTP $code"
+            }
         } catch (e: Exception) {
             false to (e.message?.take(28)?.ifBlank { null } ?: "Unreachable")
         } finally {

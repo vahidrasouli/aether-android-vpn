@@ -145,4 +145,59 @@ class DiagnosticsLogTest {
             io.aethervpn.android.ui.LogFormatter.classifySeverity(readyMsg)
         )
     }
+
+    @Test
+    fun testConsecutiveDuplicateAndDynamicPatternCollapsing() {
+        DiagnosticsLog.record("Aether", "2026-11-26T03:10:00Z connect tcp 127.0.0.1:54321 tunnel=abc-123: connection refused")
+        DiagnosticsLog.record("Aether", "2026-11-26T03:10:01Z connect tcp 127.0.0.1:54322 tunnel=def-456: connection refused")
+        DiagnosticsLog.record("Aether", "2026-11-26T03:10:02Z connect tcp 127.0.0.1:54323 tunnel=ghi-789: connection refused")
+
+        val entries = DiagnosticsLog.entries()
+        assertEquals("Same-pattern consecutive errors must collapse into 1 entry", 1, entries.size)
+        assertTrue("Collapsed entry must show (x3) badge: ${entries[0]}", entries[0].endsWith("(x3)"))
+
+        // Different message breaks the streak
+        DiagnosticsLog.record("System", "Upstream proxy 127.0.0.1:10808 appears stopped or unreachable")
+        DiagnosticsLog.record("Aether", "2026-11-26T03:10:05Z connect tcp 127.0.0.1:54324 tunnel=jkl-000: connection refused")
+        assertEquals(3, DiagnosticsLog.entries().size)
+    }
+
+    @Test
+    fun testHighFrequencyBurstRateLimitsLogsFlowEmissions() {
+        // Initial line + x2 emit immediately; burst x3..x14 within 250ms should not spam logsFlow
+        DiagnosticsLog.recordInternal("SingBox", "socks5 dial error: connection refused", 1_000L)
+        DiagnosticsLog.recordInternal("SingBox", "socks5 dial error: connection refused", 1_010L)
+        assertTrue(DiagnosticsLog.logsFlow.value.last().endsWith("(x2)"))
+
+        for (i in 3..14) {
+            DiagnosticsLog.recordInternal("SingBox", "socks5 dial error: connection refused", 1_010L + i)
+        }
+        assertEquals(1, DiagnosticsLog.entries().size)
+        assertTrue("Ring buffer must reflect full count (x14)", DiagnosticsLog.entries()[0].endsWith("(x14)"))
+        assertTrue("Burst within 250ms must rate-limit logsFlow to (x2)", DiagnosticsLog.logsFlow.value[0].endsWith("(x2)"))
+
+        // After 250ms window elapses, next duplicate flushes updated count to logsFlow
+        DiagnosticsLog.recordInternal("SingBox", "socks5 dial error: connection refused", 1_300L)
+        assertTrue(DiagnosticsLog.logsFlow.value[0].endsWith("(x15)"))
+    }
+
+    @Test
+    fun testUpstreamProxyWatchdogEmitsSingleWarningWhenPortUnreachable() = kotlinx.coroutines.runBlocking {
+        val warnings = mutableListOf<String>()
+        val watchdog = io.aethervpn.android.vpn.UpstreamProxyWatchdog(
+            proxyHost = "127.0.0.1",
+            proxyPort = 10808,
+            scope = this,
+            portProbe = { _, _, _ -> false },
+            onUnreachable = { host, port -> warnings += "Upstream proxy $host:$port appears stopped or unreachable" }
+        )
+
+        repeat(6) {
+            watchdog.onEngineLog("Aether", "connect tcp 127.0.0.1:10808: connection refused")
+            kotlinx.coroutines.delay(10)
+        }
+
+        assertEquals("Watchdog must emit exactly one warning per outage", 1, warnings.size)
+        assertEquals("Upstream proxy 127.0.0.1:10808 appears stopped or unreachable", warnings[0])
+    }
 }

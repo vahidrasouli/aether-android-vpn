@@ -6,37 +6,116 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Bounded, zero-disk, redacted in-memory diagnostic ring buffer (max 120 entries).
  * Automatically scrubs tokens, credentials, and private keys before storing.
+ * Collapses consecutive identical or same-pattern lines with a repeat counter badge `(xN)`
+ * and rate-limits high-frequency UI flow emissions during error bursts.
  * Emits reactive updates via Kotlin StateFlow<List<String>> for live UI rendering.
  */
 object DiagnosticsLog {
     private const val MAX_ENTRIES = 120
+    private const val UI_BURST_EMIT_INTERVAL_MS = 250L
+
     private val lock = Any()
     private val ring = ArrayDeque<String>(MAX_ENTRIES)
+    private val listeners = CopyOnWriteArrayList<(tag: String, message: String) -> Unit>()
+
+    private var lastPattern: String? = null
+    private var lastCleanMessage: String? = null
+    private var lastTag: String? = null
+    private var repeatCount: Int = 0
+    private var lastUiEmitMs: Long = 0L
+
     private val secretPatterns = listOf(
         Regex("(?i)(private_key|secret|password|token|client_secret)\\s*[:=]\\s*[^\\s,;\"']+"),
         Regex("://[^:@\\s]+:[^@\\s]+@")
     )
 
+    private val isoTimestampRegex =
+        Regex("\\b\\d{4}[-/]\\d{2}[-/]\\d{2}[T\\s]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\b")
+    private val timeOnlyRegex = Regex("\\b\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?\\b")
+    private val uuidRegex =
+        Regex("(?i)\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b")
+    private val portSuffixRegex = Regex(":(\\d{2,5})\\b")
+    private val portFieldRegex = Regex("(?i)\\bport\\s*[=:]?\\s*\\d+\\b")
+    private val dynamicIdRegex =
+        Regex("(?i)\\b(tunnel|conn|connection|session|stream|req|request|cid|id)(?:[_-]?id)?\\s*[=:#]\\s*[A-Za-z0-9_-]+")
+    private val hexTokenRegex = Regex("\\b0x[0-9a-fA-F]+\\b")
+    private val multiSpaceRegex = Regex("\\s+")
+
     private val _logsFlow = MutableStateFlow<List<String>>(emptyList())
     val logsFlow: StateFlow<List<String>> = _logsFlow.asStateFlow()
 
+    fun addListener(listener: (tag: String, message: String) -> Unit) {
+        listeners.addIfAbsent(listener)
+    }
+
+    fun removeListener(listener: (tag: String, message: String) -> Unit) {
+        listeners.remove(listener)
+    }
+
+    internal fun normalizePattern(tag: String, cleanMessage: String): String {
+        var norm = cleanMessage
+        norm = isoTimestampRegex.replace(norm, "<ts>")
+        norm = timeOnlyRegex.replace(norm, "<ts>")
+        norm = uuidRegex.replace(norm, "<uuid>")
+        norm = dynamicIdRegex.replace(norm) { "${it.groupValues[1].lowercase(Locale.US)}=<id>" }
+        norm = portSuffixRegex.replace(norm, ":<port>")
+        norm = portFieldRegex.replace(norm, "port=<port>")
+        norm = hexTokenRegex.replace(norm, "<hex>")
+        norm = multiSpaceRegex.replace(norm, " ").trim()
+        return "$tag|$norm"
+    }
+
     fun record(tag: String, message: String) {
-        val ts = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        recordInternal(tag, message, System.currentTimeMillis())
+    }
+
+    internal fun recordInternal(tag: String, message: String, nowMs: Long) {
+        val ts = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(nowMs))
         var clean = message
         secretPatterns.forEach { rx ->
             clean = rx.replace(clean) { m ->
                 if (m.value.startsWith("://")) "://***:***@" else "[REDACTED]"
             }
         }
-        val line = "$ts [$tag] $clean"
+
+        val pattern = normalizePattern(tag, clean)
+        var shouldNotifyListeners = true
+
         synchronized(lock) {
-            if (ring.size >= MAX_ENTRIES) ring.removeFirst()
-            ring.addLast(line)
-            _logsFlow.value = ring.toList()
+            if (ring.isNotEmpty() && lastPattern == pattern && lastTag == tag) {
+                repeatCount++
+                val baseMsg = lastCleanMessage ?: clean
+                val updatedLine = "$ts [$tag] $baseMsg (x$repeatCount)"
+                ring[ring.lastIndex] = updatedLine
+                // Rate-limit high-frequency burst emissions to keep UI CPU low,
+                // while always emitting the initial collapse (x2) immediately.
+                if (repeatCount <= 2 || nowMs - lastUiEmitMs >= UI_BURST_EMIT_INTERVAL_MS) {
+                    _logsFlow.value = ring.toList()
+                    lastUiEmitMs = nowMs
+                }
+                shouldNotifyListeners = repeatCount <= 5 || repeatCount % 5 == 0
+            } else {
+                lastPattern = pattern
+                lastCleanMessage = clean
+                lastTag = tag
+                repeatCount = 1
+                val line = "$ts [$tag] $clean"
+                if (ring.size >= MAX_ENTRIES) ring.removeFirst()
+                ring.addLast(line)
+                _logsFlow.value = ring.toList()
+                lastUiEmitMs = nowMs
+            }
+        }
+
+        if (shouldNotifyListeners) {
+            for (listener in listeners) {
+                runCatching { listener(tag, clean) }
+            }
         }
     }
 
@@ -50,6 +129,11 @@ object DiagnosticsLog {
 
     fun clear() = synchronized(lock) {
         ring.clear()
+        lastPattern = null
+        lastCleanMessage = null
+        lastTag = null
+        repeatCount = 0
+        lastUiEmitMs = 0L
         _logsFlow.value = emptyList()
     }
 
@@ -61,6 +145,12 @@ object DiagnosticsLog {
         if (ring.size > keepCount) {
             while (ring.size > keepCount) {
                 ring.removeFirst()
+            }
+            if (ring.isEmpty()) {
+                lastPattern = null
+                lastCleanMessage = null
+                lastTag = null
+                repeatCount = 0
             }
             _logsFlow.value = ring.toList()
         }

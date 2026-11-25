@@ -85,9 +85,30 @@ class UpstreamProxyHelperTest {
             colo = parsed.colo,
             warpStatus = parsed.warp,
             masqueEdgeOk = true,
-            masqueEdgeDetail = "OK"
+            masqueEdgeDetail = "OK",
+            s3Reachable = true,
+            s3Detail = "OK"
         ).formatSummary()
-        assertEquals("OK • IP: 198.51.100.42 (DE/FRA) • 280ms • WARP: off • MASQUE Edge: OK", summary)
+        assertEquals(
+            "OK • IP: 198.51.100.42 (DE/FRA) • 280ms • WARP: off • MASQUE Edge: OK • Psiphon(S3): OK",
+            summary
+        )
+
+        val s3FailedSummary = ProxyTestResult.Success(
+            rttMs = 240L,
+            publicIp = parsed.ip,
+            loc = parsed.loc,
+            colo = "",
+            warpStatus = "OK",
+            masqueEdgeOk = true,
+            masqueEdgeDetail = "OK",
+            s3Reachable = false,
+            s3Detail = "Unreachable"
+        ).formatSummary()
+        assertEquals(
+            "OK • IP: 198.51.100.42 (DE) • 240ms • WARP: OK • MASQUE Edge: OK • Psiphon(S3): Unreachable",
+            s3FailedSummary
+        )
     }
 
     @Test
@@ -140,6 +161,27 @@ class UpstreamProxyHelperTest {
                     out.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
                     out.flush()
                 }
+                // Connection 4: Stage 4 Psiphon Bootstrap (AWS S3) reachability (s3.amazonaws.com:443)
+                server.accept().use { s ->
+                    val inp = s.getInputStream()
+                    val out = s.getOutputStream()
+                    inp.read(ByteArray(3))
+                    out.write(byteArrayOf(0x05, 0x00))
+                    out.flush()
+                    val hdr = ByteArray(4)
+                    inp.read(hdr)
+                    val len = inp.read()
+                    inp.read(ByteArray(len + 2))
+                    out.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
+                    out.flush()
+                    val reader = BufferedReader(InputStreamReader(inp, Charsets.US_ASCII))
+                    var line = reader.readLine()
+                    while (!line.isNullOrEmpty()) {
+                        line = reader.readLine()
+                    }
+                    out.write("HTTP/1.1 307 Temporary Redirect\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+                    out.flush()
+                }
             } catch (_: Exception) {
             } finally {
                 runCatching { server.close() }
@@ -165,6 +207,8 @@ class UpstreamProxyHelperTest {
         assertEquals("off", ok.warpStatus)
         assertTrue(ok.masqueEdgeOk)
         assertEquals("OK", ok.masqueEdgeDetail)
+        assertTrue(ok.s3Reachable)
+        assertEquals("OK", ok.s3Detail)
     }
 
     @Test
@@ -217,7 +261,7 @@ class UpstreamProxyHelperTest {
         val socksThread = Thread {
             try {
                 socksServer.soTimeout = 4_000
-                repeat(3) { connIdx ->
+                repeat(4) { connIdx ->
                     socksServer.accept().use { s ->
                         val inp = s.getInputStream()
                         val out = s.getOutputStream()
@@ -257,6 +301,12 @@ class UpstreamProxyHelperTest {
                                 while (!line.isNullOrEmpty()) line = reader.readLine()
                                 out.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nip=198.51.100.77\nloc=DE\ncolo=FRA\nwarp=off\n".toByteArray())
                                 out.flush()
+                            } else if (connIdx == 3) {
+                                val reader = BufferedReader(InputStreamReader(inp, Charsets.US_ASCII))
+                                var line = reader.readLine()
+                                while (!line.isNullOrEmpty()) line = reader.readLine()
+                                out.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".toByteArray())
+                                out.flush()
                             }
                         }
                     }
@@ -289,7 +339,7 @@ class UpstreamProxyHelperTest {
         val httpThread = Thread {
             try {
                 httpServer.soTimeout = 4_000
-                repeat(3) { connIdx ->
+                repeat(4) { connIdx ->
                     httpServer.accept().use { s ->
                         val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.US_ASCII))
                         val out = s.getOutputStream()
@@ -309,6 +359,11 @@ class UpstreamProxyHelperTest {
                             var reqLine = reader.readLine()
                             while (!reqLine.isNullOrEmpty()) reqLine = reader.readLine()
                             out.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nip=203.0.113.55\nloc=NL\ncolo=AMS\nwarp=off\n".toByteArray())
+                            out.flush()
+                        } else if (connIdx == 3) {
+                            var reqLine = reader.readLine()
+                            while (!reqLine.isNullOrEmpty()) reqLine = reader.readLine()
+                            out.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".toByteArray())
                             out.flush()
                         }
                     }
