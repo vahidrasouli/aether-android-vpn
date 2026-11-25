@@ -58,12 +58,24 @@ enum class PsiphonProtocol(val cliValue: String, val label: String) {
     AUTO("auto", "Auto (Best Available)"),
     FRONTED_MEEK_CDN_OSSH("FRONTED-MEEK-CDN-OSSH", "Fronted Meek CDN (OSSH)"),
     FRONTED_MEEK_OSSH("FRONTED-MEEK-OSSH", "Fronted Meek (OSSH)"),
+    FRONTED_MEEK_CDN_HTTP_OSSH("FRONTED-MEEK-CDN-HTTP-OSSH", "Fronted Meek CDN HTTP (OSSH)"),
+    FRONTED_MEEK_HTTP_OSSH("FRONTED-MEEK-HTTP-OSSH", "Fronted Meek HTTP (OSSH)"),
     UNFRONTED_MEEK_HTTPS_OSSH("UNFRONTED-MEEK-HTTPS-OSSH", "Unfronted Meek HTTPS (OSSH)"),
+    UNFRONTED_MEEK_OSSH("UNFRONTED-MEEK-OSSH", "Unfronted Meek (OSSH)"),
+    UNFRONTED_MEEK_SESSION_TICKET_OSSH("UNFRONTED-MEEK-SESSION-TICKET-OSSH", "Unfronted Meek Session Ticket"),
     OSSH("OSSH", "Direct OSSH"),
+    TLS_OSSH("TLS-OSSH", "TLS OSSH"),
+    SSH("SSH", "Direct SSH"),
+    SHADOWSOCKS_OSSH("SHADOWSOCKS-OSSH", "Shadowsocks OSSH"),
     QUIC_OSSH("QUIC-OSSH", "QUIC OSSH"),
-    TAPDANCE_OSSH("TAPDANCE-OSSH", "TapDance OSSH"),
+    FRONTED_MEEK_QUIC_OSSH("FRONTED-MEEK-QUIC-OSSH", "Fronted Meek QUIC (OSSH)"),
+    FRONTED_MEEK_CDN_QUIC_OSSH("FRONTED-MEEK-CDN-QUIC-OSSH", "Fronted Meek CDN QUIC (OSSH)"),
     CONJURE_OSSH("CONJURE-OSSH", "Conjure OSSH"),
-    INPROXY("INPROXY", "Inproxy (Brokered)")
+    INPROXY_WEBRTC_OSSH("INPROXY-WEBRTC-OSSH", "Inproxy WebRTC (OSSH)"),
+    INPROXY_WEBRTC_TLS_OSSH("INPROXY-WEBRTC-TLS-OSSH", "Inproxy WebRTC (TLS-OSSH)"),
+    INPROXY_WEBRTC_QUIC_OSSH("INPROXY-WEBRTC-QUIC-OSSH", "Inproxy WebRTC (QUIC-OSSH)"),
+    INPROXY_WEBRTC_FRONTED_MEEK_OSSH("INPROXY-WEBRTC-FRONTED-MEEK-OSSH", "Inproxy WebRTC (Fronted Meek)"),
+    INPROXY_WEBRTC_SHADOWSOCKS_OSSH("INPROXY-WEBRTC-SHADOWSOCKS-OSSH", "Inproxy WebRTC (Shadowsocks)")
 }
 
 enum class NoizeProfile(val cliValue: String, val label: String) {
@@ -129,6 +141,7 @@ data class VpnConfig(
     val tunMtu: Int = DEFAULT_TUN_MTU,
     val splitTunnelMode: SplitTunnelMode = SplitTunnelMode.ALL_APPS,
     val selectedPackages: Set<String> = emptySet(),
+    val proxyBypassApps: Set<String> = emptySet(),
     val bypassIran: Boolean = false,
     val statsRefreshIntervalMs: Long = 5_000L,
     val themeMode: AppThemeMode = AppThemeMode.DARK,
@@ -335,6 +348,7 @@ data class VpnConfig(
             put("psiphonProtocol", psiphonProtocol.name)
             put("splitTunnelMode", splitTunnelMode.name)
             put("selectedPackages", JSONArray(selectedPackages.sorted()))
+            put("proxyBypassApps", JSONArray(proxyBypassApps.sorted()))
             put("bypassIran", bypassIran)
             put("statsRefreshIntervalMs", statsRefreshIntervalMs)
             put("themeMode", themeMode.name)
@@ -427,6 +441,13 @@ data class VpnConfig(
                     arr.optString(i).takeIf { it.isNotBlank() }?.let(pkgs::add)
                 }
             }
+            val proxyBypass = mutableSetOf<String>()
+            val proxyBypassArr = o.optJSONArray("proxyBypassApps")
+            if (proxyBypassArr != null) {
+                for (i in 0 until proxyBypassArr.length()) {
+                    proxyBypassArr.optString(i).takeIf { it.isNotBlank() }?.let(proxyBypass::add)
+                }
+            }
             VpnConfig(
                 profileLevel = enumOrDefault(o.optString("profileLevel"), ProfileLevel.BATTERY_EFFICIENT),
                 protocol = enumOrDefault(o.optString("protocol"), AetherProtocol.MASQUE_H3),
@@ -458,6 +479,7 @@ data class VpnConfig(
                 psiphonProtocol = enumOrDefault(o.optString("psiphonProtocol"), PsiphonProtocol.AUTO),
                 splitTunnelMode = parseSplitTunnelMode(o.optString("splitTunnelMode")),
                 selectedPackages = pkgs,
+                proxyBypassApps = proxyBypass,
                 bypassIran = o.optBoolean("bypassIran", false),
                 statsRefreshIntervalMs = o.optLong("statsRefreshIntervalMs", 5_000L).coerceIn(2_000L, 15_000L),
                 themeMode = enumOrDefault(o.optString("themeMode"), AppThemeMode.DARK),
@@ -509,6 +531,7 @@ data class VpnConfig(
                 psiphonProtocol = enumOrDefault(p.getString("psiphon_protocol", null), PsiphonProtocol.AUTO),
                 splitTunnelMode = parseSplitTunnelMode(p.getString("split_mode", null)),
                 selectedPackages = p.getStringSet("selected_packages", emptySet())?.toSet() ?: emptySet(),
+                proxyBypassApps = p.getStringSet("proxy_bypass_apps", emptySet())?.toSet() ?: emptySet(),
                 bypassIran = p.getBoolean("bypass_iran", false),
                 statsRefreshIntervalMs = p.getLong("stats_refresh_ms", 5_000L),
                 themeMode = enumOrDefault(p.getString("theme_mode", null), AppThemeMode.DARK),
@@ -560,6 +583,7 @@ data class VpnConfig(
                 .putString("psiphon_protocol", config.psiphonProtocol.name)
                 .putString("split_mode", config.splitTunnelMode.name)
                 .putStringSet("selected_packages", config.selectedPackages)
+                .putStringSet("proxy_bypass_apps", config.proxyBypassApps)
                 .putBoolean("bypass_iran", config.bypassIran)
                 .putLong("stats_refresh_ms", config.statsRefreshIntervalMs)
                 .putString("theme_mode", config.themeMode.name)

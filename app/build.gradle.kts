@@ -12,6 +12,21 @@ val keystoreProps = Properties().apply {
     }
 }
 
+val baseVersionName = "1.1.0"
+val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.trim().orEmpty()
+val gitShortSha = runCatching {
+    val proc = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+        .directory(rootProject.projectDir)
+        .redirectErrorStream(true)
+        .start()
+    proc.inputStream.bufferedReader().readText().trim().takeIf { proc.waitFor() == 0 && it.isNotEmpty() }
+}.getOrNull()
+val debugVersionSuffix = if (githubRunNumber.isNotEmpty() && !gitShortSha.isNullOrEmpty()) {
+    "-debug.b$githubRunNumber-$gitShortSha"
+} else {
+    "-debug.local"
+}
+
 android {
     namespace = "io.aethervpn.android"
     compileSdk = 35
@@ -21,7 +36,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 2
-        versionName = "1.1.0"
+        versionName = baseVersionName
 
         ndk {
             // Primary target: ARM64 Android devices (minimizes APK size)
@@ -45,6 +60,7 @@ android {
 
     buildTypes {
         debug {
+            versionNameSuffix = debugVersionSuffix
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -97,8 +113,7 @@ android {
         variant.outputs
             .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
             .forEach { output ->
-                val suffix = if (variant.buildType.name == "release") "" else "-${variant.buildType.name}"
-                output.outputFileName = "aether-android-arm64-v${variant.versionName}$suffix.apk"
+                output.outputFileName = "aether-android-arm64-v${variant.versionName}.apk"
             }
     }
 }

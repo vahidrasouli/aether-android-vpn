@@ -340,6 +340,8 @@ class MainActivity : AppCompatActivity() {
                     binding.spinnerUpstreamProtocol.setSelection(preset.protocol.ordinal, false)
                     binding.etUpstreamHost.setText(preset.host)
                     binding.etUpstreamPort.setText(preset.port.toString())
+                    binding.etUpstreamUsername.setText("")
+                    binding.etUpstreamPassword.setText("")
                 } finally {
                     isBindingUi = false
                 }
@@ -360,6 +362,8 @@ class MainActivity : AppCompatActivity() {
             binding.etRouteBlock,
             binding.etUpstreamHost,
             binding.etUpstreamPort,
+            binding.etUpstreamUsername,
+            binding.etUpstreamPassword,
             binding.etMasqueSni,
             binding.etWgKeepalive,
             binding.etZeroTrustTeam
@@ -391,17 +395,21 @@ class MainActivity : AppCompatActivity() {
         ]
         val host = binding.etUpstreamHost.text.toString().trim()
         val port = binding.etUpstreamPort.text.toString().trim().toIntOrNull() ?: 0
+        val username = binding.etUpstreamUsername.text?.toString().orEmpty()
+        val password = binding.etUpstreamPassword.text?.toString().orEmpty()
         return StructuredUpstreamProxy(
             enabled = binding.switchUpstreamProxy.isChecked,
             protocol = protocol,
             host = host,
-            port = port
+            port = port,
+            username = username,
+            password = password
         )
     }
 
     private fun syncUpstreamPreviewAndPreset() {
         val structured = currentStructuredProxyFromUi()
-        val url = structured.copy(enabled = true).buildUrl()
+        val url = structured.copy(enabled = true).buildUrl(maskPassword = true)
         binding.tvUpstreamUrlPreview.text = url.ifEmpty { "Enter a valid host and port (1–65535)" }
 
         val presetId = when (structured.detectedPreset()) {
@@ -430,7 +438,13 @@ class MainActivity : AppCompatActivity() {
         binding.tvProxyTestResult.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
 
         uiScope.launch {
-            val result = UpstreamProxyTester.test(structured.protocol, structured.host, structured.port)
+            val result = UpstreamProxyTester.test(
+                protocol = structured.protocol,
+                host = structured.host,
+                port = structured.port,
+                username = structured.username,
+                password = structured.password
+            )
             binding.btnTestProxy.isEnabled = true
             when (result) {
                 is ProxyTestResult.Success -> {
@@ -574,6 +588,9 @@ class MainActivity : AppCompatActivity() {
             binding.spinnerUpstreamProtocol.setSelection(parsedProxy.protocol.ordinal, false)
             binding.etUpstreamHost.setText(parsedProxy.host)
             binding.etUpstreamPort.setText(parsedProxy.port.toString())
+            binding.etUpstreamUsername.setText(parsedProxy.username)
+            binding.etUpstreamPassword.setText(parsedProxy.password)
+            updateProxyBypassButtonLabel(cfg)
             syncUpstreamPreviewAndPreset()
 
             binding.spinnerScanMode.setSelection(cfg.scanMode.ordinal, false)
@@ -599,6 +616,15 @@ class MainActivity : AppCompatActivity() {
             "Select Apps ($count selected)"
         } else {
             getString(R.string.action_pick_apps)
+        }
+    }
+
+    private fun updateProxyBypassButtonLabel(cfg: VpnConfig) {
+        val count = cfg.proxyBypassApps.size
+        binding.btnProxyBypassApps.text = if (count > 0) {
+            "Bypass Proxy App (Direct) • $count selected"
+        } else {
+            getString(R.string.action_bypass_proxy_app)
         }
     }
 
@@ -671,6 +697,25 @@ class MainActivity : AppCompatActivity() {
                         val updated = latest.copy(selectedPackages = newSelection)
                         persistConfigAsync(updated)
                         updateSplitButtonLabel(updated)
+                    }
+                }
+            }
+        }
+
+        binding.btnProxyBypassApps.setOnClickListener {
+            uiScope.launch {
+                val current = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@MainActivity) }
+                AppPickerDialog.show(
+                    context = this@MainActivity,
+                    scope = uiScope,
+                    initialSelection = current.proxyBypassApps,
+                    title = getString(R.string.action_bypass_proxy_app)
+                ) { newSelection ->
+                    uiScope.launch {
+                        val latest = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@MainActivity) }
+                        val updated = latest.copy(proxyBypassApps = newSelection)
+                        persistConfigAsync(updated)
+                        updateProxyBypassButtonLabel(updated)
                     }
                 }
             }
@@ -927,6 +972,10 @@ class MainActivity : AppCompatActivity() {
         val versionLabel = "v${BuildConfig.VERSION_NAME}"
         binding.tvAppVersion.text = versionLabel
         binding.tvAboutAppVersion.text = "${getString(R.string.app_name)} • $versionLabel"
+        binding.tvAboutDeviceInfo.text =
+            "Device Model: ${Build.MANUFACTURER} ${Build.MODEL} • " +
+                "Android Version: Android ${Build.VERSION.RELEASE} • " +
+                "SDK Level: API ${Build.VERSION.SDK_INT}"
 
         binding.tvAboutGithub.setOnClickListener {
             runCatching {

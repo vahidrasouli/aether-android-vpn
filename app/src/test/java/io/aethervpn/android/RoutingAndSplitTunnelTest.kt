@@ -159,4 +159,47 @@ class RoutingAndSplitTunnelTest {
         )
         assertEquals(listOf("io.aethervpn.android"), remotePlan.disallowedPackages)
     }
+
+    @Test
+    fun userSelectedProxyBypassAppsAreAlwaysExcludedFromTun() {
+        val customClonePkg = "com.v2ray.ang.customclone"
+
+        // ALL_APPS mode: disallowedPackages must include customClonePkg
+        val allApps = SplitTunnelPlanner.plan(
+            mode = SplitTunnelMode.ALL_APPS,
+            selectedPackages = emptySet(),
+            selfPackageName = "io.aethervpn.android",
+            upstreamProxy = "socks5://10.0.0.5:1080",
+            proxyBypassApps = setOf(customClonePkg)
+        )
+        assertTrue(allApps.disallowedPackages.contains(customClonePkg))
+        assertTrue(allApps.disallowedPackages.contains("io.aethervpn.android"))
+
+        // BYPASS_SELECTED mode: disallowedPackages must include customClonePkg + selected
+        val bypassSelected = SplitTunnelPlanner.plan(
+            mode = SplitTunnelMode.BYPASS_SELECTED,
+            selectedPackages = setOf("com.android.chrome"),
+            selfPackageName = "io.aethervpn.android",
+            upstreamProxy = "socks5://127.0.0.1:10808",
+            proxyBypassApps = setOf(customClonePkg)
+        )
+        assertTrue(bypassSelected.disallowedPackages.contains(customClonePkg))
+        assertTrue(bypassSelected.disallowedPackages.contains("com.android.chrome"))
+
+        // ONLY_SELECTED mode: allowedPackages must NEVER contain customClonePkg
+        val onlySelected = SplitTunnelPlanner.plan(
+            mode = SplitTunnelMode.ONLY_SELECTED,
+            selectedPackages = setOf("com.android.chrome", customClonePkg),
+            selfPackageName = "io.aethervpn.android",
+            upstreamProxy = "socks5://127.0.0.1:10808",
+            proxyBypassApps = setOf(customClonePkg)
+        )
+        assertEquals(listOf("com.android.chrome"), onlySelected.allowedPackages)
+        assertFalse(onlySelected.allowedPackages.contains(customClonePkg))
+
+        // Backup JSON round-trip preserves proxyBypassApps
+        val cfg = VpnConfig(proxyBypassApps = setOf(customClonePkg, "org.hiddify.app"))
+        val restored = VpnConfig.fromBackupJson(cfg.toSafeBackupJson()).getOrThrow()
+        assertEquals(setOf(customClonePkg, "org.hiddify.app"), restored.proxyBypassApps)
+    }
 }

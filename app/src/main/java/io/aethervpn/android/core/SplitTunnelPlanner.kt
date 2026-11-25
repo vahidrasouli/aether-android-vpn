@@ -49,20 +49,27 @@ object SplitTunnelPlanner {
         mode: SplitTunnelMode,
         selectedPackages: Set<String>,
         selfPackageName: String,
-        upstreamProxy: String = ""
+        upstreamProxy: String = "",
+        proxyBypassApps: Set<String> = emptySet()
     ): PerAppRoutingPlan {
         val excludeLocalProxies = isLoopbackUpstream(upstreamProxy)
         val autoExcluded = if (excludeLocalProxies) LOCAL_PROXY_PACKAGES else emptySet()
+        val userProxyBypass = proxyBypassApps
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != selfPackageName }
+            .toSet()
+        val mandatoryBypass = autoExcluded + userProxyBypass
 
         val cleaned = selectedPackages
             .asSequence()
             .map { it.trim() }
-            .filter { it.isNotEmpty() && it != selfPackageName && it !in autoExcluded }
+            .filter { it.isNotEmpty() && it != selfPackageName && it !in mandatoryBypass }
             .distinct()
             .sorted()
             .toList()
 
-        val baseDisallowed = (listOf(selfPackageName) + autoExcluded).distinct()
+        val baseDisallowed = (listOf(selfPackageName) + mandatoryBypass).distinct()
 
         return when (mode) {
             SplitTunnelMode.ALL_APPS -> PerAppRoutingPlan(

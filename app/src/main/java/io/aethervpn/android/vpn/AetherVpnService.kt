@@ -710,11 +710,15 @@ class AetherVpnService : VpnService() {
             mode = config.splitTunnelMode,
             selectedPackages = config.selectedPackages,
             selfPackageName = packageName,
-            upstreamProxy = config.upstreamProxy
+            upstreamProxy = config.upstreamProxy,
+            proxyBypassApps = config.proxyBypassApps
         )
 
         if (SplitTunnelPlanner.isLoopbackUpstream(config.upstreamProxy)) {
             DiagnosticsLog.record("Tunnel", "Auto-excluding local proxy apps for loopback upstream")
+        }
+        if (config.proxyBypassApps.isNotEmpty()) {
+            DiagnosticsLog.record("Tunnel", "Bypassing user-selected proxy app(s): ${config.proxyBypassApps.joinToString(", ")}")
         }
 
         plan.disallowedPackages.forEach { pkg ->

@@ -615,9 +615,20 @@ fn build_config(
                 "InproxyTunnelProtocolSelectionProbability".into(),
                 serde_json::json!(1.0),
             );
+            let upper = proto.to_ascii_uppercase();
+            let inproxy_protocols = if upper == "INPROXY" || upper == "INPROXY-WEBRTC" {
+                vec![
+                    "INPROXY-WEBRTC-OSSH".to_string(),
+                    "INPROXY-WEBRTC-TLS-OSSH".to_string(),
+                    "INPROXY-WEBRTC-QUIC-OSSH".to_string(),
+                    "INPROXY-WEBRTC-FRONTED-MEEK-OSSH".to_string(),
+                ]
+            } else {
+                vec![upper]
+            };
             map.insert(
                 "LimitTunnelProtocols".into(),
-                serde_json::json!(["INPROXY-WEBRTC-OSSH", "INPROXY-WEBRTC-RANDEZVOUS-OSSH"]),
+                serde_json::json!(inproxy_protocols),
             );
             map.insert("DisableTactics".into(), serde_json::Value::from(true));
         } else {

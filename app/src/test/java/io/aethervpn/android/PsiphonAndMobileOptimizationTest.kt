@@ -288,6 +288,64 @@ class PsiphonAndMobileOptimizationTest {
         val argsChain = mgr.buildCoreArguments(cfgChain)
         assertTrue(argsChain.contains("--psiphon-protocol"))
         assertEquals("OSSH", argsChain[argsChain.indexOf("--psiphon-protocol") + 1])
+
+        val cfgInproxy = VpnConfig(
+            psiphonMode = PsiphonMode.PSIPHON_ONLY,
+            psiphonProtocol = PsiphonProtocol.INPROXY_WEBRTC_OSSH
+        )
+        val argsInproxy = mgr.buildCoreArguments(cfgInproxy)
+        assertTrue(argsInproxy.contains("--psiphon-protocol"))
+        assertEquals("INPROXY-WEBRTC-OSSH", argsInproxy[argsInproxy.indexOf("--psiphon-protocol") + 1])
+    }
+
+    @Test
+    fun testAllUiPsiphonProtocolsMatchSupportedTunnelProtocols83aa73b() {
+        // Exact SupportedTunnelProtocols minus DisabledTunnelProtocols (TAPDANCE-OSSH)
+        // from CluvexStudio/psiphon-tunnel-core@83aa73b psiphon/common/protocol/protocol.go
+        val supportedNonInproxy = setOf(
+            "SSH",
+            "OSSH",
+            "TLS-OSSH",
+            "UNFRONTED-MEEK-OSSH",
+            "UNFRONTED-MEEK-HTTPS-OSSH",
+            "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+            "FRONTED-MEEK-OSSH",
+            "FRONTED-MEEK-CDN-OSSH",
+            "FRONTED-MEEK-HTTP-OSSH",
+            "FRONTED-MEEK-CDN-HTTP-OSSH",
+            "QUIC-OSSH",
+            "FRONTED-MEEK-QUIC-OSSH",
+            "FRONTED-MEEK-CDN-QUIC-OSSH",
+            "CONJURE-OSSH",
+            "SHADOWSOCKS-OSSH"
+        )
+        val supportedInproxy = setOf(
+            "INPROXY-WEBRTC-SSH",
+            "INPROXY-WEBRTC-OSSH",
+            "INPROXY-WEBRTC-TLS-OSSH",
+            "INPROXY-WEBRTC-UNFRONTED-MEEK-OSSH",
+            "INPROXY-WEBRTC-UNFRONTED-MEEK-HTTPS-OSSH",
+            "INPROXY-WEBRTC-UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+            "INPROXY-WEBRTC-FRONTED-MEEK-OSSH",
+            "INPROXY-WEBRTC-FRONTED-MEEK-HTTP-OSSH",
+            "INPROXY-WEBRTC-QUIC-OSSH",
+            "INPROXY-WEBRTC-FRONTED-MEEK-QUIC-OSSH",
+            "INPROXY-WEBRTC-SHADOWSOCKS-OSSH"
+        )
+        val allValidProtocols = supportedNonInproxy + supportedInproxy
+
+        val nonAuto = PsiphonProtocol.entries.filter { it != PsiphonProtocol.AUTO }
+        assertTrue("Expected at least 10 selectable Psiphon protocols", nonAuto.size >= 10)
+        for (proto in nonAuto) {
+            assertTrue(
+                "UI PsiphonProtocol ${proto.name} (${proto.cliValue}) is not in SupportedTunnelProtocols@83aa73b",
+                proto.cliValue in allValidProtocols
+            )
+            assertFalse(
+                "Disabled/typo protocol must not be exposed: ${proto.cliValue}",
+                proto.cliValue.contains("RANDEZVOUS") || proto.cliValue == "TAPDANCE-OSSH"
+            )
+        }
     }
 
     @Test

@@ -10,6 +10,9 @@ import java.io.InputStreamReader
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.util.Base64
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocket
 
@@ -33,9 +36,11 @@ data class StructuredUpstreamProxy(
     val enabled: Boolean = false,
     val protocol: UpstreamProxyProtocol = UpstreamProxyProtocol.SOCKS5,
     val host: String = "127.0.0.1",
-    val port: Int = 10808
+    val port: Int = 10808,
+    val username: String = "",
+    val password: String = ""
 ) {
-    fun buildUrl(): String {
+    fun buildUrl(maskPassword: Boolean = false): String {
         if (!enabled) return ""
         val cleanHost = host.trim()
         if (cleanHost.isEmpty() || port !in 1..65535) return ""
@@ -44,21 +49,47 @@ data class StructuredUpstreamProxy(
         } else {
             cleanHost
         }
-        return "${protocol.scheme}://$formattedHost:$port"
+        val authPrefix = buildAuthPrefix(maskPassword)
+        return "${protocol.scheme}://$authPrefix$formattedHost:$port"
+    }
+
+    private fun buildAuthPrefix(maskPassword: Boolean): String {
+        val hasUser = username.isNotEmpty()
+        val hasPass = password.isNotEmpty()
+        if (!hasUser && !hasPass) return ""
+        val encodedUser = encodeUserInfo(username)
+        val passPart = when {
+            !hasPass -> ""
+            maskPassword -> "••••"
+            else -> encodeUserInfo(password)
+        }
+        return when {
+            hasUser && hasPass -> "$encodedUser:$passPart@"
+            hasUser -> "$encodedUser@"
+            else -> ":$passPart@"
+        }
     }
 
     fun detectedPreset(): UpstreamProxyPreset {
         val cleanHost = host.trim()
         return when {
-            protocol == UpstreamProxyProtocol.SOCKS5 && cleanHost == "127.0.0.1" && port == 10808 ->
+            username.isEmpty() && password.isEmpty() &&
+                protocol == UpstreamProxyProtocol.SOCKS5 && cleanHost == "127.0.0.1" && port == 10808 ->
                 UpstreamProxyPreset.V2RAYNG
-            protocol == UpstreamProxyProtocol.SOCKS5 && cleanHost == "127.0.0.1" && port == 7890 ->
+            username.isEmpty() && password.isEmpty() &&
+                protocol == UpstreamProxyProtocol.SOCKS5 && cleanHost == "127.0.0.1" && port == 7890 ->
                 UpstreamProxyPreset.SINGBOX_CLASH
             else -> UpstreamProxyPreset.CUSTOM
         }
     }
 
     companion object {
+        private fun encodeUserInfo(value: String): String =
+            URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+        private fun decodeUserInfo(value: String): String =
+            runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
+
         fun parse(rawUrl: String): StructuredUpstreamProxy {
             val trimmed = rawUrl.trim()
             if (trimmed.isEmpty()) {
@@ -74,7 +105,23 @@ data class StructuredUpstreamProxy(
                 else -> UpstreamProxyProtocol.SOCKS5
             }
             val withoutScheme = trimmed.substringAfter("://", trimmed)
-            val authority = withoutScheme.substringAfterLast('@').substringBefore('/')
+            val beforePath = withoutScheme.substringBefore('/')
+            val (userInfoRaw, authority) = if (beforePath.contains('@')) {
+                beforePath.substringBeforeLast('@') to beforePath.substringAfterLast('@')
+            } else {
+                "" to beforePath
+            }
+            val (username, password) = if (userInfoRaw.isNotEmpty()) {
+                val colonIdx = userInfoRaw.indexOf(':')
+                if (colonIdx >= 0) {
+                    decodeUserInfo(userInfoRaw.substring(0, colonIdx)) to
+                        decodeUserInfo(userInfoRaw.substring(colonIdx + 1))
+                } else {
+                    decodeUserInfo(userInfoRaw) to ""
+                }
+            } else {
+                "" to ""
+            }
             val (host, portStr) = if (authority.startsWith("[")) {
                 val h = authority.substringAfter("[").substringBefore("]")
                 val p = authority.substringAfter("]:", "")
@@ -92,7 +139,9 @@ data class StructuredUpstreamProxy(
                 enabled = true,
                 protocol = protocol,
                 host = host.trim().ifEmpty { "127.0.0.1" },
-                port = port
+                port = port,
+                username = username,
+                password = password
             )
         }
     }
@@ -154,14 +203,18 @@ object UpstreamProxyTester {
         protocol: UpstreamProxyProtocol,
         host: String,
         port: Int,
-        timeoutMs: Int = 6_000
-    ): ProxyTestResult = testInternal(protocol, host, port, timeoutMs)
+        timeoutMs: Int = 6_000,
+        username: String = "",
+        password: String = ""
+    ): ProxyTestResult = testInternal(protocol, host, port, timeoutMs, username, password)
 
     internal suspend fun testInternal(
         protocol: UpstreamProxyProtocol,
         host: String,
         port: Int,
         timeoutMs: Int = 6_000,
+        username: String = "",
+        password: String = "",
         tlsUpgrade: (Socket, String, Int, Int, Boolean) -> Socket = ::defaultTlsUpgrade
     ): ProxyTestResult = withContext(Dispatchers.IO) {
         val cleanHost = host.trim()
@@ -174,11 +227,11 @@ object UpstreamProxyTester {
 
         try {
             // Stage 1: Local Handshake
-            verifyLocalHandshake(protocol, cleanHost, port, timeoutMs)
+            verifyLocalHandshake(protocol, cleanHost, port, timeoutMs, username, password)
 
             // Stage 2: End-to-End Cloudflare Trace through proxy
             val traceStartMs = System.currentTimeMillis()
-            val trace = fetchTraceThroughProxy(protocol, cleanHost, port, timeoutMs, tlsUpgrade)
+            val trace = fetchTraceThroughProxy(protocol, cleanHost, port, timeoutMs, username, password, tlsUpgrade)
             val rtt = (System.currentTimeMillis() - traceStartMs).coerceAtLeast(1L)
 
             // Stage 3: Cloudflare MASQUE Edge Reachability (162.159.198.1:443 / cloudflareaccess.com)
@@ -187,6 +240,8 @@ object UpstreamProxyTester {
                 proxyHost = cleanHost,
                 proxyPort = port,
                 timeoutMs = timeoutMs,
+                username = username,
+                password = password,
                 tlsUpgrade = tlsUpgrade
             )
 
@@ -208,29 +263,33 @@ object UpstreamProxyTester {
         protocol: UpstreamProxyProtocol,
         host: String,
         port: Int,
-        timeoutMs: Int
+        timeoutMs: Int,
+        username: String = "",
+        password: String = ""
     ) {
         Socket().use { socket ->
             socket.soTimeout = timeoutMs
             socket.connect(InetSocketAddress(host, port), timeoutMs)
             when (protocol) {
                 UpstreamProxyProtocol.SOCKS5 -> {
-                    val out = socket.getOutputStream()
-                    out.write(byteArrayOf(0x05, 0x01, 0x00))
-                    out.flush()
-                    val input = socket.getInputStream()
-                    val ver = input.read()
-                    val method = input.read()
-                    if (ver != 0x05 || method < 0) {
-                        throw IllegalStateException("Not a SOCKS5 proxy")
-                    }
-                    if (method == 0xFF) {
-                        throw IllegalStateException("SOCKS5 requires auth")
-                    }
+                    negotiateSocks5Auth(
+                        input = socket.getInputStream(),
+                        out = socket.getOutputStream(),
+                        username = username,
+                        password = password
+                    )
                 }
                 UpstreamProxyProtocol.HTTP -> {
                     val out = socket.getOutputStream()
-                    val req = "HEAD / HTTP/1.1\r\nHost: $host:$port\r\nConnection: close\r\n\r\n"
+                    val authHeader = httpBasicAuthHeader(username, password)
+                    val req = buildString {
+                        append("HEAD / HTTP/1.1\r\n")
+                        append("Host: $host:$port\r\n")
+                        if (authHeader != null) {
+                            append("Proxy-Authorization: $authHeader\r\n")
+                        }
+                        append("Connection: close\r\n\r\n")
+                    }
                     out.write(req.toByteArray(Charsets.US_ASCII))
                     out.flush()
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.US_ASCII))
@@ -238,9 +297,74 @@ object UpstreamProxyTester {
                     if (statusLine.isNullOrBlank() || !statusLine.startsWith("HTTP/1.", ignoreCase = true)) {
                         throw IllegalStateException("Not an HTTP proxy")
                     }
+                    val code = statusLine.split(" ", limit = 3).getOrNull(1)?.toIntOrNull() ?: 0
+                    if (code == 407) {
+                        throw IllegalStateException("HTTP proxy authentication failed (407)")
+                    }
                 }
             }
         }
+    }
+
+    private fun negotiateSocks5Auth(
+        input: InputStream,
+        out: java.io.OutputStream,
+        username: String,
+        password: String
+    ) {
+        val hasCredentials = username.isNotEmpty() || password.isNotEmpty()
+        if (hasCredentials) {
+            out.write(byteArrayOf(0x05, 0x02, 0x00, 0x02))
+        } else {
+            out.write(byteArrayOf(0x05, 0x01, 0x00))
+        }
+        out.flush()
+
+        val greeting = ByteArray(2)
+        readFully(input, greeting)
+        val ver = greeting[0].toInt() and 0xFF
+        val method = greeting[1].toInt() and 0xFF
+        if (ver != 0x05) {
+            throw IllegalStateException("Not a SOCKS5 proxy")
+        }
+        when (method) {
+            0x00 -> return
+            0x02 -> {
+                if (!hasCredentials) {
+                    throw IllegalStateException("SOCKS5 requires auth")
+                }
+                val uBytes = username.toByteArray(Charsets.UTF_8)
+                val pBytes = password.toByteArray(Charsets.UTF_8)
+                if (uBytes.size > 255 || pBytes.size > 255) {
+                    throw IllegalArgumentException("SOCKS5 credentials exceed 255 bytes")
+                }
+                val authReq = ByteArray(3 + uBytes.size + pBytes.size).apply {
+                    this[0] = 0x01
+                    this[1] = uBytes.size.toByte()
+                    System.arraycopy(uBytes, 0, this, 2, uBytes.size)
+                    this[2 + uBytes.size] = pBytes.size.toByte()
+                    System.arraycopy(pBytes, 0, this, 3 + uBytes.size, pBytes.size)
+                }
+                out.write(authReq)
+                out.flush()
+
+                val authResp = ByteArray(2)
+                readFully(input, authResp)
+                if (authResp[0] != 0x01.toByte() || authResp[1] != 0x00.toByte()) {
+                    throw IllegalStateException("SOCKS5 authentication failed")
+                }
+            }
+            0xFF -> throw IllegalStateException(
+                if (hasCredentials) "SOCKS5 no acceptable auth method" else "SOCKS5 requires auth"
+            )
+            else -> throw IllegalStateException("Unsupported SOCKS5 auth method (0x%02X)".format(method))
+        }
+    }
+
+    private fun httpBasicAuthHeader(username: String, password: String): String? {
+        if (username.isEmpty() && password.isEmpty()) return null
+        val encoded = Base64.getEncoder().encodeToString("$username:$password".toByteArray(Charsets.UTF_8))
+        return "Basic $encoded"
     }
 
     private fun fetchTraceThroughProxy(
@@ -248,6 +372,8 @@ object UpstreamProxyTester {
         proxyHost: String,
         proxyPort: Int,
         timeoutMs: Int,
+        username: String,
+        password: String,
         tlsUpgrade: (Socket, String, Int, Int, Boolean) -> Socket
     ): CloudflareTraceInfo {
         var rawSocket: Socket? = null
@@ -260,7 +386,9 @@ object UpstreamProxyTester {
                 targetHost = TRACE_HOST,
                 targetPort = TRACE_PORT,
                 isIpLiteral = false,
-                timeoutMs = timeoutMs
+                timeoutMs = timeoutMs,
+                username = username,
+                password = password
             )
             tlsSocket = tlsUpgrade(rawSocket, TRACE_HOST, TRACE_PORT, timeoutMs, false)
             val out = tlsSocket.getOutputStream()
@@ -297,6 +425,8 @@ object UpstreamProxyTester {
         proxyHost: String,
         proxyPort: Int,
         timeoutMs: Int,
+        username: String,
+        password: String,
         tlsUpgrade: (Socket, String, Int, Int, Boolean) -> Socket
     ): Pair<Boolean, String> {
         var rawSocket: Socket? = null
@@ -309,7 +439,9 @@ object UpstreamProxyTester {
                 targetHost = MASQUE_EDGE_IP,
                 targetPort = MASQUE_EDGE_PORT,
                 isIpLiteral = true,
-                timeoutMs = timeoutMs
+                timeoutMs = timeoutMs,
+                username = username,
+                password = password
             )
             tlsSocket = tlsUpgrade(rawSocket, MASQUE_EDGE_SNI, MASQUE_EDGE_PORT, timeoutMs, true)
             true to "OK"
@@ -328,7 +460,9 @@ object UpstreamProxyTester {
         targetHost: String,
         targetPort: Int,
         isIpLiteral: Boolean,
-        timeoutMs: Int
+        timeoutMs: Int,
+        username: String = "",
+        password: String = ""
     ): Socket {
         val socket = Socket()
         try {
@@ -339,13 +473,12 @@ object UpstreamProxyTester {
 
             when (protocol) {
                 UpstreamProxyProtocol.SOCKS5 -> {
-                    out.write(byteArrayOf(0x05, 0x01, 0x00))
-                    out.flush()
-                    val greeting = ByteArray(2)
-                    readFully(input, greeting)
-                    if (greeting[0] != 0x05.toByte() || greeting[1] != 0x00.toByte()) {
-                        throw IllegalStateException("SOCKS5 handshake rejected")
-                    }
+                    negotiateSocks5Auth(
+                        input = input,
+                        out = out,
+                        username = username,
+                        password = password
+                    )
 
                     val connectReq = if (isIpLiteral) {
                         val addrBytes = InetAddress.getByName(targetHost).address
@@ -395,9 +528,15 @@ object UpstreamProxyTester {
                     }
                 }
                 UpstreamProxyProtocol.HTTP -> {
-                    val req = "CONNECT $targetHost:$targetPort HTTP/1.1\r\n" +
-                        "Host: $targetHost:$targetPort\r\n" +
-                        "Proxy-Connection: keep-alive\r\n\r\n"
+                    val authHeader = httpBasicAuthHeader(username, password)
+                    val req = buildString {
+                        append("CONNECT $targetHost:$targetPort HTTP/1.1\r\n")
+                        append("Host: $targetHost:$targetPort\r\n")
+                        if (authHeader != null) {
+                            append("Proxy-Authorization: $authHeader\r\n")
+                        }
+                        append("Proxy-Connection: keep-alive\r\n\r\n")
+                    }
                     out.write(req.toByteArray(Charsets.US_ASCII))
                     out.flush()
                     val statusLine = readAsciiLine(input)

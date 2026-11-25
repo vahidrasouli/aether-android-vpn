@@ -57,9 +57,10 @@
     <string name="action_check_updates">Check for Updates</string>
     <string name="action_download_install">Download &amp; Update</string>
     <string name="update_status_idle">Tap to check GitHub Releases for a newer version.</string>
-    <string name="title_upstream_proxy">UPSTREAM PROXY (LOCAL / CHAIN)</string>
+    <string name="title_upstream_proxy">UPSTREAM PROXY (LOCAL / REMOTE)</string>
     <string name="enable_upstream_proxy">Enable Upstream Proxy</string>
     <string name="action_test_proxy">Test Proxy</string>
+    <string name="action_bypass_proxy_app">Bypass Proxy App (Direct)</string>
 
     <string name="title_engine_lab">Engine &amp; Performance Lab</string>
     <string name="engine_lab_entry_subtitle">Tune Aether Core, Psiphon Go runtime, HEV packet buffers &amp; presets</string>

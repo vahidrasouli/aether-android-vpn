@@ -34,9 +34,13 @@ object AppPickerDialog {
         context: Context,
         scope: CoroutineScope,
         initialSelection: Set<String>,
+        title: String? = null,
         onSelectionChanged: (Set<String>) -> Unit
     ) {
         val binding = DialogAppPickerBinding.inflate(LayoutInflater.from(context))
+        if (!title.isNullOrBlank()) {
+            binding.tvPickerTitle.text = title
+        }
         val selected = initialSelection.toMutableSet()
         var allApps: List<InstalledAppEntry> = emptyList()
 

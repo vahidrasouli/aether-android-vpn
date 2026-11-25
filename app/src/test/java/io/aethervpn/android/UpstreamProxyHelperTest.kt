@@ -166,4 +166,171 @@ class UpstreamProxyHelperTest {
         assertTrue(ok.masqueEdgeOk)
         assertEquals("OK", ok.masqueEdgeDetail)
     }
+
+    @Test
+    fun authenticatedRemoteProxyUrlBuildAndParseRoundTripsWithUrlEncoding() {
+        val socksAuth = StructuredUpstreamProxy(
+            enabled = true,
+            protocol = UpstreamProxyProtocol.SOCKS5,
+            host = "proxy.example.com",
+            port = 1080,
+            username = "user@domain",
+            password = "p@ss:word 1+2"
+        )
+        val built = socksAuth.buildUrl()
+        assertEquals("socks5://user%40domain:p%40ss%3Aword%201%2B2@proxy.example.com:1080", built)
+        assertEquals(
+            "socks5://user%40domain:••••@proxy.example.com:1080",
+            socksAuth.buildUrl(maskPassword = true)
+        )
+        assertEquals(UpstreamProxyPreset.CUSTOM, socksAuth.detectedPreset())
+
+        val parsedSocks = StructuredUpstreamProxy.parse(built)
+        assertTrue(parsedSocks.enabled)
+        assertEquals(UpstreamProxyProtocol.SOCKS5, parsedSocks.protocol)
+        assertEquals("proxy.example.com", parsedSocks.host)
+        assertEquals(1080, parsedSocks.port)
+        assertEquals("user@domain", parsedSocks.username)
+        assertEquals("p@ss:word 1+2", parsedSocks.password)
+
+        val httpAuth = StructuredUpstreamProxy(
+            enabled = true,
+            protocol = UpstreamProxyProtocol.HTTP,
+            host = "203.0.113.10",
+            port = 8080,
+            username = "alice",
+            password = "secret"
+        )
+        val httpUrl = httpAuth.buildUrl()
+        assertEquals("http://alice:secret@203.0.113.10:8080", httpUrl)
+        val parsedHttp = StructuredUpstreamProxy.parse(httpUrl)
+        assertEquals(UpstreamProxyProtocol.HTTP, parsedHttp.protocol)
+        assertEquals("alice", parsedHttp.username)
+        assertEquals("secret", parsedHttp.password)
+    }
+
+    @Test
+    fun socks5Rfc1929AndHttpBasicAuthAreSupportedInProxyTester() = runBlocking {
+        // 1. SOCKS5 RFC 1929 Username/Password Auth
+        val socksServer = ServerSocket(0)
+        val socksPort = socksServer.localPort
+        val socksThread = Thread {
+            try {
+                socksServer.soTimeout = 4_000
+                repeat(3) { connIdx ->
+                    socksServer.accept().use { s ->
+                        val inp = s.getInputStream()
+                        val out = s.getOutputStream()
+                        val greeting = ByteArray(4)
+                        inp.read(greeting)
+                        // Expect [0x05, 0x02, 0x00, 0x02]
+                        assertEquals(0x02.toByte(), greeting[3])
+                        out.write(byteArrayOf(0x05, 0x02))
+                        out.flush()
+
+                        // RFC 1929 auth subnegotiation
+                        val ver = inp.read()
+                        val uLen = inp.read()
+                        val uBytes = ByteArray(uLen).also { inp.read(it) }
+                        val pLen = inp.read()
+                        val pBytes = ByteArray(pLen).also { inp.read(it) }
+                        assertEquals(0x01, ver)
+                        assertEquals("alice", String(uBytes, Charsets.UTF_8))
+                        assertEquals("s3cr3t", String(pBytes, Charsets.UTF_8))
+                        out.write(byteArrayOf(0x01, 0x00))
+                        out.flush()
+
+                        if (connIdx > 0) {
+                            val hdr = ByteArray(4)
+                            inp.read(hdr)
+                            if (hdr[3].toInt() == 0x03) {
+                                val len = inp.read()
+                                inp.read(ByteArray(len + 2))
+                            } else {
+                                inp.read(ByteArray(4 + 2))
+                            }
+                            out.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
+                            out.flush()
+                            if (connIdx == 1) {
+                                val reader = BufferedReader(InputStreamReader(inp, Charsets.US_ASCII))
+                                var line = reader.readLine()
+                                while (!line.isNullOrEmpty()) line = reader.readLine()
+                                out.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nip=198.51.100.77\nloc=DE\ncolo=FRA\nwarp=off\n".toByteArray())
+                                out.flush()
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { socksServer.close() }
+            }
+        }
+        socksThread.isDaemon = true
+        socksThread.start()
+
+        val socksResult = UpstreamProxyTester.testInternal(
+            protocol = UpstreamProxyProtocol.SOCKS5,
+            host = "127.0.0.1",
+            port = socksPort,
+            timeoutMs = 3_000,
+            username = "alice",
+            password = "s3cr3t",
+            tlsUpgrade = { raw, _, _, _, _ -> raw }
+        )
+        socksThread.join(3_000)
+        assertTrue("Expected SOCKS5 auth Success, got $socksResult", socksResult is ProxyTestResult.Success)
+
+        // 2. HTTP Proxy-Authorization: Basic
+        val httpServer = ServerSocket(0)
+        val httpPort = httpServer.localPort
+        val expectedAuth = "Proxy-Authorization: Basic " +
+            java.util.Base64.getEncoder().encodeToString("bob:hunter2".toByteArray(Charsets.UTF_8))
+        val httpThread = Thread {
+            try {
+                httpServer.soTimeout = 4_000
+                repeat(3) { connIdx ->
+                    httpServer.accept().use { s ->
+                        val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.US_ASCII))
+                        val out = s.getOutputStream()
+                        val headers = mutableListOf<String>()
+                        var line = reader.readLine()
+                        while (!line.isNullOrEmpty()) {
+                            headers += line
+                            line = reader.readLine()
+                        }
+                        assertTrue(
+                            "Missing Basic Proxy-Authorization header: $headers",
+                            headers.any { it.equals(expectedAuth, ignoreCase = true) }
+                        )
+                        out.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                        out.flush()
+                        if (connIdx == 1) {
+                            var reqLine = reader.readLine()
+                            while (!reqLine.isNullOrEmpty()) reqLine = reader.readLine()
+                            out.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nip=203.0.113.55\nloc=NL\ncolo=AMS\nwarp=off\n".toByteArray())
+                            out.flush()
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { httpServer.close() }
+            }
+        }
+        httpThread.isDaemon = true
+        httpThread.start()
+
+        val httpResult = UpstreamProxyTester.testInternal(
+            protocol = UpstreamProxyProtocol.HTTP,
+            host = "127.0.0.1",
+            port = httpPort,
+            timeoutMs = 3_000,
+            username = "bob",
+            password = "hunter2",
+            tlsUpgrade = { raw, _, _, _, _ -> raw }
+        )
+        httpThread.join(3_000)
+        assertTrue("Expected HTTP auth Success, got $httpResult", httpResult is ProxyTestResult.Success)
+    }
 }

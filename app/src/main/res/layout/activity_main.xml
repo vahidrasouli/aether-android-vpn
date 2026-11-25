@@ -732,7 +732,7 @@
                                     android:layout_height="48dp"
                                     android:layout_marginStart="8dp"
                                     android:layout_weight="1.8"
-                                    android:hint="127.0.0.1"
+                                    android:hint="127.0.0.1 or proxy.example.com"
                                     android:inputType="textNoSuggestions"
                                     android:singleLine="true"
                                     android:text="127.0.0.1"
@@ -755,6 +755,72 @@
                                     android:textColorHint="@color/text_secondary"
                                     android:textSize="14sp" />
                             </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:baselineAligned="false"
+                                android:orientation="horizontal">
+
+                                <com.google.android.material.textfield.TextInputLayout
+                                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:hint="Username (optional)"
+                                    app:boxCornerRadiusBottomEnd="10dp"
+                                    app:boxCornerRadiusBottomStart="10dp"
+                                    app:boxCornerRadiusTopEnd="10dp"
+                                    app:boxCornerRadiusTopStart="10dp"
+                                    app:boxStrokeColor="@color/card_border">
+
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etUpstreamUsername"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:inputType="textNoSuggestions"
+                                        android:maxLines="1"
+                                        android:textColor="@color/text_primary"
+                                        android:textColorHint="@color/text_secondary"
+                                        android:textSize="13sp" />
+                                </com.google.android.material.textfield.TextInputLayout>
+
+                                <com.google.android.material.textfield.TextInputLayout
+                                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="8dp"
+                                    android:layout_weight="1"
+                                    android:hint="Password (optional)"
+                                    app:boxCornerRadiusBottomEnd="10dp"
+                                    app:boxCornerRadiusBottomStart="10dp"
+                                    app:boxCornerRadiusTopEnd="10dp"
+                                    app:boxCornerRadiusTopStart="10dp"
+                                    app:boxStrokeColor="@color/card_border"
+                                    app:endIconMode="password_toggle">
+
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etUpstreamPassword"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:inputType="textPassword"
+                                        android:maxLines="1"
+                                        android:textColor="@color/text_primary"
+                                        android:textColorHint="@color/text_secondary"
+                                        android:textSize="13sp" />
+                                </com.google.android.material.textfield.TextInputLayout>
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnProxyBypassApps"
+                                style="@style/Widget.Aether.Button.Outlined"
+                                android:layout_width="match_parent"
+                                android:layout_height="44dp"
+                                android:layout_marginTop="8dp"
+                                android:minHeight="44dp"
+                                android:text="@string/action_bypass_proxy_app"
+                                android:textSize="12sp" />
 
                             <TextView
                                 android:id="@+id/tvUpstreamUrlPreview"
@@ -1027,6 +1093,14 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="3dp"
                             android:text="@string/about_developer"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tvAboutDeviceInfo"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
                             android:textColor="@color/text_secondary"
                             android:textSize="12sp" />
 

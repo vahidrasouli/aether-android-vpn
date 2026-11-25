@@ -30,6 +30,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Compute unique debug build version
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DEBUG_VER="1.1.0-debug.b${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          echo "DEBUG_VERSION=${DEBUG_VER}" >> "$GITHUB_ENV"
+          echo "Computed Debug Version: ${DEBUG_VER}"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -223,27 +230,6 @@ jobs:
       - name: Assemble ARM64 Debug APK (bounded workers)
         run: gradle --max-workers=2 :app:assembleDebug
 
-      - name: Assemble signed Release APK (only when keystore secrets are present)
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
-            cat > keystore.properties <<EOF
-          storeFile=../release.jks
-          storePassword=${KEYSTORE_PASSWORD}
-          keyAlias=${KEY_ALIAS}
-          keyPassword=${KEY_PASSWORD}
-          EOF
-            gradle --max-workers=2 :app:assembleRelease
-            rm -f release.jks keystore.properties
-          else
-            echo "No signing keystore configured; skipping release APK assembly."
-          fi
-
       - name: Verify APK structure and native libraries
         run: |
           APK=$(ls app/build/outputs/apk/debug/aether-android-arm64-v*.apk | head -n 1)
@@ -287,10 +273,7 @@ jobs:
       - name: Stage APK and generate SHA-256 checksums
         run: |
           mkdir -p release-artifacts
-          cp app/build/outputs/apk/debug/aether-android-arm64-v*.apk release-artifacts/
-          if ls app/build/outputs/apk/release/aether-android-arm64-v*.apk 1> /dev/null 2>&1; then
-            cp app/build/outputs/apk/release/aether-android-arm64-v*.apk release-artifacts/
-          fi
+          cp app/build/outputs/apk/debug/aether-android-arm64-v${DEBUG_VERSION}.apk release-artifacts/
           cd release-artifacts
           sha256sum *.apk > SHA256SUMS.txt
           echo "Generated SHA-256 Checksums:"
@@ -299,32 +282,5 @@ jobs:
       - name: Upload workflow APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aether-android-vpn-arm64
+          name: aether-android-arm64-v${{ env.DEBUG_VERSION }}
           path: release-artifacts/*
-
-  publish-release:
-    name: Publish GitHub Release
-    needs: build-arm64
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: aether-android-vpn-arm64
-          path: release-artifacts
-
-      - name: Publish Verified GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            release-artifacts/*.apk
-            release-artifacts/SHA256SUMS.txt
