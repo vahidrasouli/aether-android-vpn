@@ -3,10 +3,13 @@ package io.aethervpn.android
 import io.aethervpn.android.core.AetherEngineManager
 import io.aethervpn.android.core.AetherLogCallback
 import io.aethervpn.android.core.AetherNative
+import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.PsiphonProtocol
 import io.aethervpn.android.core.SocketProtectorCallback
 import io.aethervpn.android.core.VpnConfig
+import io.aethervpn.android.vpn.AetherVpnService
 import hev.htproxy.TProxyService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -249,9 +252,12 @@ class PsiphonAndMobileOptimizationTest {
         )
         val args = mgr.buildCoreArguments(cfg, psiphonBinaryPath = "/data/app/libpsiphon.so")
         assertTrue(args.contains("--psiphon-only"))
+        assertTrue(args.contains("--perf"))
+        assertEquals("low", args[args.indexOf("--perf") + 1])
         assertTrue(args.contains("--upstream"))
         assertTrue(args.contains("--psiphon-region"))
         assertTrue(args.contains("--psiphon-bin"))
+        assertFalse(args.contains("--psiphon-protocol"))
         assertFalse(args.contains("--protocol"))
         assertFalse(args.contains("--scan"))
         assertFalse(args.contains("--h3"))
@@ -259,5 +265,67 @@ class PsiphonAndMobileOptimizationTest {
         assertFalse(args.contains("--ech"))
         assertFalse(args.contains("--fragment"))
         assertFalse(args.contains("--masque-sni"))
+    }
+
+    @Test
+    fun testPsiphonProtocolSelectorCliMappingAndPerfPreserved() {
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+        val cfgOnly = VpnConfig(
+            psiphonMode = PsiphonMode.PSIPHON_ONLY,
+            psiphonProtocol = PsiphonProtocol.FRONTED_MEEK_CDN_OSSH,
+            perfProfile = PerfProfile.LOW
+        )
+        val argsOnly = mgr.buildCoreArguments(cfgOnly)
+        assertTrue(argsOnly.contains("--perf"))
+        assertEquals("low", argsOnly[argsOnly.indexOf("--perf") + 1])
+        assertTrue(argsOnly.contains("--psiphon-protocol"))
+        assertEquals("FRONTED-MEEK-CDN-OSSH", argsOnly[argsOnly.indexOf("--psiphon-protocol") + 1])
+
+        val cfgChain = VpnConfig(
+            psiphonMode = PsiphonMode.WARP_TO_PSIPHON,
+            psiphonProtocol = PsiphonProtocol.OSSH
+        )
+        val argsChain = mgr.buildCoreArguments(cfgChain)
+        assertTrue(argsChain.contains("--psiphon-protocol"))
+        assertEquals("OSSH", argsChain[argsChain.indexOf("--psiphon-protocol") + 1])
+    }
+
+    @Test
+    fun testUpstreamProxyFallbackPolicyForAllUdpWarpProtocols() {
+        val udpProtocols = listOf(
+            AetherProtocol.MASQUE_H3,
+            AetherProtocol.WIREGUARD,
+            AetherProtocol.GOOL,
+            AetherProtocol.GOOL_CLASSIC,
+            AetherProtocol.MIM
+        )
+        for (proto in udpProtocols) {
+            val cfgWithProxy = VpnConfig(
+                protocol = proto,
+                autoFallbackToH2 = false,
+                upstreamProxy = "socks5://127.0.0.1:10808"
+            )
+            assertTrue(
+                "UDP protocol $proto with upstream proxy must fall back to MASQUE_H2",
+                AetherVpnService.shouldFallbackToMasqueH2(cfgWithProxy, proto, userRequestedStop = false)
+            )
+        }
+
+        val cfgH2 = VpnConfig(
+            protocol = AetherProtocol.MASQUE_H2,
+            upstreamProxy = "socks5://127.0.0.1:10808"
+        )
+        assertFalse(
+            AetherVpnService.shouldFallbackToMasqueH2(cfgH2, AetherProtocol.MASQUE_H2, userRequestedStop = false)
+        )
+
+        val cfgPsiphonOnly = VpnConfig(
+            protocol = AetherProtocol.WIREGUARD,
+            psiphonMode = PsiphonMode.PSIPHON_ONLY,
+            upstreamProxy = "socks5://127.0.0.1:10808"
+        )
+        assertFalse(
+            AetherVpnService.shouldFallbackToMasqueH2(cfgPsiphonOnly, AetherProtocol.WIREGUARD, userRequestedStop = false)
+        )
     }
 }

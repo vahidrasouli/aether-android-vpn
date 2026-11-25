@@ -52,7 +52,7 @@ class TunnelValidatorTest {
         serverThread.isDaemon = true
         serverThread.start()
 
-        val result = TunnelValidator.verifyThroughSocks(port, timeoutMs = 2_000)
+        val result = TunnelValidator.verifyThroughSocks(port, timeoutMs = 2_000, maxAttempts = 1)
         serverThread.join(2_000)
 
         assertTrue("Result must be failure on SOCKS refusal", result.isFailure)
@@ -141,6 +141,81 @@ class TunnelValidatorTest {
 
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull()?.message?.contains("missing exit location") == true)
+    }
+
+    @Test
+    fun retriesTransientGeneralSocksFailureUpToThreeAttemptsAndUsesDirectIpv4Connect() {
+        val server = ServerSocket(0)
+        val port = server.localPort
+        var attemptCount = 0
+        var observedAtyp = -1
+        var observedIp = ByteArray(0)
+
+        val thread = Thread {
+            try {
+                server.soTimeout = 4_000
+                repeat(3) { idx ->
+                    val client = server.accept()
+                    attemptCount++
+                    val inStream = client.getInputStream()
+                    val outStream = client.getOutputStream()
+
+                    val greeting = ByteArray(3)
+                    inStream.read(greeting)
+                    outStream.write(byteArrayOf(0x05, 0x00))
+                    outStream.flush()
+
+                    val cmdHeader = ByteArray(4)
+                    inStream.read(cmdHeader)
+                    observedAtyp = cmdHeader[3].toInt() and 0xFF
+                    observedIp = ByteArray(4)
+                    inStream.read(observedIp)
+                    val portBytes = ByteArray(2)
+                    inStream.read(portBytes)
+
+                    if (idx < 2) {
+                        // First 2 attempts fail with 0x01 General SOCKS server failure
+                        outStream.write(byteArrayOf(0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                        outStream.flush()
+                        client.close()
+                    } else {
+                        // 3rd attempt succeeds
+                        outStream.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
+                        outStream.flush()
+                        val reader = BufferedReader(InputStreamReader(inStream, Charsets.US_ASCII))
+                        var line = reader.readLine()
+                        while (!line.isNullOrEmpty()) {
+                            line = reader.readLine()
+                        }
+                        val resp = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nip=104.28.1.2\ncolo=FRA\nloc=DE\nwarp=on\n"
+                        outStream.write(resp.toByteArray(Charsets.UTF_8))
+                        outStream.flush()
+                        client.close()
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+
+        val result = TunnelValidator.verifyThroughSocksInternal(
+            socksPort = port,
+            timeoutMs = 2_000,
+            psiphonMode = PsiphonMode.OFF,
+            maxAttempts = 3,
+            retryDelayMs = 20L,
+            tlsUpgrade = { raw, _ -> raw }
+        )
+        thread.join(3_000)
+
+        assertTrue("Expected retry loop to succeed on 3rd attempt: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(3, attemptCount)
+        assertEquals("Must use ATYP 0x01 (IPv4) to avoid inner DNS stall", 0x01, observedAtyp)
+        assertEquals(listOf(1, 1, 1, 1), observedIp.map { it.toInt() and 0xFF })
+        assertEquals("104.28.1.2", result.getOrThrow().publicIp)
     }
 
     private fun startMockTraceSocksServer(traceBody: String): Pair<Int, Thread> {

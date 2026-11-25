@@ -29,11 +29,13 @@ class AetherEngineManager(private val privateDataDir: File) {
         val configFile = File(stateDir, "aether.toml")
 
         // Strict Resource Isolation: in Psiphon Only mode, skip all WARP/MASQUE flags
-        // (protocol, gateway scan, netstack/IP/perf, MASQUE SNI/ECH/fragment, WireGuard keepalive)
+        // (protocol, gateway scan, netstack/IP, MASQUE SNI/ECH/fragment, WireGuard keepalive)
+        // while preserving --perf so mobile defaults (low) are never overridden by desktop High.
         if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) {
             val psiphonOnlyArgs = mutableListOf(
                 "--bind", "${VpnConfig.LOOPBACK_HOST}:${VpnConfig.PSIPHON_SOCKS_PORT}",
                 "--config", configFile.absolutePath,
+                "--perf", config.perfProfile.cliValue,
                 "--log-level", "info",
                 "--psiphon-only"
             )
@@ -43,6 +45,10 @@ class AetherEngineManager(private val privateDataDir: File) {
             if (config.psiphonRegion.isNotBlank() && !config.psiphonRegion.equals("auto", ignoreCase = true)) {
                 psiphonOnlyArgs += "--psiphon-region"
                 psiphonOnlyArgs += config.psiphonRegion.trim().uppercase()
+            }
+            if (config.psiphonProtocol != PsiphonProtocol.AUTO) {
+                psiphonOnlyArgs += "--psiphon-protocol"
+                psiphonOnlyArgs += config.psiphonProtocol.cliValue
             }
             if (!psiphonBinaryPath.isNullOrBlank()) {
                 psiphonOnlyArgs += "--psiphon-bin"
@@ -169,6 +175,11 @@ class AetherEngineManager(private val privateDataDir: File) {
                 args += config.psiphonRegion.trim().uppercase()
             }
 
+            if (config.psiphonProtocol != PsiphonProtocol.AUTO) {
+                args += "--psiphon-protocol"
+                args += config.psiphonProtocol.cliValue
+            }
+
             if (!psiphonBinaryPath.isNullOrBlank()) {
                 args += "--psiphon-bin"
                 args += psiphonBinaryPath
@@ -203,12 +214,21 @@ class AetherEngineManager(private val privateDataDir: File) {
 
             else -> 35_000L
         }
-        return when (config.psiphonMode) {
+        val rawTimeout = when (config.psiphonMode) {
             // Psiphon needs extra time for initial Meek/CDN dial, tactics fetch, and (for PSIPHON_TO_WARP) WARP chaining
             PsiphonMode.PSIPHON_ONLY -> maxOf(baseTimeoutMs, 120_000L)
             PsiphonMode.PSIPHON_TO_WARP -> maxOf(baseTimeoutMs, 150_000L)
             PsiphonMode.WARP_TO_PSIPHON,
             PsiphonMode.OFF -> baseTimeoutMs
+        }
+        return if (config.upstreamProxy.isNotBlank() &&
+            config.psiphonMode != PsiphonMode.PSIPHON_ONLY &&
+            proto != AetherProtocol.MASQUE_H2
+        ) {
+            val capMs = if (config.psiphonMode == PsiphonMode.PSIPHON_TO_WARP) 45_000L else 20_000L
+            minOf(rawTimeout, capMs)
+        } else {
+            rawTimeout
         }
     }
 

@@ -43,6 +43,7 @@ import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.ProxyTestResult
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.PsiphonProtocol
 import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.ScanMode
 import io.aethervpn.android.core.SplitTunnelMode
@@ -240,6 +241,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerProtocol.adapter = simpleAdapter(AetherProtocol.entries.map { it.label })
         binding.spinnerPsiphonMode.adapter = simpleAdapter(PsiphonMode.entries.map { it.label })
         binding.spinnerPsiphonRegion.adapter = simpleAdapter(VpnConfig.PSIPHON_REGIONS.map { it.second })
+        binding.spinnerPsiphonProtocol.adapter = simpleAdapter(PsiphonProtocol.entries.map { it.label })
         binding.spinnerSplitMode.adapter = simpleAdapter(SplitTunnelMode.entries.map { it.label })
         binding.spinnerIpFamily.adapter = simpleAdapter(IpFamily.entries.map { it.label })
         binding.spinnerScanMode.adapter = simpleAdapter(ScanMode.entries.map { it.label })
@@ -272,6 +274,7 @@ class MainActivity : AppCompatActivity() {
             binding.spinnerProtocol,
             binding.spinnerPsiphonMode,
             binding.spinnerPsiphonRegion,
+            binding.spinnerPsiphonProtocol,
             binding.spinnerSplitMode,
             binding.spinnerIpFamily,
             binding.spinnerScanMode,
@@ -420,7 +423,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnTestProxy.isEnabled = true
             when (result) {
                 is ProxyTestResult.Success -> {
-                    binding.tvProxyTestResult.text = "Proxy OK • ${result.rttMs}ms"
+                    binding.tvProxyTestResult.text = result.formatSummary()
                     binding.tvProxyTestResult.backgroundTintList =
                         ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent_primary_container))
                     binding.tvProxyTestResult.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.log_success))
@@ -453,6 +456,9 @@ class MainActivity : AppCompatActivity() {
             manualPeer = binding.etManualPeer.text.toString().trim(),
             psiphonMode = PsiphonMode.entries[binding.spinnerPsiphonMode.selectedItemPosition],
             psiphonRegion = selectedRegionCode,
+            psiphonProtocol = PsiphonProtocol.entries[
+                binding.spinnerPsiphonProtocol.selectedItemPosition.coerceIn(0, PsiphonProtocol.entries.lastIndex)
+            ],
             bypassIran = binding.switchBypassIran.isChecked,
             splitTunnelMode = SplitTunnelMode.entries[binding.spinnerSplitMode.selectedItemPosition],
             exitLocation = binding.etExitLocation.text.toString().trim(),
@@ -538,6 +544,7 @@ class MainActivity : AppCompatActivity() {
                 it.first.equals(cfg.psiphonRegion, ignoreCase = true)
             }.coerceAtLeast(0)
             binding.spinnerPsiphonRegion.setSelection(regionIdx, false)
+            binding.spinnerPsiphonProtocol.setSelection(cfg.psiphonProtocol.ordinal, false)
 
             binding.switchBypassIran.isChecked = cfg.bypassIran
             binding.spinnerSplitMode.setSelection(cfg.splitTunnelMode.ordinal, false)

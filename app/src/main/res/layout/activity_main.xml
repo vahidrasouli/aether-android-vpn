@@ -439,6 +439,20 @@
                             android:layout_width="match_parent"
                             android:layout_height="48dp"
                             android:layout_marginTop="2dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/label_psiphon_protocol"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <Spinner
+                            android:id="@+id/spinnerPsiphonProtocol"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:layout_marginTop="2dp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -694,8 +708,7 @@
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="10dp"
-                                android:gravity="center_vertical"
-                                android:orientation="horizontal">
+                                android:orientation="vertical">
 
                                 <com.google.android.material.button.MaterialButton
                                     android:id="@+id/btnTestProxy"
@@ -707,12 +720,12 @@
 
                                 <TextView
                                     android:id="@+id/tvProxyTestResult"
-                                    android:layout_width="wrap_content"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginStart="10dp"
+                                    android:layout_marginTop="8dp"
                                     android:background="@drawable/bg_pill_chain"
                                     android:paddingHorizontal="12dp"
-                                    android:paddingVertical="6dp"
+                                    android:paddingVertical="8dp"
                                     android:textColor="@color/text_primary"
                                     android:textSize="12sp"
                                     android:textStyle="bold"

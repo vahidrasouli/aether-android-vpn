@@ -63,6 +63,18 @@ class AetherVpnService : VpnService() {
         @Volatile
         private var instanceRef: WeakReference<AetherVpnService>? = null
 
+        internal fun shouldFallbackToMasqueH2(
+            config: VpnConfig,
+            primaryProtocol: AetherProtocol,
+            userRequestedStop: Boolean
+        ): Boolean {
+            if (userRequestedStop) return false
+            if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) return false
+            if (primaryProtocol == AetherProtocol.MASQUE_H2) return false
+            return config.upstreamProxy.isNotBlank() ||
+                (primaryProtocol == AetherProtocol.MASQUE_H3 && config.autoFallbackToH2)
+        }
+
         fun readLiveStats(): TrafficStats {
             return instanceRef?.get()?.hevManager?.readStats() ?: TrafficStats()
         }
@@ -270,15 +282,18 @@ class AetherVpnService : VpnService() {
         val firstAttempt = attemptSingleProtocol(config, primaryProtocol, isReconnect)
         if (firstAttempt.isSuccess) return
 
-        // Smart 1-shot battery-saving fallback: MASQUE HTTP/3 -> MASQUE HTTP/2 when QUIC is blocked
+        // Smart 1-shot fallback to MASQUE HTTP/2 (TCP):
+        // - When an upstream proxy is enabled and any UDP-dependent WARP protocol fails/times out.
+        // - Or when MASQUE HTTP/3 fails and autoFallbackToH2 is enabled.
         // (Skipped in PSIPHON_ONLY mode where WARP/MASQUE is not used)
-        if (!userRequestedStop &&
-            config.psiphonMode != PsiphonMode.PSIPHON_ONLY &&
-            primaryProtocol == AetherProtocol.MASQUE_H3 &&
-            config.autoFallbackToH2
-        ) {
+        if (shouldFallbackToMasqueH2(config, primaryProtocol, userRequestedStop)) {
             val firstErr = formatException(firstAttempt.exceptionOrNull())
-            DiagnosticsLog.record("Aether", "MASQUE HTTP/3 failed ($firstErr); trying 1-shot HTTP/2 fallback")
+            val notice = if (config.upstreamProxy.isNotBlank()) {
+                "${primaryProtocol.label} failed/timed out over upstream proxy ($firstErr); falling back to MASQUE (HTTP/2 TCP)"
+            } else {
+                "MASQUE HTTP/3 failed ($firstErr); trying 1-shot HTTP/2 fallback"
+            }
+            DiagnosticsLog.record("Aether", notice)
             val fallbackAttempt = attemptSingleProtocol(config, AetherProtocol.MASQUE_H2, isReconnect)
             if (fallbackAttempt.isSuccess) return
             failClosed(

@@ -54,6 +54,18 @@ enum class PsiphonMode(val label: String, val cliValue: String) {
     PSIPHON_ONLY("Psiphon Only", "only")
 }
 
+enum class PsiphonProtocol(val cliValue: String, val label: String) {
+    AUTO("auto", "Auto (Best Available)"),
+    FRONTED_MEEK_CDN_OSSH("FRONTED-MEEK-CDN-OSSH", "Fronted Meek CDN (OSSH)"),
+    FRONTED_MEEK_OSSH("FRONTED-MEEK-OSSH", "Fronted Meek (OSSH)"),
+    UNFRONTED_MEEK_HTTPS_OSSH("UNFRONTED-MEEK-HTTPS-OSSH", "Unfronted Meek HTTPS (OSSH)"),
+    OSSH("OSSH", "Direct OSSH"),
+    QUIC_OSSH("QUIC-OSSH", "QUIC OSSH"),
+    TAPDANCE_OSSH("TAPDANCE-OSSH", "TapDance OSSH"),
+    CONJURE_OSSH("CONJURE-OSSH", "Conjure OSSH"),
+    INPROXY("INPROXY", "Inproxy (Brokered)")
+}
+
 enum class NoizeProfile(val cliValue: String, val label: String) {
     OFF("off", "Off (Best battery)"),
     LIGHT("light", "Light"),
@@ -105,6 +117,7 @@ data class VpnConfig(
     val zeroTrustTeam: String = "",
     val psiphonMode: PsiphonMode = PsiphonMode.OFF,
     val psiphonRegion: String = "",
+    val psiphonProtocol: PsiphonProtocol = PsiphonProtocol.AUTO,
     val socksPort: Int = DEFAULT_SOCKS_PORT,
     val tunMtu: Int = DEFAULT_TUN_MTU,
     val splitTunnelMode: SplitTunnelMode = SplitTunnelMode.ALL_APPS,
@@ -216,6 +229,7 @@ data class VpnConfig(
             put("zeroTrustTeam", zeroTrustTeam)
             put("psiphonMode", psiphonMode.name)
             put("psiphonRegion", psiphonRegion.trim())
+            put("psiphonProtocol", psiphonProtocol.name)
             put("splitTunnelMode", splitTunnelMode.name)
             put("selectedPackages", JSONArray(selectedPackages.sorted()))
             put("bypassIran", bypassIran)
@@ -327,6 +341,7 @@ data class VpnConfig(
                 zeroTrustTeam = o.optString("zeroTrustTeam", "").trim(),
                 psiphonMode = enumOrDefault(o.optString("psiphonMode"), PsiphonMode.OFF),
                 psiphonRegion = o.optString("psiphonRegion", "").trim(),
+                psiphonProtocol = enumOrDefault(o.optString("psiphonProtocol"), PsiphonProtocol.AUTO),
                 splitTunnelMode = parseSplitTunnelMode(o.optString("splitTunnelMode")),
                 selectedPackages = pkgs,
                 bypassIran = o.optBoolean("bypassIran", false),
@@ -366,6 +381,7 @@ data class VpnConfig(
                 zeroTrustTeam = p.getString("zerotrust_team", "").orEmpty(),
                 psiphonMode = enumOrDefault(p.getString("psiphon_mode", null), PsiphonMode.OFF),
                 psiphonRegion = p.getString("psiphon_region", "").orEmpty(),
+                psiphonProtocol = enumOrDefault(p.getString("psiphon_protocol", null), PsiphonProtocol.AUTO),
                 splitTunnelMode = parseSplitTunnelMode(p.getString("split_mode", null)),
                 selectedPackages = p.getStringSet("selected_packages", emptySet())?.toSet() ?: emptySet(),
                 bypassIran = p.getBoolean("bypass_iran", false),
@@ -405,6 +421,7 @@ data class VpnConfig(
                 .putString("zerotrust_team", config.zeroTrustTeam.trim())
                 .putString("psiphon_mode", config.psiphonMode.name)
                 .putString("psiphon_region", config.psiphonRegion.trim())
+                .putString("psiphon_protocol", config.psiphonProtocol.name)
                 .putString("split_mode", config.splitTunnelMode.name)
                 .putStringSet("selected_packages", config.selectedPackages)
                 .putBoolean("bypass_iran", config.bypassIran)

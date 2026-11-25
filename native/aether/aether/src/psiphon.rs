@@ -332,6 +332,13 @@ pub fn shape() -> Shape {
     }
 }
 
+pub fn explicit_protocol() -> Option<String> {
+    crate::settings::var("AETHER_PSIPHON_PROTOCOL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("auto"))
+}
+
 pub fn chained_protocols(shape: Shape) -> Vec<&'static str> {
     let carries_udp = |name: &&str| name.contains("QUIC") || name.starts_with("INPROXY");
 
@@ -575,10 +582,17 @@ fn build_config(
     );
 
     let chosen = shape();
+    let explicit_proto = explicit_protocol();
     put_cdn_fronting(&mut map);
 
-    match (upstream.is_some(), chosen) {
-        (true, _) => {
+    if let Some(proto) = explicit_proto {
+        let is_inproxy = proto.to_ascii_uppercase().starts_with("INPROXY");
+        let carries_udp = proto.to_ascii_uppercase().contains("QUIC") || is_inproxy;
+        if upstream.is_some() && carries_udp {
+            log::warn!(
+                "[-] psiphon protocol {proto} requires UDP, which upstream proxies do not carry; \
+                 falling back to TCP-only chained protocols"
+            );
             map.insert(
                 "InproxyTunnelProtocolPreferProbability".into(),
                 serde_json::json!(0.0),
@@ -592,14 +606,21 @@ fn build_config(
                 serde_json::json!(chained_protocols(chosen)),
             );
             map.insert("DisableTactics".into(), serde_json::Value::from(true));
-        }
-        (false, Shape::Auto) => {
-            // Direct Psiphon with no upstream proxy: leave LimitTunnelProtocols,
-            // Inproxy probabilities, and DisableTactics unset so Psiphon tries all
-            // anti-censorship protocols (Meek, OSSH, QUIC-OSSH, TapDance, Conjure,
-            // Inproxy, etc.) with Tactics enabled.
-        }
-        (false, Shape::Cdn) => {
+        } else if is_inproxy {
+            map.insert(
+                "InproxyTunnelProtocolPreferProbability".into(),
+                serde_json::json!(1.0),
+            );
+            map.insert(
+                "InproxyTunnelProtocolSelectionProbability".into(),
+                serde_json::json!(1.0),
+            );
+            map.insert(
+                "LimitTunnelProtocols".into(),
+                serde_json::json!(["INPROXY-WEBRTC-OSSH", "INPROXY-WEBRTC-RANDEZVOUS-OSSH"]),
+            );
+            map.insert("DisableTactics".into(), serde_json::Value::from(true));
+        } else {
             map.insert(
                 "InproxyTunnelProtocolPreferProbability".into(),
                 serde_json::json!(0.0),
@@ -610,26 +631,65 @@ fn build_config(
             );
             map.insert(
                 "LimitTunnelProtocols".into(),
-                serde_json::json!(CDN_PROTOCOLS),
+                serde_json::json!([proto]),
             );
             map.insert("DisableTactics".into(), serde_json::Value::from(true));
         }
-        (false, Shape::Direct) => {
-            map.insert(
-                "InproxyTunnelProtocolPreferProbability".into(),
-                serde_json::json!(0.0),
-            );
-            map.insert(
-                "InproxyTunnelProtocolSelectionProbability".into(),
-                serde_json::json!(0.0),
-            );
-            let unfronted: Vec<&str> = NON_INPROXY_PROTOCOLS
-                .iter()
-                .copied()
-                .filter(|name| !name.starts_with("FRONTED"))
-                .collect();
-            map.insert("LimitTunnelProtocols".into(), serde_json::json!(unfronted));
-            map.insert("DisableTactics".into(), serde_json::Value::from(true));
+    } else {
+        match (upstream.is_some(), chosen) {
+            (true, _) => {
+                map.insert(
+                    "InproxyTunnelProtocolPreferProbability".into(),
+                    serde_json::json!(0.0),
+                );
+                map.insert(
+                    "InproxyTunnelProtocolSelectionProbability".into(),
+                    serde_json::json!(0.0),
+                );
+                map.insert(
+                    "LimitTunnelProtocols".into(),
+                    serde_json::json!(chained_protocols(chosen)),
+                );
+                map.insert("DisableTactics".into(), serde_json::Value::from(true));
+            }
+            (false, Shape::Auto) => {
+                // Direct Psiphon with no upstream proxy: leave LimitTunnelProtocols,
+                // Inproxy probabilities, and DisableTactics unset so Psiphon tries all
+                // anti-censorship protocols (Meek, OSSH, QUIC-OSSH, TapDance, Conjure,
+                // Inproxy, etc.) with Tactics enabled.
+            }
+            (false, Shape::Cdn) => {
+                map.insert(
+                    "InproxyTunnelProtocolPreferProbability".into(),
+                    serde_json::json!(0.0),
+                );
+                map.insert(
+                    "InproxyTunnelProtocolSelectionProbability".into(),
+                    serde_json::json!(0.0),
+                );
+                map.insert(
+                    "LimitTunnelProtocols".into(),
+                    serde_json::json!(CDN_PROTOCOLS),
+                );
+                map.insert("DisableTactics".into(), serde_json::Value::from(true));
+            }
+            (false, Shape::Direct) => {
+                map.insert(
+                    "InproxyTunnelProtocolPreferProbability".into(),
+                    serde_json::json!(0.0),
+                );
+                map.insert(
+                    "InproxyTunnelProtocolSelectionProbability".into(),
+                    serde_json::json!(0.0),
+                );
+                let unfronted: Vec<&str> = NON_INPROXY_PROTOCOLS
+                    .iter()
+                    .copied()
+                    .filter(|name| !name.starts_with("FRONTED"))
+                    .collect();
+                map.insert("LimitTunnelProtocols".into(), serde_json::json!(unfronted));
+                map.insert("DisableTactics".into(), serde_json::Value::from(true));
+            }
         }
     }
 
@@ -1242,6 +1302,7 @@ mod tests {
             "AETHER_PSIPHON_DIR",
             "AETHER_PSIPHON_INTERFACE",
             "AETHER_PSIPHON_MODE",
+            "AETHER_PSIPHON_PROTOCOL",
             "AETHER_PSIPHON_CDN_IPS",
             "AETHER_PSIPHON_CDN_SNI",
             "AETHER_PSIPHON_CDN_SETS",

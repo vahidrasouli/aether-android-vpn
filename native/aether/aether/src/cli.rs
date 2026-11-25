@@ -296,6 +296,8 @@ Tor:
   --psiphon-mode <shape>   auto (default, let psiphon pick), cdn (only fronted
                            meek through a cdn, for networks that block the rest)
                            or direct (no fronting)
+  --psiphon-protocol <p>   auto (default) or a specific Psiphon tunnel protocol
+                           such as FRONTED-MEEK-CDN-OSSH, OSSH, QUIC-OSSH, INPROXY
   --psiphon-config <path>  a psiphon json config of your own, laid over the
                            built-in one. only needed to use different
                            credentials or server list settings
@@ -442,6 +444,7 @@ Environment variables:
                                    --psiphon-only
   AETHER_PSIPHON_CONFIG            --psiphon-config
   AETHER_PSIPHON_MODE              --psiphon-mode
+  AETHER_PSIPHON_PROTOCOL          --psiphon-protocol
   AETHER_PSIPHON_CDN_IPS           --psiphon-cdn-ips
   AETHER_PSIPHON_CDN_SNI           --psiphon-cdn-sni
   AETHER_PSIPHON_CDN_SETS          --psiphon-cdn-sets
@@ -633,6 +636,7 @@ pub fn parse_args(args: Vec<String>) -> crate::error::Result<Parsed> {
             "--psiphon-http" => set("AETHER_PSIPHON_HTTP", next_value!()),
             "--psiphon-region" => set("AETHER_PSIPHON_REGION", next_value!()),
             "--psiphon-mode" => set("AETHER_PSIPHON_MODE", next_value!()),
+            "--psiphon-protocol" => set("AETHER_PSIPHON_PROTOCOL", next_value!()),
             "--psiphon-cdn-ips" => set("AETHER_PSIPHON_CDN_IPS", next_value!()),
             "--psiphon-cdn-sni" => set("AETHER_PSIPHON_CDN_SNI", next_value!()),
             "--psiphon-cdn-sets" => set("AETHER_PSIPHON_CDN_SETS", next_value!()),

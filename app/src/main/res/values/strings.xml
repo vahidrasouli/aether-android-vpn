@@ -39,6 +39,7 @@
     <string name="title_psiphon_chain">Psiphon ↔ WARP Chaining</string>
     <string name="label_psiphon_mode">Psiphon Chaining Mode</string>
     <string name="label_psiphon_region">Psiphon Country / Egress Region</string>
+    <string name="label_psiphon_protocol">Psiphon Protocol</string>
     <string name="title_logs_console">Live Diagnostics Console</string>
     <string name="action_copy_logs">Copy Logs</string>
     <string name="action_clear_logs">Clear Logs</string>

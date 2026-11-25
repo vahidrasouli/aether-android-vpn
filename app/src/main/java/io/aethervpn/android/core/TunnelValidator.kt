@@ -26,18 +26,25 @@ data class ValidationResult(
  * unnecessary, battery-draining reconnects when the existing tunnel remains healthy.
  */
 object TunnelValidator {
-    private const val TRACE_HOST = "www.cloudflare.com"
+    private val TRACE_IP_BYTES = byteArrayOf(1, 1, 1, 1)
+    private const val TRACE_HOST = "cloudflare.com"
     private const val TRACE_PORT = 443
+    private const val DEFAULT_MAX_ATTEMPTS = 3
+    private const val DEFAULT_RETRY_BACKOFF_MS = 600L
 
     fun verifyThroughSocks(
         socksPort: Int,
         timeoutMs: Int = 12_000,
-        psiphonMode: PsiphonMode = PsiphonMode.OFF
+        psiphonMode: PsiphonMode = PsiphonMode.OFF,
+        maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
+        retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS
     ): Result<ValidationResult> {
         return verifyThroughSocksInternal(
             socksPort = socksPort,
             timeoutMs = timeoutMs,
-            psiphonMode = psiphonMode
+            psiphonMode = psiphonMode,
+            maxAttempts = maxAttempts,
+            retryDelayMs = retryDelayMs
         )
     }
 
@@ -45,6 +52,8 @@ object TunnelValidator {
         socksPort: Int,
         timeoutMs: Int = 12_000,
         psiphonMode: PsiphonMode = PsiphonMode.OFF,
+        maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
+        retryDelayMs: Long = DEFAULT_RETRY_BACKOFF_MS,
         tlsUpgrade: (Socket, Int) -> Socket = { raw, timeout ->
             val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
             (sslFactory.createSocket(raw, TRACE_HOST, TRACE_PORT, true) as SSLSocket).apply {
@@ -52,6 +61,39 @@ object TunnelValidator {
                 startHandshake()
             }
         }
+    ): Result<ValidationResult> {
+        val attempts = maxAttempts.coerceAtLeast(1)
+        var lastFailure: Result<ValidationResult>? = null
+        for (attempt in 1..attempts) {
+            val res = verifySingleAttempt(
+                socksPort = socksPort,
+                timeoutMs = timeoutMs,
+                psiphonMode = psiphonMode,
+                tlsUpgrade = tlsUpgrade
+            )
+            if (res.isSuccess) return res
+            // Preserve a descriptive SOCKS/TLS failure over a subsequent ConnectException if port closed
+            val err = res.exceptionOrNull()
+            if (lastFailure == null || err !is java.net.ConnectException) {
+                lastFailure = res
+            }
+            if (attempt < attempts && retryDelayMs > 0L) {
+                try {
+                    Thread.sleep(retryDelayMs * attempt)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+        }
+        return lastFailure ?: Result.failure(IllegalStateException("End-to-end validation failed"))
+    }
+
+    private fun verifySingleAttempt(
+        socksPort: Int,
+        timeoutMs: Int,
+        psiphonMode: PsiphonMode,
+        tlsUpgrade: (Socket, Int) -> Socket
     ): Result<ValidationResult> {
         val startNs = System.nanoTime()
         var rawSocket: Socket? = null
@@ -78,17 +120,16 @@ object TunnelValidator {
                 return Result.failure(IllegalStateException("SOCKS5 auth rejected: ${greetingReply[1]}"))
             }
 
-            // 2. SOCKS5 CONNECT (VER: 5, CMD: 1 CONNECT, RSV: 0, ATYP: 3 DOMAINNAME)
-            val hostBytes = TRACE_HOST.toByteArray(Charsets.US_ASCII)
-            val connectReq = ByteArray(4 + 1 + hostBytes.size + 2)
+            // 2. SOCKS5 CONNECT directly to 1.1.1.1:443 (VER: 5, CMD: 1 CONNECT, RSV: 0, ATYP: 1 IPv4)
+            // Avoids inner DNS/mapdns timing stalls on SIM data right after tunnel startup.
+            val connectReq = ByteArray(4 + 4 + 2)
             connectReq[0] = 0x05 // VER
             connectReq[1] = 0x01 // CMD: CONNECT
             connectReq[2] = 0x00 // RSV
-            connectReq[3] = 0x03 // ATYP: DOMAINNAME
-            connectReq[4] = hostBytes.size.toByte()
-            System.arraycopy(hostBytes, 0, connectReq, 5, hostBytes.size)
-            connectReq[connectReq.size - 2] = (TRACE_PORT shr 8).toByte()
-            connectReq[connectReq.size - 1] = (TRACE_PORT and 0xFF).toByte()
+            connectReq[3] = 0x01 // ATYP: IPv4
+            System.arraycopy(TRACE_IP_BYTES, 0, connectReq, 4, 4)
+            connectReq[8] = (TRACE_PORT shr 8).toByte()
+            connectReq[9] = (TRACE_PORT and 0xFF).toByte()
 
             outStream.write(connectReq)
             outStream.flush()
@@ -237,6 +278,11 @@ object TunnelValidator {
         socksPort: Int,
         psiphonMode: PsiphonMode = PsiphonMode.OFF
     ): Boolean {
-        return verifyThroughSocks(socksPort, timeoutMs = 4_000, psiphonMode = psiphonMode).isSuccess
+        return verifyThroughSocks(
+            socksPort = socksPort,
+            timeoutMs = 4_000,
+            psiphonMode = psiphonMode,
+            maxAttempts = 1
+        ).isSuccess
     }
 }
