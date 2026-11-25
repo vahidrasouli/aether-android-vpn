@@ -17,7 +17,7 @@ jobs:
     name: Build & Verify ARM64 APK
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     env:
       ANDROID_COMPILE_SDK: "35"
       ANDROID_BUILD_TOOLS: "35.0.0"
@@ -317,3 +317,36 @@ jobs:
         with:
           name: aether-android-arm64-v${{ env.DEBUG_VERSION }}
           path: release-artifacts/*
+
+      - name: Publish rolling debug-latest pre-release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="debug-latest"
+          TITLE="v${DEBUG_VERSION}"
+          APK_PATH="release-artifacts/aether-android-arm64-v${DEBUG_VERSION}.apk"
+          SUMS_PATH="release-artifacts/SHA256SUMS.txt"
+          NOTES="Rolling automated ARM64 Debug build from \`main\` (${GITHUB_SHA::7})."$'\n\n'"**Version:** \`${TITLE}\`"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            EXISTING_ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+            for asset in $EXISTING_ASSETS; do
+              echo "Deleting stale asset: $asset"
+              gh release delete-asset "$TAG" "$asset" --yes
+            done
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --prerelease \
+              --latest=false \
+              --target "$GITHUB_SHA"
+            gh release upload "$TAG" "$APK_PATH" "$SUMS_PATH" --clobber
+          else
+            gh release create "$TAG" "$APK_PATH" "$SUMS_PATH" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --prerelease \
+              --latest=false \
+              --target "$GITHUB_SHA"
+          fi

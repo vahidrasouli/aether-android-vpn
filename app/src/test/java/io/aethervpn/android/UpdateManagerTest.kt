@@ -1,5 +1,6 @@
 package io.aethervpn.android
 
+import io.aethervpn.android.core.DebugBuildVersion
 import io.aethervpn.android.core.SemVer
 import io.aethervpn.android.core.UpdateCheckResult
 import io.aethervpn.android.core.UpdateManager
@@ -71,5 +72,89 @@ class UpdateManagerTest {
             percent = 42
         )
         assertEquals("42% • 7.8 / 18.4 MB", progress.formatLabel())
+    }
+
+    @Test
+    fun channelEndpointSelectionIsolatesDebugAndRelease() {
+        assertEquals(
+            "https://api.github.com/repos/vahidrasouli/aether-android-vpn/releases/tags/debug-latest",
+            UpdateManager.apiUrlForChannel(isDebugBuild = true)
+        )
+        assertEquals(
+            "https://api.github.com/repos/vahidrasouli/aether-android-vpn/releases/latest",
+            UpdateManager.apiUrlForChannel(isDebugBuild = false)
+        )
+    }
+
+    @Test
+    fun debugBuildVersionComparisonHandlesBuildNumbersLocalAndSemVer() {
+        val remoteB38 = DebugBuildVersion.parse("v1.1.0-debug.b38-abc1234")
+        assertNotNull(remoteB38)
+        assertTrue(remoteB38!!.isNewerThan("1.1.0-debug.b33-d544774"))
+        assertFalse(remoteB38.isNewerThan("1.1.0-debug.b38-abc1234"))
+        assertFalse(remoteB38.isNewerThan("1.1.0-debug.b40-fff0000"))
+
+        val remoteB1 = DebugBuildVersion.parse("1.1.0-debug.b1-abc1234")
+        assertNotNull(remoteB1)
+        assertTrue(remoteB1!!.isNewerThan("1.1.0-debug.local"))
+
+        val higherSemVer = DebugBuildVersion.parse("v1.2.0-debug.b1-1112223")
+        assertNotNull(higherSemVer)
+        assertTrue(higherSemVer!!.isNewerThan("1.1.0-debug.b99-9998887"))
+    }
+
+    @Test
+    fun parseDebugLatestReleaseJsonSelectsDebugApkAndDetectsUpdate() {
+        val json = """
+            {
+              "tag_name": "debug-latest",
+              "name": "v1.1.0-debug.b38-abc1234",
+              "prerelease": true,
+              "html_url": "https://github.com/vahidrasouli/aether-android-vpn/releases/tag/debug-latest",
+              "body": "Rolling automated ARM64 Debug build from main (abc1234).",
+              "assets": [
+                {
+                  "name": "SHA256SUMS.txt",
+                  "browser_download_url": "https://example.com/SHA256SUMS.txt"
+                },
+                {
+                  "name": "aether-android-arm64-v1.1.0-debug.b38-abc1234.apk",
+                  "browser_download_url": "https://example.com/aether-android-arm64-v1.1.0-debug.b38-abc1234.apk"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val update = UpdateManager.parseReleaseResponse(
+            jsonBody = json,
+            currentVersion = "1.1.0-debug.b33-d544774",
+            isDebugBuild = true
+        )
+        assertTrue(update is UpdateCheckResult.UpdateAvailable)
+        val available = update as UpdateCheckResult.UpdateAvailable
+        assertEquals("debug-latest", available.release.tagName)
+        assertEquals("1.1.0-debug.b38-abc1234", available.release.versionName)
+        assertEquals(
+            "aether-android-arm64-v1.1.0-debug.b38-abc1234.apk",
+            available.release.apkFileName
+        )
+        assertEquals(
+            "https://example.com/aether-android-arm64-v1.1.0-debug.b38-abc1234.apk",
+            available.release.apkDownloadUrl
+        )
+
+        val upToDate = UpdateManager.parseReleaseResponse(
+            jsonBody = json,
+            currentVersion = "1.1.0-debug.b38-abc1234",
+            isDebugBuild = true
+        )
+        assertTrue(upToDate is UpdateCheckResult.UpToDate)
+
+        val fromLocal = UpdateManager.parseReleaseResponse(
+            jsonBody = json,
+            currentVersion = "1.1.0-debug.local",
+            isDebugBuild = true
+        )
+        assertTrue(fromLocal is UpdateCheckResult.UpdateAvailable)
     }
 }

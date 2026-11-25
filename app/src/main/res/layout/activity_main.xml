@@ -1191,6 +1191,21 @@
                             android:textStyle="bold" />
 
                         <TextView
+                            android:id="@+id/tvAboutChannelBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:background="@drawable/bg_pill_chain"
+                            android:paddingStart="10dp"
+                            android:paddingTop="3dp"
+                            android:paddingEnd="10dp"
+                            android:paddingBottom="3dp"
+                            android:text="@string/channel_stable"
+                            android:textColor="@color/accent_primary"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <TextView
                             android:id="@+id/tvAboutEngines"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"

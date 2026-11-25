@@ -1035,6 +1035,9 @@ class MainActivity : AppCompatActivity() {
         val versionLabel = "v${BuildConfig.VERSION_NAME}"
         binding.tvAppVersion.text = versionLabel
         binding.tvAboutAppVersion.text = "${getString(R.string.app_name)} • $versionLabel"
+        binding.tvAboutChannelBadge.text = getString(
+            if (BuildConfig.DEBUG) R.string.channel_debug_prerelease else R.string.channel_stable
+        )
         binding.tvAboutDeviceInfo.text =
             "Device Model: ${Build.MANUFACTURER} ${Build.MODEL} • " +
                 "Android Version: Android ${Build.VERSION.RELEASE} • " +

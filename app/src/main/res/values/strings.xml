@@ -57,6 +57,8 @@
     <string name="action_check_updates">Check for Updates</string>
     <string name="action_download_install">Download &amp; Update</string>
     <string name="update_status_idle">Tap to check GitHub Releases for a newer version.</string>
+    <string name="channel_debug_prerelease">Channel: Debug (Pre-release)</string>
+    <string name="channel_stable">Channel: Stable</string>
     <string name="title_upstream_proxy">UPSTREAM PROXY (LOCAL / REMOTE)</string>
     <string name="enable_upstream_proxy">Enable Upstream Proxy</string>
     <string name="action_test_proxy">Test Proxy</string>

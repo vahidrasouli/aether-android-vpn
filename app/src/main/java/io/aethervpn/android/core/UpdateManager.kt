@@ -1,5 +1,6 @@
 package io.aethervpn.android.core
 
+import io.aethervpn.android.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -77,6 +78,59 @@ data class SemVer(
     }
 }
 
+data class DebugBuildVersion(
+    val baseSemVer: SemVer,
+    val buildNumber: Int?,
+    val isLocal: Boolean,
+    val rawVersion: String
+) {
+    fun isNewerThan(currentRaw: String): Boolean {
+        val currentDebug = parse(currentRaw)
+        val currentBase = currentDebug?.baseSemVer ?: SemVer.parse(currentRaw)?.let {
+            SemVer(it.major, it.minor, it.patch)
+        } ?: return false
+
+        if (baseSemVer > currentBase) return true
+        if (baseSemVer < currentBase) return false
+
+        if (currentDebug == null) {
+            return buildNumber != null
+        }
+        if (currentDebug.isLocal && buildNumber != null) {
+            return true
+        }
+        val remoteNum = buildNumber ?: return false
+        val currentNum = currentDebug.buildNumber ?: return false
+        return remoteNum > currentNum
+    }
+
+    companion object {
+        private val DEBUG_VERSION_REGEX =
+            Regex("""(?:^|aether-android-arm64-)[vV]?(\d+)\.(\d+)\.(\d+)-debug\.(?:b(\d+)(?:-[0-9A-Za-z]+)?|(local))(?:\.apk)?$""")
+
+        fun parse(raw: String): DebugBuildVersion? {
+            val trimmed = raw.trim()
+            val match = DEBUG_VERSION_REGEX.find(trimmed) ?: return null
+            val major = match.groupValues[1].toIntOrNull() ?: return null
+            val minor = match.groupValues[2].toIntOrNull() ?: return null
+            val patch = match.groupValues[3].toIntOrNull() ?: return null
+            val buildNum = match.groupValues[4].takeIf { it.isNotEmpty() }?.toIntOrNull()
+            val isLocal = match.groupValues[5] == "local"
+            val normalized = trimmed
+                .removePrefix("aether-android-arm64-")
+                .removeSuffix(".apk")
+                .removePrefix("v")
+                .removePrefix("V")
+            return DebugBuildVersion(
+                baseSemVer = SemVer(major, minor, patch),
+                buildNumber = buildNum,
+                isLocal = isLocal,
+                rawVersion = normalized
+            )
+        }
+    }
+}
+
 data class ReleaseInfo(
     val tagName: String,
     val versionName: String,
@@ -112,13 +166,19 @@ object UpdateManager {
     const val GITHUB_REPO_URL = "https://github.com/vahidrasouli/aether-android-vpn"
     const val GITHUB_LATEST_RELEASE_API =
         "https://api.github.com/repos/vahidrasouli/aether-android-vpn/releases/latest"
+    const val GITHUB_DEBUG_RELEASE_API =
+        "https://api.github.com/repos/vahidrasouli/aether-android-vpn/releases/tags/debug-latest"
 
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 15_000
 
+    fun apiUrlForChannel(isDebugBuild: Boolean): String =
+        if (isDebugBuild) GITHUB_DEBUG_RELEASE_API else GITHUB_LATEST_RELEASE_API
+
     suspend fun checkForUpdates(
         currentVersion: String,
-        apiUrl: String = GITHUB_LATEST_RELEASE_API
+        isDebugBuild: Boolean = BuildConfig.DEBUG,
+        apiUrl: String = apiUrlForChannel(isDebugBuild)
     ): UpdateCheckResult = withContext(Dispatchers.IO) {
         var conn: HttpURLConnection? = null
         try {
@@ -148,7 +208,7 @@ object UpdateManager {
             }
 
             val bodyText = conn.inputStream.bufferedReader().use { it.readText() }
-            parseReleaseResponse(bodyText, currentVersion)
+            parseReleaseResponse(bodyText, currentVersion, isDebugBuild)
         } catch (e: Exception) {
             UpdateCheckResult.Unavailable(
                 "Unable to check for updates: ${e.message ?: "network error"}"
@@ -158,20 +218,17 @@ object UpdateManager {
         }
     }
 
-    internal fun parseReleaseResponse(jsonBody: String, currentVersion: String): UpdateCheckResult {
+    internal fun parseReleaseResponse(
+        jsonBody: String,
+        currentVersion: String,
+        isDebugBuild: Boolean = false
+    ): UpdateCheckResult {
         val json = runCatching { JSONObject(jsonBody) }.getOrNull()
             ?: return UpdateCheckResult.Unavailable("Invalid release response from GitHub.")
 
         val tagName = json.optString("tag_name", "").trim()
         if (tagName.isEmpty()) {
             return UpdateCheckResult.Unavailable("Latest release has no version tag.")
-        }
-
-        val parsedRemote = SemVer.parse(tagName)
-            ?: return UpdateCheckResult.Unavailable("Unrecognized release tag: $tagName")
-
-        if (!SemVer.isNewerVersion(tagName, currentVersion)) {
-            return UpdateCheckResult.UpToDate(currentVersion)
         }
 
         val releaseNotes = json.optString("body", "").trim()
@@ -189,17 +246,40 @@ object UpdateManager {
                 if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
                     apkUrl = url
                     apkName = name
-                    if (name.contains("arm64", ignoreCase = true) && !name.contains("debug", ignoreCase = true)) {
+                    val isArm64 = name.contains("arm64", ignoreCase = true)
+                    val isDebugAsset = name.contains("debug", ignoreCase = true)
+                    if (isArm64 && isDebugAsset == isDebugBuild) {
                         break
                     }
                 }
             }
         }
 
+        val resolvedVersionName = if (isDebugBuild) {
+            val releaseName = json.optString("name", "").trim()
+            val remoteDebug = DebugBuildVersion.parse(releaseName)
+                ?: apkName?.let { DebugBuildVersion.parse(it) }
+                ?: DebugBuildVersion.parse(tagName)
+                ?: return UpdateCheckResult.Unavailable("Unrecognized debug release version.")
+
+            if (!remoteDebug.isNewerThan(currentVersion)) {
+                return UpdateCheckResult.UpToDate(currentVersion)
+            }
+            remoteDebug.rawVersion
+        } else {
+            val parsedRemote = SemVer.parse(tagName)
+                ?: return UpdateCheckResult.Unavailable("Unrecognized release tag: $tagName")
+
+            if (!SemVer.isNewerVersion(tagName, currentVersion)) {
+                return UpdateCheckResult.UpToDate(currentVersion)
+            }
+            parsedRemote.toString()
+        }
+
         return UpdateCheckResult.UpdateAvailable(
             ReleaseInfo(
                 tagName = tagName,
-                versionName = parsedRemote.toString(),
+                versionName = resolvedVersionName,
                 releaseNotes = releaseNotes,
                 apkDownloadUrl = apkUrl,
                 apkFileName = apkName,
