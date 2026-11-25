@@ -62,4 +62,14 @@ class UpdateManagerTest {
         val upToDate = UpdateManager.parseReleaseResponse(json, "1.2.0")
         assertTrue(upToDate is UpdateCheckResult.UpToDate)
     }
+
+    @Test
+    fun downloadProgressFormatsPercentageAndMbCounter() {
+        val progress = io.aethervpn.android.core.DownloadProgress(
+            downloadedBytes = (7.8 * 1024 * 1024).toLong(),
+            totalBytes = (18.4 * 1024 * 1024).toLong(),
+            percent = 42
+        )
+        assertEquals("42% • 7.8 / 18.4 MB", progress.formatLabel())
+    }
 }

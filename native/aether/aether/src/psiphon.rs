@@ -574,20 +574,19 @@ fn build_config(
         serde_json::Value::from(SERVER_LIST_SIGNATURE_KEY),
     );
 
-    map.insert(
-        "InproxyTunnelProtocolPreferProbability".into(),
-        serde_json::json!(0.0),
-    );
-    map.insert(
-        "InproxyTunnelProtocolSelectionProbability".into(),
-        serde_json::json!(0.0),
-    );
-
     let chosen = shape();
     put_cdn_fronting(&mut map);
 
     match (upstream.is_some(), chosen) {
         (true, _) => {
+            map.insert(
+                "InproxyTunnelProtocolPreferProbability".into(),
+                serde_json::json!(0.0),
+            );
+            map.insert(
+                "InproxyTunnelProtocolSelectionProbability".into(),
+                serde_json::json!(0.0),
+            );
             map.insert(
                 "LimitTunnelProtocols".into(),
                 serde_json::json!(chained_protocols(chosen)),
@@ -595,12 +594,20 @@ fn build_config(
             map.insert("DisableTactics".into(), serde_json::Value::from(true));
         }
         (false, Shape::Auto) => {
-            map.insert(
-                "LimitTunnelProtocols".into(),
-                serde_json::json!(NON_INPROXY_PROTOCOLS),
-            );
+            // Direct Psiphon with no upstream proxy: leave LimitTunnelProtocols,
+            // Inproxy probabilities, and DisableTactics unset so Psiphon tries all
+            // anti-censorship protocols (Meek, OSSH, QUIC-OSSH, TapDance, Conjure,
+            // Inproxy, etc.) with Tactics enabled.
         }
         (false, Shape::Cdn) => {
+            map.insert(
+                "InproxyTunnelProtocolPreferProbability".into(),
+                serde_json::json!(0.0),
+            );
+            map.insert(
+                "InproxyTunnelProtocolSelectionProbability".into(),
+                serde_json::json!(0.0),
+            );
             map.insert(
                 "LimitTunnelProtocols".into(),
                 serde_json::json!(CDN_PROTOCOLS),
@@ -608,6 +615,14 @@ fn build_config(
             map.insert("DisableTactics".into(), serde_json::Value::from(true));
         }
         (false, Shape::Direct) => {
+            map.insert(
+                "InproxyTunnelProtocolPreferProbability".into(),
+                serde_json::json!(0.0),
+            );
+            map.insert(
+                "InproxyTunnelProtocolSelectionProbability".into(),
+                serde_json::json!(0.0),
+            );
             let unfronted: Vec<&str> = NON_INPROXY_PROTOCOLS
                 .iter()
                 .copied()
@@ -1790,6 +1805,29 @@ mod tests {
         );
 
         crate::settings::remove("AETHER_PSIPHON_DNS");
+        clear();
+    }
+
+    #[test]
+    fn direct_auto_psiphon_allows_all_protocols_and_tactics() {
+        let _held = hold();
+        clear();
+
+        let text = build_config(
+            &std::env::temp_dir(),
+            "127.0.0.1:1821".parse().expect("an address"),
+            None,
+            None,
+            Placement::BehindHeld,
+        )
+        .expect("a config");
+        let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+
+        assert!(parsed.get("LimitTunnelProtocols").is_none());
+        assert!(parsed.get("DisableTactics").is_none());
+        assert!(parsed.get("InproxyTunnelProtocolPreferProbability").is_none());
+        assert!(parsed.get("InproxyTunnelProtocolSelectionProbability").is_none());
+
         clear();
     }
 }

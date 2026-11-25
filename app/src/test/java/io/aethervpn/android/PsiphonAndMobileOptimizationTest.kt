@@ -234,4 +234,30 @@ class PsiphonAndMobileOptimizationTest {
             )
         )
     }
+
+    @Test
+    fun testPsiphonOnlySkipsAllWarpAndMasqueFlags() {
+        val mgr = AetherEngineManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+        val cfg = VpnConfig(
+            protocol = io.aethervpn.android.core.AetherProtocol.MASQUE_H3,
+            psiphonMode = PsiphonMode.PSIPHON_ONLY,
+            psiphonRegion = "DE",
+            upstreamProxy = "socks5://127.0.0.1:10808",
+            echEnabled = true,
+            tlsFragmentation = true,
+            masqueSni = "example.com"
+        )
+        val args = mgr.buildCoreArguments(cfg, psiphonBinaryPath = "/data/app/libpsiphon.so")
+        assertTrue(args.contains("--psiphon-only"))
+        assertTrue(args.contains("--upstream"))
+        assertTrue(args.contains("--psiphon-region"))
+        assertTrue(args.contains("--psiphon-bin"))
+        assertFalse(args.contains("--protocol"))
+        assertFalse(args.contains("--scan"))
+        assertFalse(args.contains("--h3"))
+        assertFalse(args.contains("--h2"))
+        assertFalse(args.contains("--ech"))
+        assertFalse(args.contains("--fragment"))
+        assertFalse(args.contains("--masque-sni"))
+    }
 }

@@ -129,4 +129,34 @@ class RoutingAndSplitTunnelTest {
             }
         }
     }
+
+    @Test
+    fun loopbackUpstreamAutoExcludesLocalProxyAppsInAllModes() {
+        val allAppsPlan = SplitTunnelPlanner.plan(
+            mode = SplitTunnelMode.ALL_APPS,
+            selectedPackages = emptySet(),
+            selfPackageName = "io.aethervpn.android",
+            upstreamProxy = "socks5://127.0.0.1:10808"
+        )
+        assertTrue(allAppsPlan.disallowedPackages.contains("io.aethervpn.android"))
+        assertTrue(allAppsPlan.disallowedPackages.containsAll(SplitTunnelPlanner.LOCAL_PROXY_PACKAGES))
+
+        val onlySelectedPlan = SplitTunnelPlanner.plan(
+            mode = SplitTunnelMode.ONLY_SELECTED,
+            selectedPackages = setOf("com.android.chrome", "com.v2ray.ang", "io.nekohasekai.sfa"),
+            selfPackageName = "io.aethervpn.android",
+            upstreamProxy = "http://localhost:7890"
+        )
+        assertEquals(listOf("com.android.chrome"), onlySelectedPlan.allowedPackages)
+        assertFalse(onlySelectedPlan.allowedPackages.contains("com.v2ray.ang"))
+        assertFalse(onlySelectedPlan.allowedPackages.contains("io.nekohasekai.sfa"))
+
+        val remotePlan = SplitTunnelPlanner.plan(
+            mode = SplitTunnelMode.ALL_APPS,
+            selectedPackages = emptySet(),
+            selfPackageName = "io.aethervpn.android",
+            upstreamProxy = "socks5://10.0.0.5:1080"
+        )
+        assertEquals(listOf("io.aethervpn.android"), remotePlan.disallowedPackages)
+    }
 }

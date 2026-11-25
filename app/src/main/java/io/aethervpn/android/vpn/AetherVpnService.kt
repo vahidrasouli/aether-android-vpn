@@ -271,7 +271,9 @@ class AetherVpnService : VpnService() {
         if (firstAttempt.isSuccess) return
 
         // Smart 1-shot battery-saving fallback: MASQUE HTTP/3 -> MASQUE HTTP/2 when QUIC is blocked
+        // (Skipped in PSIPHON_ONLY mode where WARP/MASQUE is not used)
         if (!userRequestedStop &&
+            config.psiphonMode != PsiphonMode.PSIPHON_ONLY &&
             primaryProtocol == AetherProtocol.MASQUE_H3 &&
             config.autoFallbackToH2
         ) {
@@ -688,8 +690,13 @@ class AetherVpnService : VpnService() {
         val plan = SplitTunnelPlanner.plan(
             mode = config.splitTunnelMode,
             selectedPackages = config.selectedPackages,
-            selfPackageName = packageName
+            selfPackageName = packageName,
+            upstreamProxy = config.upstreamProxy
         )
+
+        if (SplitTunnelPlanner.isLoopbackUpstream(config.upstreamProxy)) {
+            DiagnosticsLog.record("Tunnel", "Auto-excluding local proxy apps for loopback upstream")
+        }
 
         plan.disallowedPackages.forEach { pkg ->
             val res = runCatching { builder.addDisallowedApplication(pkg) }

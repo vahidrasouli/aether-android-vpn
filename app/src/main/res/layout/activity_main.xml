@@ -557,17 +557,168 @@
                             android:textColor="@color/text_primary"
                             android:textColorHint="@color/text_secondary"
                             android:textSize="14sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
-                        <EditText
-                            android:id="@+id/etUpstreamProxy"
+                <!-- Card 4B: Structured Upstream Proxy -->
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/Widget.Aether.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:letterSpacing="0.08"
+                            android:text="@string/title_upstream_proxy"
+                            android:textColor="@color/accent_primary"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switchUpstreamProxy"
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
-                            android:layout_marginTop="6dp"
-                            android:hint="Upstream proxy (socks5:// or http://)"
-                            android:inputType="textNoSuggestions"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/enable_upstream_proxy"
                             android:textColor="@color/text_primary"
-                            android:textColorHint="@color/text_secondary"
                             android:textSize="14sp" />
+
+                        <LinearLayout
+                            android:id="@+id/layoutUpstreamProxyFields"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:orientation="vertical"
+                            android:visibility="gone">
+
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/chipGroupUpstreamPreset"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                app:selectionRequired="true"
+                                app:singleSelection="true">
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipPresetV2rayNg"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="v2rayNG (10808)"
+                                    android:textSize="12sp"
+                                    app:chipBackgroundColor="@color/surface_elevated"
+                                    app:chipStrokeColor="@color/card_border" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipPresetSingbox"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Sing-box / Clash (7890)"
+                                    android:textSize="12sp"
+                                    app:chipBackgroundColor="@color/surface_elevated"
+                                    app:chipStrokeColor="@color/card_border" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipPresetCustom"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Custom"
+                                    android:textSize="12sp"
+                                    app:chipBackgroundColor="@color/surface_elevated"
+                                    app:chipStrokeColor="@color/card_border" />
+                            </com.google.android.material.chip.ChipGroup>
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <Spinner
+                                    android:id="@+id/spinnerUpstreamProtocol"
+                                    android:layout_width="0dp"
+                                    android:layout_height="48dp"
+                                    android:layout_weight="1.1" />
+
+                                <EditText
+                                    android:id="@+id/etUpstreamHost"
+                                    android:layout_width="0dp"
+                                    android:layout_height="48dp"
+                                    android:layout_marginStart="8dp"
+                                    android:layout_weight="1.8"
+                                    android:hint="127.0.0.1"
+                                    android:inputType="textNoSuggestions"
+                                    android:singleLine="true"
+                                    android:text="127.0.0.1"
+                                    android:textColor="@color/text_primary"
+                                    android:textColorHint="@color/text_secondary"
+                                    android:textSize="14sp" />
+
+                                <EditText
+                                    android:id="@+id/etUpstreamPort"
+                                    android:layout_width="0dp"
+                                    android:layout_height="48dp"
+                                    android:layout_marginStart="8dp"
+                                    android:layout_weight="0.9"
+                                    android:hint="10808"
+                                    android:inputType="number"
+                                    android:maxLength="5"
+                                    android:singleLine="true"
+                                    android:text="10808"
+                                    android:textColor="@color/text_primary"
+                                    android:textColorHint="@color/text_secondary"
+                                    android:textSize="14sp" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/tvUpstreamUrlPreview"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:fontFamily="monospace"
+                                android:text="socks5://127.0.0.1:10808"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnTestProxy"
+                                    style="@style/Widget.Aether.Button.Tonal"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="44dp"
+                                    android:minHeight="44dp"
+                                    android:text="@string/action_test_proxy" />
+
+                                <TextView
+                                    android:id="@+id/tvProxyTestResult"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:background="@drawable/bg_pill"
+                                    android:paddingHorizontal="12dp"
+                                    android:paddingVertical="6dp"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="12sp"
+                                    android:textStyle="bold"
+                                    android:visibility="gone" />
+                            </LinearLayout>
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -868,6 +1019,16 @@
                                 app:indicatorColor="@color/accent_primary"
                                 app:trackColor="@color/surface_elevated"
                                 app:trackCornerRadius="4dp" />
+
+                            <TextView
+                                android:id="@+id/tvUpdateProgressDetail"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:fontFamily="monospace"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp"
+                                android:visibility="gone" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnDownloadInstallUpdate"

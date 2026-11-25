@@ -41,15 +41,20 @@ import io.aethervpn.android.core.IpFamily
 import io.aethervpn.android.core.NoizeProfile
 import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
+import io.aethervpn.android.core.ProxyTestResult
 import io.aethervpn.android.core.PsiphonMode
 import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.ScanMode
 import io.aethervpn.android.core.SplitTunnelMode
+import io.aethervpn.android.core.StructuredUpstreamProxy
 import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.TunnelSnapshot
 import io.aethervpn.android.core.TunnelValidator
 import io.aethervpn.android.core.UpdateCheckResult
 import io.aethervpn.android.core.UpdateManager
+import io.aethervpn.android.core.UpstreamProxyPreset
+import io.aethervpn.android.core.UpstreamProxyProtocol
+import io.aethervpn.android.core.UpstreamProxyTester
 import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.core.VpnStateStore
 import io.aethervpn.android.databinding.ActivityMainBinding
@@ -241,6 +246,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerNoize.adapter = simpleAdapter(NoizeProfile.entries.map { it.label })
         binding.spinnerTheme.adapter = simpleAdapter(AppThemeMode.entries.map { it.label })
         binding.spinnerStatsInterval.adapter = simpleAdapter(statsIntervalLabels)
+        binding.spinnerUpstreamProtocol.adapter = simpleAdapter(UpstreamProxyProtocol.entries.map { it.label })
     }
 
     private fun setupAutoSaveListeners() {
@@ -271,12 +277,16 @@ class MainActivity : AppCompatActivity() {
             binding.spinnerScanMode,
             binding.spinnerNoize,
             binding.spinnerTheme,
-            binding.spinnerStatsInterval
+            binding.spinnerStatsInterval,
+            binding.spinnerUpstreamProtocol
         )
         immediateSpinners.forEach { spinner ->
             spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
                     if (isBindingUi) return
+                    if (spinner === binding.spinnerUpstreamProtocol) {
+                        syncUpstreamPreviewAndPreset()
+                    }
                     saveFromUiImmediate()
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -289,13 +299,43 @@ class MainActivity : AppCompatActivity() {
             binding.switchBypassIran,
             binding.switchTlsFragment,
             binding.switchEch,
-            binding.switchTlsVerify
+            binding.switchTlsVerify,
+            binding.switchUpstreamProxy
         )
         immediateSwitches.forEach { sw ->
-            sw.setOnCheckedChangeListener { _, _ ->
+            sw.setOnCheckedChangeListener { _, isChecked ->
                 if (isBindingUi) return@setOnCheckedChangeListener
+                if (sw === binding.switchUpstreamProxy) {
+                    binding.layoutUpstreamProxyFields.visibility = if (isChecked) View.VISIBLE else View.GONE
+                    syncUpstreamPreviewAndPreset()
+                }
                 saveFromUiImmediate()
             }
+        }
+
+        binding.chipGroupUpstreamPreset.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (isBindingUi) return@setOnCheckedStateChangeListener
+            val preset = when (checkedIds.firstOrNull()) {
+                R.id.chipPresetV2rayNg -> UpstreamProxyPreset.V2RAYNG
+                R.id.chipPresetSingbox -> UpstreamProxyPreset.SINGBOX_CLASH
+                else -> UpstreamProxyPreset.CUSTOM
+            }
+            if (preset != UpstreamProxyPreset.CUSTOM) {
+                isBindingUi = true
+                try {
+                    binding.spinnerUpstreamProtocol.setSelection(preset.protocol.ordinal, false)
+                    binding.etUpstreamHost.setText(preset.host)
+                    binding.etUpstreamPort.setText(preset.port.toString())
+                } finally {
+                    isBindingUi = false
+                }
+                syncUpstreamPreviewAndPreset()
+                saveFromUiImmediate()
+            }
+        }
+
+        binding.btnTestProxy.setOnClickListener {
+            runUpstreamProxyTest()
         }
 
         val debouncedFields = listOf(
@@ -304,7 +344,8 @@ class MainActivity : AppCompatActivity() {
             binding.etCustomDns,
             binding.etRouteDirect,
             binding.etRouteBlock,
-            binding.etUpstreamProxy,
+            binding.etUpstreamHost,
+            binding.etUpstreamPort,
             binding.etMasqueSni,
             binding.etWgKeepalive,
             binding.etZeroTrustTeam
@@ -314,6 +355,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 if (isBindingUi) return
+                syncUpstreamPreviewAndPreset()
                 scheduleDebouncedTextSave()
             }
         }
@@ -326,6 +368,70 @@ class MainActivity : AppCompatActivity() {
         debounceSaveJob = uiScope.launch {
             delay(400L)
             saveFromUiImmediate()
+        }
+    }
+
+    private fun currentStructuredProxyFromUi(): StructuredUpstreamProxy {
+        val protocol = UpstreamProxyProtocol.entries[
+            binding.spinnerUpstreamProtocol.selectedItemPosition.coerceIn(0, UpstreamProxyProtocol.entries.lastIndex)
+        ]
+        val host = binding.etUpstreamHost.text.toString().trim()
+        val port = binding.etUpstreamPort.text.toString().trim().toIntOrNull() ?: 0
+        return StructuredUpstreamProxy(
+            enabled = binding.switchUpstreamProxy.isChecked,
+            protocol = protocol,
+            host = host,
+            port = port
+        )
+    }
+
+    private fun syncUpstreamPreviewAndPreset() {
+        val structured = currentStructuredProxyFromUi()
+        val url = structured.copy(enabled = true).buildUrl()
+        binding.tvUpstreamUrlPreview.text = url.ifEmpty { "Enter a valid host and port (1–65535)" }
+
+        val presetId = when (structured.detectedPreset()) {
+            UpstreamProxyPreset.V2RAYNG -> R.id.chipPresetV2rayNg
+            UpstreamProxyPreset.SINGBOX_CLASH -> R.id.chipPresetSingbox
+            UpstreamProxyPreset.CUSTOM -> R.id.chipPresetCustom
+        }
+        if (binding.chipGroupUpstreamPreset.checkedChipId != presetId) {
+            val prev = isBindingUi
+            isBindingUi = true
+            try {
+                binding.chipGroupUpstreamPreset.check(presetId)
+            } finally {
+                isBindingUi = prev
+            }
+        }
+    }
+
+    private fun runUpstreamProxyTest() {
+        val structured = currentStructuredProxyFromUi()
+        binding.btnTestProxy.isEnabled = false
+        binding.tvProxyTestResult.visibility = View.VISIBLE
+        binding.tvProxyTestResult.text = "Testing…"
+        binding.tvProxyTestResult.backgroundTintList =
+            ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_elevated))
+        binding.tvProxyTestResult.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+
+        uiScope.launch {
+            val result = UpstreamProxyTester.test(structured.protocol, structured.host, structured.port)
+            binding.btnTestProxy.isEnabled = true
+            when (result) {
+                is ProxyTestResult.Success -> {
+                    binding.tvProxyTestResult.text = "Proxy OK • ${result.rttMs}ms"
+                    binding.tvProxyTestResult.backgroundTintList =
+                        ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent_primary_container))
+                    binding.tvProxyTestResult.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.log_success))
+                }
+                is ProxyTestResult.Failure -> {
+                    binding.tvProxyTestResult.text = result.error
+                    binding.tvProxyTestResult.backgroundTintList =
+                        ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.error_container))
+                    binding.tvProxyTestResult.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.error_text))
+                }
+            }
         }
     }
 
@@ -354,7 +460,7 @@ class MainActivity : AppCompatActivity() {
             customDns = binding.etCustomDns.text.toString().trim(),
             routeDirectRules = binding.etRouteDirect.text.toString().trim(),
             routeBlockRules = binding.etRouteBlock.text.toString().trim(),
-            upstreamProxy = binding.etUpstreamProxy.text.toString().trim(),
+            upstreamProxy = currentStructuredProxyFromUi().buildUrl(),
             scanMode = ScanMode.entries[binding.spinnerScanMode.selectedItemPosition],
             noizeProfile = NoizeProfile.entries[binding.spinnerNoize.selectedItemPosition],
             tlsFragmentation = binding.switchTlsFragment.isChecked,
@@ -441,7 +547,14 @@ class MainActivity : AppCompatActivity() {
             binding.etCustomDns.setText(cfg.customDns)
             binding.etRouteDirect.setText(cfg.routeDirectRules)
             binding.etRouteBlock.setText(cfg.routeBlockRules)
-            binding.etUpstreamProxy.setText(cfg.upstreamProxy)
+
+            val parsedProxy = StructuredUpstreamProxy.parse(cfg.upstreamProxy)
+            binding.switchUpstreamProxy.isChecked = parsedProxy.enabled
+            binding.layoutUpstreamProxyFields.visibility = if (parsedProxy.enabled) View.VISIBLE else View.GONE
+            binding.spinnerUpstreamProtocol.setSelection(parsedProxy.protocol.ordinal, false)
+            binding.etUpstreamHost.setText(parsedProxy.host)
+            binding.etUpstreamPort.setText(parsedProxy.port.toString())
+            syncUpstreamPreviewAndPreset()
 
             binding.spinnerScanMode.setSelection(cfg.scanMode.ordinal, false)
             binding.spinnerNoize.setSelection(cfg.noizeProfile.ordinal, false)
@@ -815,6 +928,7 @@ class MainActivity : AppCompatActivity() {
                         binding.tvUpdateVersion.text = "Update ${rel.tagName} (v${rel.versionName})"
                         binding.tvUpdateNotes.text = rel.releaseNotes
                         binding.progressUpdateDownload.visibility = View.GONE
+                        binding.tvUpdateProgressDetail.visibility = View.GONE
                         binding.btnDownloadInstallUpdate.isEnabled = true
                         binding.btnDownloadInstallUpdate.text = if (rel.apkDownloadUrl != null) {
                             getString(R.string.action_download_install)
@@ -855,6 +969,8 @@ class MainActivity : AppCompatActivity() {
             binding.progressUpdateDownload.visibility = View.VISIBLE
             binding.progressUpdateDownload.isIndeterminate = false
             binding.progressUpdateDownload.progress = 0
+            binding.tvUpdateProgressDetail.visibility = View.VISIBLE
+            binding.tvUpdateProgressDetail.text = "0% • Starting download…"
             binding.tvUpdateStatus.text = "Downloading ${rel.apkFileName ?: "update"}..."
 
             uiScope.launch {
@@ -863,19 +979,22 @@ class MainActivity : AppCompatActivity() {
                     downloadUrl = apkUrl,
                     fileName = fileName,
                     cacheDir = cacheDir
-                ) { pct ->
+                ) { progress ->
                     uiScope.launch {
-                        binding.progressUpdateDownload.progress = pct
+                        binding.progressUpdateDownload.progress = progress.percent
+                        binding.tvUpdateProgressDetail.text = progress.formatLabel()
                     }
                 }
 
                 binding.btnDownloadInstallUpdate.isEnabled = true
                 downloadResult.onSuccess { file ->
                     pendingInstallApkFile = file
+                    binding.progressUpdateDownload.progress = 100
                     binding.tvUpdateStatus.text = "Download complete. Launching installer..."
                     installDownloadedApk(file)
                 }.onFailure { err ->
                     binding.progressUpdateDownload.visibility = View.GONE
+                    binding.tvUpdateProgressDetail.visibility = View.GONE
                     binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
                 }
             }

@@ -28,12 +28,30 @@ class AetherEngineManager(private val privateDataDir: File) {
         val stateDir = File(privateDataDir, "aether").apply { mkdirs() }
         val configFile = File(stateDir, "aether.toml")
 
-        // When Psiphon is run standalone (--psiphon-only), Aether listens on --bind directly for Psiphon
-        val bindAddress = if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) {
-            "${VpnConfig.LOOPBACK_HOST}:${VpnConfig.PSIPHON_SOCKS_PORT}"
-        } else {
-            config.socksBindAddress
+        // Strict Resource Isolation: in Psiphon Only mode, skip all WARP/MASQUE flags
+        // (protocol, gateway scan, netstack/IP/perf, MASQUE SNI/ECH/fragment, WireGuard keepalive)
+        if (config.psiphonMode == PsiphonMode.PSIPHON_ONLY) {
+            val psiphonOnlyArgs = mutableListOf(
+                "--bind", "${VpnConfig.LOOPBACK_HOST}:${VpnConfig.PSIPHON_SOCKS_PORT}",
+                "--config", configFile.absolutePath,
+                "--log-level", "info",
+                "--psiphon-only"
+            )
+            if (config.upstreamProxy.isNotBlank()) {
+                psiphonOnlyArgs += "--upstream"; psiphonOnlyArgs += config.upstreamProxy
+            }
+            if (config.psiphonRegion.isNotBlank() && !config.psiphonRegion.equals("auto", ignoreCase = true)) {
+                psiphonOnlyArgs += "--psiphon-region"
+                psiphonOnlyArgs += config.psiphonRegion.trim().uppercase()
+            }
+            if (!psiphonBinaryPath.isNullOrBlank()) {
+                psiphonOnlyArgs += "--psiphon-bin"
+                psiphonOnlyArgs += psiphonBinaryPath
+            }
+            return psiphonOnlyArgs
         }
+
+        val bindAddress = config.socksBindAddress
 
         val args = mutableListOf(
             "--protocol", proto.cliProtocol,
@@ -226,7 +244,11 @@ class AetherEngineManager(private val privateDataDir: File) {
             android.system.Os.setenv("AETHER_MAX_CLIENTS", MAX_CLIENTS.toString(), true)
             android.system.Os.setenv("AETHER_HALF_CLOSE_SECS", "30", true)
             android.system.Os.setenv("AETHER_TCP_KEEPALIVE_SECS", "60", true)
-            android.system.Os.setenv("AETHER_MASQUE_H2_KEEPALIVE_SECS", "45", true)
+            if (config.psiphonMode != PsiphonMode.PSIPHON_ONLY) {
+                android.system.Os.setenv("AETHER_MASQUE_H2_KEEPALIVE_SECS", "45", true)
+            } else {
+                android.system.Os.unsetenv("AETHER_MASQUE_H2_KEEPALIVE_SECS")
+            }
         }
 
         // Apply mobile Go runtime caps when Psiphon is enabled to prevent Android LMK kills

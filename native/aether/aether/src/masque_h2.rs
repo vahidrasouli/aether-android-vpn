@@ -216,9 +216,13 @@ fn is_via_upstream(peer: std::net::SocketAddr) -> bool {
     crate::upstream::configured().is_some() && !crate::routing::is_private(peer.ip())
 }
 
-fn effective_sni_for<'a>(configured_sni: &'a str, via_upstream: bool) -> &'a str {
+fn effective_sni_for<'a>(
+    configured_sni: &'a str,
+    authority: &'a str,
+    via_upstream: bool,
+) -> &'a str {
     if via_upstream && configured_sni == consts::DEFAULT_MASQUE_SNI {
-        consts::CONNECT_SNI
+        authority
     } else {
         configured_sni
     }
@@ -233,7 +237,7 @@ async fn connect_tls(
     fragment: FragmentConfig,
 ) -> Result<tokio_boring::SslStream<FragmentingStream<TcpStream>>> {
     let via_upstream = is_via_upstream(cfg.peer);
-    let effective_sni = effective_sni_for(&cfg.sni, via_upstream);
+    let effective_sni = effective_sni_for(&cfg.sni, &cfg.authority, via_upstream);
     let effective_fragment = if via_upstream {
         FragmentConfig::disabled()
     } else {
@@ -839,17 +843,17 @@ mod tests {
     }
 
     #[test]
-    fn upstream_h2_uses_direct_masque_sni_when_default_sni_is_active() {
+    fn upstream_h2_uses_authority_sni_when_default_sni_is_active() {
         assert_eq!(
-            effective_sni_for(consts::DEFAULT_MASQUE_SNI, true),
-            consts::CONNECT_SNI
+            effective_sni_for(consts::DEFAULT_MASQUE_SNI, "cloudflareaccess.com", true),
+            "cloudflareaccess.com"
         );
         assert_eq!(
-            effective_sni_for(consts::DEFAULT_MASQUE_SNI, false),
+            effective_sni_for(consts::DEFAULT_MASQUE_SNI, "cloudflareaccess.com", false),
             consts::DEFAULT_MASQUE_SNI
         );
         assert_eq!(
-            effective_sni_for("custom.example.com", true),
+            effective_sni_for("custom.example.com", "cloudflareaccess.com", true),
             "custom.example.com"
         );
     }

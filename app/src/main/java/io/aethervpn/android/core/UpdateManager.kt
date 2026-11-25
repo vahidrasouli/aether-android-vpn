@@ -86,6 +86,22 @@ data class ReleaseInfo(
     val htmlUrl: String
 )
 
+data class DownloadProgress(
+    val downloadedBytes: Long,
+    val totalBytes: Long,
+    val percent: Int
+) {
+    fun formatLabel(): String {
+        val dlMb = downloadedBytes / (1024.0 * 1024.0)
+        return if (totalBytes > 0L) {
+            val totMb = totalBytes / (1024.0 * 1024.0)
+            String.format(java.util.Locale.US, "%d%% • %.1f / %.1f MB", percent, dlMb, totMb)
+        } else {
+            String.format(java.util.Locale.US, "%.1f MB", dlMb)
+        }
+    }
+}
+
 sealed interface UpdateCheckResult {
     data class UpdateAvailable(val release: ReleaseInfo) : UpdateCheckResult
     data class UpToDate(val currentVersion: String) : UpdateCheckResult
@@ -196,7 +212,7 @@ object UpdateManager {
         downloadUrl: String,
         fileName: String,
         cacheDir: File,
-        onProgress: (Int) -> Unit
+        onProgress: (DownloadProgress) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         var conn: HttpURLConnection? = null
         try {
@@ -228,6 +244,7 @@ object UpdateManager {
             val totalBytes = conn.contentLengthLong
             var downloadedBytes = 0L
             var lastReportedPct = -1
+            var lastReportedBytes = 0L
 
             conn.inputStream.use { input ->
                 FileOutputStream(targetFile).use { output ->
@@ -237,18 +254,21 @@ object UpdateManager {
                         if (read <= 0) break
                         output.write(buffer, 0, read)
                         downloadedBytes += read
-                        if (totalBytes > 0L) {
-                            val pct = ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                            if (pct != lastReportedPct) {
-                                lastReportedPct = pct
-                                onProgress(pct)
-                            }
+                        val pct = if (totalBytes > 0L) {
+                            ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                        } else {
+                            0
+                        }
+                        if (pct != lastReportedPct || downloadedBytes - lastReportedBytes >= 131_072L) {
+                            lastReportedPct = pct
+                            lastReportedBytes = downloadedBytes
+                            onProgress(DownloadProgress(downloadedBytes, totalBytes, pct))
                         }
                     }
                     output.flush()
                 }
             }
-            onProgress(100)
+            onProgress(DownloadProgress(downloadedBytes, totalBytes.coerceAtLeast(downloadedBytes), 100))
             Result.success(targetFile)
         } catch (e: Exception) {
             Result.failure(e)
