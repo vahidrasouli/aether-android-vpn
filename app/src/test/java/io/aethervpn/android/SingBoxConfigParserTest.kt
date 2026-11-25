@@ -170,4 +170,79 @@ class SingBoxConfigParserTest {
         assertTrue(SingBoxConfigParser.parse("ftp://example.com").isFailure)
         assertTrue(SingBoxConfigParser.parse("{}").isFailure)
     }
+
+    @Test
+    fun buildsSingBox112DnsRoutingDialAndLogForVlessAndVmess() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
+        val vmessJson = """
+            {"v":"2","ps":"VMessNode","add":"203.0.113.5","port":"443","id":"12345678-1234-1234-1234-1234567890ab","aid":"0","scy":"auto","net":"tcp"}
+        """.trimIndent()
+        val vmessUri = "vmess://" + Base64.getEncoder().encodeToString(vmessJson.toByteArray(Charsets.UTF_8))
+
+        for (uri in listOf(vlessUri, vmessUri)) {
+            val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(uri).getOrThrow())
+
+            // Log config: warn level, not disabled, no timestamp
+            val log = runtime.getJSONObject("log")
+            assertFalse(log.getBoolean("disabled"))
+            assertEquals("warn", log.getString("level"))
+            assertFalse(log.getBoolean("timestamp"))
+
+            // Sing-box 1.12 typed DNS servers
+            val dns = runtime.getJSONObject("dns")
+            assertEquals("dns-remote", dns.getString("final"))
+            val servers = dns.getJSONArray("servers")
+            assertEquals(2, servers.length())
+
+            val remoteDns = servers.getJSONObject(0)
+            assertEquals("dns-remote", remoteDns.getString("tag"))
+            assertEquals("https", remoteDns.getString("type"))
+            assertEquals("1.1.1.1", remoteDns.getString("server"))
+            assertEquals("proxy", remoteDns.getString("detour"))
+            assertFalse(remoteDns.has("address"))
+
+            val localDns = servers.getJSONObject(1)
+            assertEquals("dns-local", localDns.getString("tag"))
+            assertEquals("udp", localDns.getString("type"))
+            assertEquals("1.1.1.1", localDns.getString("server"))
+            assertEquals("direct", localDns.getString("detour"))
+            assertFalse(localDns.has("address"))
+
+            // Proxy outbound dial keep-alive & timeout fields
+            val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
+            assertEquals("proxy", proxyOutbound.getString("tag"))
+            assertEquals("30s", proxyOutbound.getString("tcp_keep_alive"))
+            assertEquals("15s", proxyOutbound.getString("tcp_keep_alive_interval"))
+            assertEquals("10s", proxyOutbound.getString("connect_timeout"))
+
+            // Route rules: sniff, hijack-dns, ip_is_private -> direct, quic -> reject
+            val route = runtime.getJSONObject("route")
+            assertEquals("dns-local", route.getString("default_domain_resolver"))
+            val rules = route.getJSONArray("rules")
+            val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
+
+            assertTrue(ruleList.any { it.optString("action") == "sniff" })
+            assertTrue(ruleList.any { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" })
+            assertTrue(ruleList.any { it.optBoolean("ip_is_private", false) && it.optString("outbound") == "direct" })
+            assertTrue(ruleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+        }
+    }
+
+    @Test
+    fun omitsQuicRejectRuleForUdpBasedOutbound() {
+        val hy2Uri = "hy2://hy2pass@hy2.example.com:8443?sni=hy2.example.com#HY2"
+        val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(hy2Uri).getOrThrow())
+        val rules = runtime.getJSONObject("route").getJSONArray("rules")
+        val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
+
+        assertTrue(ruleList.any { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" })
+        assertFalse(ruleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+    }
+
+    @Test
+    fun stripsAnsiEscapeCodesFromSingBoxLogs() {
+        val raw = "\u001B[33mWARN\u001B[0m[0005] \u001B[1;31mconnection reset\u001B[0m"
+        assertEquals("WARN[0005] connection reset", SingBoxEngineManager.stripAnsiCodes(raw))
+        assertEquals("plain log line", SingBoxEngineManager.stripAnsiCodes("plain log line"))
+    }
 }

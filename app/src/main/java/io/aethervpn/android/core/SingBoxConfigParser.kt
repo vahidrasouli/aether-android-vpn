@@ -78,10 +78,7 @@ object SingBoxConfigParser {
         val parsed = parse(rawUriOrJson).getOrThrow()
         val root = if (parsed.isFullConfig) {
             JSONObject(parsed.outboundOrFullJson.toString()).apply {
-                put("log", JSONObject().apply {
-                    put("level", "info")
-                    put("timestamp", false)
-                })
+                put("log", buildLogObject())
                 val existingInbounds = optJSONArray("inbounds")
                 val newInbounds = JSONArray()
                 newInbounds.put(buildMixedInbound(listenPort))
@@ -129,28 +126,32 @@ object SingBoxConfigParser {
         } else {
             val outbound = JSONObject(parsed.outboundOrFullJson.toString()).apply {
                 put("tag", "proxy")
+                put("tcp_keep_alive", "30s")
+                put("tcp_keep_alive_interval", "15s")
+                put("connect_timeout", "10s")
                 if (upstreamSocksPort != null) {
                     put("detour", UPSTREAM_SOCKS_TAG)
                 }
             }
+            val isTcpOutbound = outbound.optString("type").lowercase() in TCP_BASED_OUTBOUND_TYPES
             JSONObject().apply {
-                put("log", JSONObject().apply {
-                    put("level", "info")
-                    put("timestamp", false)
-                })
+                put("log", buildLogObject())
                 put("dns", JSONObject().apply {
                     put("servers", JSONArray().apply {
                         put(JSONObject().apply {
                             put("tag", "dns-remote")
-                            put("address", "1.1.1.1")
+                            put("type", "https")
+                            put("server", "1.1.1.1")
                             put("detour", "proxy")
                         })
                         put(JSONObject().apply {
                             put("tag", "dns-local")
-                            put("address", "local")
+                            put("type", "udp")
+                            put("server", "1.1.1.1")
                             put("detour", "direct")
                         })
                     })
+                    put("final", "dns-remote")
                     put("strategy", "ipv4_only")
                 })
                 put("inbounds", JSONArray().apply {
@@ -167,6 +168,26 @@ object SingBoxConfigParser {
                     })
                 })
                 put("route", JSONObject().apply {
+                    put("rules", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("action", "sniff")
+                        })
+                        put(JSONObject().apply {
+                            put("protocol", "dns")
+                            put("action", "hijack-dns")
+                        })
+                        put(JSONObject().apply {
+                            put("ip_is_private", true)
+                            put("outbound", "direct")
+                        })
+                        if (isTcpOutbound) {
+                            put(JSONObject().apply {
+                                put("protocol", "quic")
+                                put("action", "reject")
+                            })
+                        }
+                    })
+                    put("default_domain_resolver", "dns-local")
                     put("final", "proxy")
                     put("auto_detect_interface", false)
                 })
@@ -177,6 +198,13 @@ object SingBoxConfigParser {
 
     private const val UPSTREAM_SOCKS_TAG = "upstream-socks"
     private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
+    private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
+
+    private fun buildLogObject(): JSONObject = JSONObject().apply {
+        put("disabled", false)
+        put("level", "warn")
+        put("timestamp", false)
+    }
 
     private fun buildUpstreamSocksOutbound(upstreamSocksPort: Int): JSONObject = JSONObject().apply {
         put("type", "socks")
@@ -191,7 +219,6 @@ object SingBoxConfigParser {
         put("tag", "mixed-in")
         put("listen", VpnConfig.LOOPBACK_HOST)
         put("listen_port", listenPort)
-        put("sniff", true)
     }
 
     private fun parseRawJson(trimmed: String, customName: String?): ParsedSingBoxProfile {

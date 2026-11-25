@@ -93,4 +93,11 @@ class HevConfigGeneratorTest {
         val customDnsYaml = manager.generateYamlConfig(VpnConfig(customDns = "8.8.8.8"))
         assertFalse(customDnsYaml.contains("mapdns:"))
     }
+
+    @Test
+    fun setsGenerousTcpReadWriteTimeoutForPersistentConnections() {
+        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
+        val yaml = manager.generateYamlConfig(VpnConfig())
+        assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
+    }
 }

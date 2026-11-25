@@ -147,9 +147,9 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
                     var line: String? = reader.readLine()
                     while (isActive && line != null) {
-                        val trimmed = line.trim()
-                        if (trimmed.isNotEmpty()) {
-                            DiagnosticsLog.record(tag, trimmed)
+                        val cleaned = stripAnsiCodes(line).trim()
+                        if (cleaned.isNotEmpty()) {
+                            DiagnosticsLog.record(tag, cleaned)
                         }
                         line = reader.readLine()
                     }
@@ -159,6 +159,12 @@ class SingBoxEngineManager(private val privateDataDir: File) {
     }
 
     companion object {
+        private val ANSI_ESCAPE_REGEX = Regex("\\u001B\\[[0-9;]*m")
+
+        internal fun stripAnsiCodes(line: String): String {
+            return ANSI_ESCAPE_REGEX.replace(line, "")
+        }
+
         internal fun resolveGoEnvironment(config: VpnConfig): Map<String, String?> {
             val env = linkedMapOf<String, String?>()
             env["GOMEMLIMIT"] = if (config.goMemLimit.equals("Auto", ignoreCase = true) || config.goMemLimit.isBlank()) {
