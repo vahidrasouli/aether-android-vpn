@@ -737,18 +737,26 @@ fn apply_direct_dns_config(
     }
 
     let servers = configured_dns_servers();
-    let has_key = |target: &str| map.keys().any(|k| k.eq_ignore_ascii_case(target));
+    let has_alt = map
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case("DNSResolverAlternateServers"));
+    let has_pref = map
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case("DNSResolverPreferredAlternateServers"));
+    let has_prob = map
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case("DNSResolverPreferAlternateServerProbability"));
 
-    if !has_key("DNSResolverAlternateServers") {
+    if !has_alt {
         map.insert("DNSResolverAlternateServers".into(), serde_json::json!(servers));
     }
-    if !has_key("DNSResolverPreferredAlternateServers") {
+    if !has_pref {
         map.insert(
             "DNSResolverPreferredAlternateServers".into(),
             serde_json::json!(servers),
         );
     }
-    if !has_key("DNSResolverPreferAlternateServerProbability") {
+    if !has_prob {
         map.insert(
             "DNSResolverPreferAlternateServerProbability".into(),
             serde_json::json!(1.0),
