@@ -10,12 +10,22 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
 import java.io.BufferedReader
+import java.io.EOFException
 import java.io.File
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLSocket
+
+data class SpeedProbeResult(
+    val bytesDownloaded: Int,
+    val elapsedMs: Long,
+    val kbPerSec: Long
+)
 
 /**
  * Manages the official SagerNet/sing-box ARM64 core subprocess (`libsing-box.so`).
@@ -340,6 +350,189 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     }
                 }
                 runCatching { testConfig.delete() }
+            }
+        }
+
+        const val SPEED_PROBE_BYTES = 262_144
+        private const val SPEED_PROBE_HOST = "speed.cloudflare.com"
+        private const val SPEED_PROBE_PORT = 443
+
+        fun formatSpeedProbeLog(
+            result: Result<SpeedProbeResult>,
+            requestedBytes: Int = SPEED_PROBE_BYTES
+        ): String {
+            return result.fold(
+                onSuccess = { probe ->
+                    val kb = (probe.bytesDownloaded / 1024).coerceAtLeast(1)
+                    "Direct SOCKS5 throughput: ${kb}KB in ${probe.elapsedMs}ms (${probe.kbPerSec} KB/s)"
+                },
+                onFailure = { err ->
+                    "Direct SOCKS5 throughput failed (${requestedBytes / 1024}KB): ${err.message ?: err.javaClass.simpleName}"
+                }
+            )
+        }
+
+        /**
+         * Downloads [bytesToDownload] bytes from https://speed.cloudflare.com/__down directly through
+         * the local SOCKS5 listener on 127.0.0.1:[socksPort] to isolate sing-box vs HEV TUN stalls.
+         */
+        fun runDirectSocks5SpeedProbe(
+            socksPort: Int,
+            bytesToDownload: Int = SPEED_PROBE_BYTES,
+            timeoutMs: Int = 15_000
+        ): Result<SpeedProbeResult> {
+            var rawSocket: Socket? = null
+            var sslSocket: Socket? = null
+            var bodyBytesRead = 0
+            return try {
+                rawSocket = Socket()
+                rawSocket.soTimeout = timeoutMs
+                rawSocket.connect(VpnConfig.loopbackSocketAddress(socksPort), timeoutMs)
+
+                val outStream = rawSocket.getOutputStream()
+                val inStream = rawSocket.getInputStream()
+
+                // 1. SOCKS5 Greeting (VER=5, NMETHODS=1, NO_AUTH=0x00)
+                outStream.write(byteArrayOf(0x05, 0x01, 0x00))
+                outStream.flush()
+
+                val greeting = ByteArray(2)
+                readExactBytes(inStream, greeting)
+                if (greeting[0] != 0x05.toByte() || greeting[1] != 0x00.toByte()) {
+                    return Result.failure(IllegalStateException("SOCKS5 greeting rejected (${greeting[0]}, ${greeting[1]})"))
+                }
+
+                // 2. SOCKS5 CONNECT to speed.cloudflare.com:443 (ATYP=0x03 domain)
+                val hostBytes = SPEED_PROBE_HOST.toByteArray(Charsets.US_ASCII)
+                val connectReq = ByteArray(4 + 1 + hostBytes.size + 2)
+                connectReq[0] = 0x05
+                connectReq[1] = 0x01
+                connectReq[2] = 0x00
+                connectReq[3] = 0x03
+                connectReq[4] = hostBytes.size.toByte()
+                System.arraycopy(hostBytes, 0, connectReq, 5, hostBytes.size)
+                connectReq[5 + hostBytes.size] = (SPEED_PROBE_PORT shr 8).toByte()
+                connectReq[6 + hostBytes.size] = (SPEED_PROBE_PORT and 0xFF).toByte()
+                outStream.write(connectReq)
+                outStream.flush()
+
+                val replyHeader = ByteArray(4)
+                readExactBytes(inStream, replyHeader)
+                if (replyHeader[0] != 0x05.toByte() || replyHeader[1] != 0x00.toByte()) {
+                    return Result.failure(
+                        IllegalStateException("SOCKS5 CONNECT failed (rep=0x%02X)".format(replyHeader[1].toInt() and 0xFF))
+                    )
+                }
+                when (replyHeader[3].toInt() and 0xFF) {
+                    0x01 -> skipExactBytes(inStream, 6)
+                    0x03 -> {
+                        val len = inStream.read()
+                        if (len < 0) return Result.failure(EOFException("Premature EOF reading SOCKS5 domain"))
+                        skipExactBytes(inStream, len + 2)
+                    }
+                    0x04 -> skipExactBytes(inStream, 18)
+                    else -> return Result.failure(IllegalStateException("Unknown SOCKS5 ATYP: ${replyHeader[3]}"))
+                }
+
+                // 3. TLS upgrade + HTTP/1.1 GET /__down?bytes=...
+                val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
+                sslSocket = (sslFactory.createSocket(rawSocket, SPEED_PROBE_HOST, SPEED_PROBE_PORT, true) as SSLSocket).apply {
+                    soTimeout = timeoutMs
+                    startHandshake()
+                }
+                val sslOut = sslSocket.getOutputStream()
+                val sslIn = sslSocket.getInputStream()
+                val req = "GET /__down?bytes=$bytesToDownload HTTP/1.1\r\n" +
+                    "Host: $SPEED_PROBE_HOST\r\n" +
+                    "User-Agent: AetherAndroid/2.4.0\r\n" +
+                    "Connection: close\r\n\r\n"
+                sslOut.write(req.toByteArray(Charsets.US_ASCII))
+                sslOut.flush()
+
+                // Parse HTTP status and skip headers byte-by-byte so buffered reads don't eat body bytes
+                val statusLine = readHttpLine(sslIn)
+                    ?: return Result.failure(EOFException("Empty HTTP response from speed probe"))
+                val statusCode = statusLine.split(" ", limit = 3).getOrNull(1)?.toIntOrNull() ?: 0
+                if (statusCode !in 200..299) {
+                    return Result.failure(IllegalStateException("HTTP $statusCode: $statusLine"))
+                }
+                while (true) {
+                    val hdr = readHttpLine(sslIn) ?: break
+                    if (hdr.isEmpty()) break
+                }
+
+                val startNs = System.nanoTime()
+                val buf = ByteArray(8192)
+                while (bodyBytesRead < bytesToDownload) {
+                    val n = sslIn.read(buf)
+                    if (n < 0) break
+                    bodyBytesRead += n
+                }
+                val elapsedMs = ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1L)
+                if (bodyBytesRead < bytesToDownload) {
+                    return Result.failure(
+                        EOFException("Incomplete download: ${bodyBytesRead}B of ${bytesToDownload}B after ${elapsedMs}ms")
+                    )
+                }
+                val kbPerSec = (bodyBytesRead.toLong() * 1000L) / (elapsedMs * 1024L)
+                Result.success(
+                    SpeedProbeResult(
+                        bytesDownloaded = bodyBytesRead,
+                        elapsedMs = elapsedMs,
+                        kbPerSec = kbPerSec
+                    )
+                )
+            } catch (e: Exception) {
+                val stalledSuffix = if (bodyBytesRead > 0) {
+                    " (stalled at ${bodyBytesRead / 1024}KB / ${bodyBytesRead}B)"
+                } else {
+                    ""
+                }
+                Result.failure(IllegalStateException("${e.message ?: e.javaClass.simpleName}$stalledSuffix", e))
+            } finally {
+                runCatching { sslSocket?.close() }
+                runCatching { rawSocket?.close() }
+            }
+        }
+
+        private fun readExactBytes(inStream: InputStream, buffer: ByteArray) {
+            var offset = 0
+            while (offset < buffer.size) {
+                val read = inStream.read(buffer, offset, buffer.size - offset)
+                if (read < 0) {
+                    throw EOFException("Premature EOF (expected ${buffer.size}B, got ${offset}B)")
+                }
+                offset += read
+            }
+        }
+
+        private fun skipExactBytes(inStream: InputStream, count: Int) {
+            var remaining = count
+            while (remaining > 0) {
+                val skipped = inStream.skip(remaining.toLong())
+                if (skipped <= 0) {
+                    if (inStream.read() < 0) throw EOFException("Premature EOF skipping SOCKS5 bytes")
+                    remaining--
+                } else {
+                    remaining -= skipped.toInt()
+                }
+            }
+        }
+
+        private fun readHttpLine(inStream: InputStream): String? {
+            val sb = StringBuilder()
+            var prev = -1
+            while (true) {
+                val b = inStream.read()
+                if (b < 0) return if (sb.isEmpty()) null else sb.toString()
+                if (b == '\n'.code) {
+                    if (prev == '\r'.code && sb.isNotEmpty()) {
+                        sb.setLength(sb.length - 1)
+                    }
+                    return sb.toString()
+                }
+                sb.append(b.toChar())
+                prev = b
             }
         }
     }

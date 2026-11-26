@@ -8,6 +8,10 @@
         android:title="@string/action_test_all"
         app:showAsAction="always" />
     <item
+        android:id="@+id/action_speed_probe"
+        android:title="@string/action_speed_probe"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_sort_ping"
         android:icon="@drawable/ic_sort_24"
         android:iconTint="@color/text_primary"

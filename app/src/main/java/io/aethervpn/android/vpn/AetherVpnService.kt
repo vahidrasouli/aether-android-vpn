@@ -604,6 +604,10 @@ class AetherVpnService : VpnService() {
                 getString(R.string.status_connected),
                 "${verified.publicIp} • ${plan.chainMode.label}"
             )
+            serviceScope.launch {
+                val probe = SingBoxEngineManager.runDirectSocks5SpeedProbe(socksPort = plan.tunTargetPort)
+                DiagnosticsLog.record("SingBox", SingBoxEngineManager.formatSpeedProbeLog(probe))
+            }
             Result.success(Unit)
         } catch (ce: CancellationException) {
             throw ce

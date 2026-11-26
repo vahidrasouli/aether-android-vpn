@@ -1,6 +1,8 @@
 package io.aethervpn.android
 
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.SingBoxEngineManager
+import io.aethervpn.android.core.SpeedProbeResult
 import io.aethervpn.android.core.TunnelValidator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -438,5 +440,19 @@ class TunnelValidatorTest {
         thread.isDaemon = true
         thread.start()
         return port to thread
+    }
+
+    @Test
+    fun formatsDirectSocks5SpeedProbeDiagnosticLines() {
+        val okLine = SingBoxEngineManager.formatSpeedProbeLog(
+            Result.success(SpeedProbeResult(bytesDownloaded = 262_144, elapsedMs = 420, kbPerSec = 609))
+        )
+        assertEquals("Direct SOCKS5 throughput: 256KB in 420ms (609 KB/s)", okLine)
+
+        val failLine = SingBoxEngineManager.formatSpeedProbeLog(
+            Result.failure(IllegalStateException("Read timed out (stalled at 32KB / 32768B)"))
+        )
+        assertTrue(failLine.contains("Direct SOCKS5 throughput failed (256KB):"))
+        assertTrue(failLine.contains("stalled at 32KB"))
     }
 }

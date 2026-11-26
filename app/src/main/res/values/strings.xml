@@ -83,6 +83,7 @@
     <string name="action_test">Test</string>
     <string name="action_delete">Delete</string>
     <string name="action_test_all">Test All</string>
+    <string name="action_speed_probe">Speed Test (256KB)</string>
     <string name="action_sort_ping">Sort by Ping</string>
     <string name="action_edit_profile">Edit Profile</string>
     <string name="action_copy_uri">Copy URI</string>

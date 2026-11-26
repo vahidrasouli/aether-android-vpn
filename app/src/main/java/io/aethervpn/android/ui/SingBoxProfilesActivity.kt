@@ -33,13 +33,16 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.aethervpn.android.R
 import io.aethervpn.android.core.ChainMode
+import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.QrCodeHelper
 import io.aethervpn.android.core.SingBoxConfigParser
 import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfile
 import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.SingBoxProfileStoreState
+import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.VpnConfig
+import io.aethervpn.android.core.VpnStateStore
 import io.aethervpn.android.databinding.ActivitySingboxProfilesBinding
 import io.aethervpn.android.databinding.DialogAddSingboxProfileBinding
 import io.aethervpn.android.databinding.DialogShareQrBinding
@@ -116,6 +119,10 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.action_test_all -> {
                     runTestAll()
+                    true
+                }
+                R.id.action_speed_probe -> {
+                    runSpeedProbe()
                     true
                 }
                 R.id.action_sort_ping -> {
@@ -713,6 +720,24 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         binding.layoutTestAllProgress.visibility = View.GONE
         submitProfilesList()
         showSnack("Test All cancelled")
+    }
+
+    private fun runSpeedProbe() {
+        val state = VpnStateStore.state.value
+        if (state.phase != TunnelPhase.VPN_CONNECTED) {
+            showSnack("Connect VPN in Sing-box mode first to probe live SOCKS5 throughput")
+            return
+        }
+        showSnack("Running 256KB direct SOCKS5 speed probe…")
+        lifecycleScope.launch {
+            val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
+            val probe = withContext(Dispatchers.IO) {
+                SingBoxEngineManager.runDirectSocks5SpeedProbe(socksPort = cfg.effectiveSocksPort)
+            }
+            val line = SingBoxEngineManager.formatSpeedProbeLog(probe)
+            DiagnosticsLog.record("SingBox", line)
+            showSnack(line)
+        }
     }
 
     private fun sortByPing() {
