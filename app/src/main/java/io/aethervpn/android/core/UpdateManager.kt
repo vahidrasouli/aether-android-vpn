@@ -821,7 +821,13 @@ object UpdateManager {
         var cancelled = false
         try {
             coroutineContext.ensureActive()
-            val probe = runCatching { probeDownloadTarget(downloadUrl, expectedTotalBytes) }.getOrNull()
+            val hasSingleStreamPart = partFile.isFile && partFile.length() > 0L && !chunksFileFor(partFile).exists()
+            val skipProbe = hasSingleStreamPart || (expectedTotalBytes in 1L until PARALLEL_MIN_BYTES)
+            val probe = if (skipProbe) {
+                null
+            } else {
+                runCatching { probeDownloadTarget(downloadUrl, expectedTotalBytes) }.getOrNull()
+            }
             coroutineContext.ensureActive()
 
             if (probe != null && probe.acceptRanges && probe.totalBytes >= PARALLEL_MIN_BYTES) {
@@ -907,13 +913,10 @@ object UpdateManager {
             if (code in 200..299) {
                 val len = conn.contentLengthLong.takeIf { it > 0L } ?: expectedTotalBytes
                 val ranges = conn.getHeaderField("Accept-Ranges")?.contains("bytes", ignoreCase = true) == true
-                if (ranges && len > 0L) {
-                    return ProbeResult(resolvedUrl, len, true)
-                }
-                if (len < 0L || (!ranges && (len >= PARALLEL_MIN_BYTES || expectedTotalBytes >= PARALLEL_MIN_BYTES))) {
+                if (len < 0L) {
                     conn.disconnect()
                     headPair = null
-                    return probeWithRangeGet(resolvedUrl, expectedTotalBytes.coerceAtLeast(len))
+                    return probeWithRangeGet(resolvedUrl, expectedTotalBytes)
                 }
                 return ProbeResult(resolvedUrl, len, ranges)
             }
