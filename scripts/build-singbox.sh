@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JNILIBS_ARM64="${ROOT_DIR}/app/src/main/jniLibs/arm64-v8a"
 SINGBOX_REPO="${SINGBOX_REPO:-https://github.com/SagerNet/sing-box.git}"
-SINGBOX_VERSION="${SINGBOX_VERSION:-v1.12.25}"
+SINGBOX_VERSION="${SINGBOX_VERSION:-v1.14.4}"
 SINGBOX_SRC_DIR="${SINGBOX_SRC_DIR:-${ROOT_DIR}/native/sing-box}"
-SINGBOX_TAGS="${SINGBOX_TAGS:-with_quic,with_utls,with_wireguard,with_gvisor,with_clash_api}"
+SINGBOX_TAGS="${SINGBOX_TAGS:-with_utls,with_reality_server,with_quic,with_wireguard,with_gvisor,with_clash_api}"
 
 echo "[*] Building official SagerNet/sing-box (${SINGBOX_VERSION}) for ARM64 (android/arm64)..."
 

@@ -159,7 +159,8 @@ class SingBoxConfigParserTest {
 
         val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(fullJson, 1825).getOrThrow())
         val inbound = runtime.getJSONArray("inbounds").getJSONObject(0)
-        assertEquals("mixed", inbound.getString("type"))
+        assertEquals("socks", inbound.getString("type"))
+        assertEquals("socks-in", inbound.getString("tag"))
         assertEquals("127.0.0.1", inbound.getString("listen"))
         assertEquals(1825, inbound.getInt("listen_port"))
     }
@@ -229,9 +230,10 @@ class SingBoxConfigParserTest {
             assertFalse("dns-local must NOT have detour in sing-box 1.12", localDns.has("detour"))
             assertFalse(localDns.has("address"))
 
-            // Mixed inbound & proxy outbound must NOT force local domain_strategy
-            val mixedInbound = runtime.getJSONArray("inbounds").getJSONObject(0)
-            assertFalse(mixedInbound.has("domain_strategy"))
+            // Socks inbound & proxy outbound must NOT force local domain_strategy
+            val socksInbound = runtime.getJSONArray("inbounds").getJSONObject(0)
+            assertEquals("socks", socksInbound.getString("type"))
+            assertFalse(socksInbound.has("domain_strategy"))
 
             // Proxy outbound dial timeout field (no invalid tcp_keep_alive fields for sing-box 1.12)
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
@@ -498,17 +500,17 @@ class SingBoxConfigParserTest {
     }
 
     @Test
-    fun disablesAutoDetectInterfaceAndKeepsMixedInboundMinimal() {
+    fun disablesAutoDetectInterfaceAndKeepsSocksInboundMinimal() {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
         val uriRuntime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, listenPort = 1825).getOrThrow())
         assertFalse(uriRuntime.getJSONObject("route").optBoolean("auto_detect_interface", false))
 
-        val uriMixed = uriRuntime.getJSONArray("inbounds").getJSONObject(0)
-        assertEquals(setOf("type", "tag", "listen", "listen_port"), uriMixed.keys().asSequence().toSet())
-        assertEquals("mixed", uriMixed.getString("type"))
-        assertEquals("mixed-in", uriMixed.getString("tag"))
-        assertEquals("127.0.0.1", uriMixed.getString("listen"))
-        assertEquals(1825, uriMixed.getInt("listen_port"))
+        val uriSocks = uriRuntime.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(setOf("type", "tag", "listen", "listen_port"), uriSocks.keys().asSequence().toSet())
+        assertEquals("socks", uriSocks.getString("type"))
+        assertEquals("socks-in", uriSocks.getString("tag"))
+        assertEquals("127.0.0.1", uriSocks.getString("listen"))
+        assertEquals(1825, uriSocks.getInt("listen_port"))
 
         val fullJsonWithAutoDetect = """
             {
@@ -522,7 +524,33 @@ class SingBoxConfigParserTest {
             "Imported full JSON must override auto_detect_interface to false on Android",
             fullRuntime.getJSONObject("route").optBoolean("auto_detect_interface", false)
         )
-        val fullMixed = fullRuntime.getJSONArray("inbounds").getJSONObject(0)
-        assertEquals(setOf("type", "tag", "listen", "listen_port"), fullMixed.keys().asSequence().toSet())
+        val fullSocks = fullRuntime.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(setOf("type", "tag", "listen", "listen_port"), fullSocks.keys().asSequence().toSet())
+        assertEquals("socks", fullSocks.getString("type"))
+        assertEquals("socks-in", fullSocks.getString("tag"))
+    }
+
+    @Test
+    fun rejectsIspDnsPoisonedCidrBeforePrivateIpBypassForVlessAndShadowsocks() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
+        val ssUser = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("aes-256-gcm:myPass123".toByteArray(Charsets.UTF_8))
+        val ssUri = "ss://$ssUser@198.51.100.20:8388#SSNode"
+
+        for (uri in listOf(vlessUri, ssUri)) {
+            val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(uri).getOrThrow())
+            val rules = runtime.getJSONObject("route").getJSONArray("rules")
+            val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
+
+            val poisonIdx = ruleList.indexOfFirst { rule ->
+                val cidrs = rule.optJSONArray("ip_cidr")
+                cidrs != null && (0 until cidrs.length()).any { cidrs.getString(it) == "10.10.34.0/24" } &&
+                    rule.optString("action") == "reject"
+            }
+            val privateIpIdx = ruleList.indexOfFirst { it.optBoolean("ip_is_private", false) }
+
+            assertTrue("10.10.34.0/24 reject rule must exist", poisonIdx >= 0)
+            assertTrue("10.10.34.0/24 reject rule must appear strictly before ip_is_private", poisonIdx < privateIpIdx)
+        }
     }
 }

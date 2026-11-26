@@ -183,7 +183,7 @@ object SingBoxConfigParser {
                 put("log", buildLogObject(config))
                 val existingInbounds = optJSONArray("inbounds")
                 val newInbounds = JSONArray()
-                newInbounds.put(buildMixedInbound(listenPort))
+                newInbounds.put(buildSocksInbound(listenPort))
                 if (existingInbounds != null) {
                     for (i in 0 until existingInbounds.length()) {
                         val ib = existingInbounds.optJSONObject(i) ?: continue
@@ -290,7 +290,7 @@ object SingBoxConfigParser {
                     put("independent_cache", true)
                 })
                 put("inbounds", JSONArray().apply {
-                    put(buildMixedInbound(listenPort))
+                    put(buildSocksInbound(listenPort))
                 })
                 put("outbounds", JSONArray().apply {
                     put(outbound)
@@ -316,6 +316,10 @@ object SingBoxConfigParser {
                         put(JSONObject().apply {
                             put("protocol", "dns")
                             put("action", "hijack-dns")
+                        })
+                        put(JSONObject().apply {
+                            put("ip_cidr", JSONArray().apply { put("10.10.34.0/24") })
+                            put("action", "reject")
                         })
                         if (config.sbBypassPrivateIp) {
                             put(JSONObject().apply {
@@ -459,9 +463,9 @@ object SingBoxConfigParser {
         put("version", "5")
     }
 
-    private fun buildMixedInbound(listenPort: Int): JSONObject = JSONObject().apply {
-        put("type", "mixed")
-        put("tag", "mixed-in")
+    private fun buildSocksInbound(listenPort: Int): JSONObject = JSONObject().apply {
+        put("type", "socks")
+        put("tag", "socks-in")
         put("listen", VpnConfig.LOOPBACK_HOST)
         put("listen_port", listenPort)
     }
