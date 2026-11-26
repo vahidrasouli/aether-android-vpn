@@ -411,7 +411,7 @@ class SingBoxConfigParserTest {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=ws&security=tls#VlessWs"
         for (dnsIp in listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")) {
             val cfg = VpnConfig(sbRemoteDns = dnsIp, sbDirectDns = "1.1.1.1")
-            val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, cfg).getOrThrow())
+            val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, config = cfg).getOrThrow())
             val servers = runtime.getJSONObject("dns").getJSONArray("servers")
 
             val remoteDns = servers.getJSONObject(0)

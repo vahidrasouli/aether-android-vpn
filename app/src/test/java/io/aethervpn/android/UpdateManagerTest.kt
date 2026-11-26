@@ -355,7 +355,7 @@ class UpdateManagerTest {
                 var x = if (v < 0) -v else v
                 val b = ByteArray(8)
                 for (i in 0..7) {
-                    b[i] = (x and 0xFF).toByte()
+                    b[i] = (x and 0xFFL).toByte()
                     x = x ushr 8
                 }
                 if (v < 0) b[7] = (b[7].toInt() or 0x80).toByte()
