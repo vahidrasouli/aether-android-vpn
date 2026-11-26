@@ -329,7 +329,7 @@ object UpdateManager {
 
             cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
                 if (cause != null) {
-                    runCatching { conn.disconnect() }
+                    runCatching { conn?.disconnect() }
                 }
             }
 

@@ -115,7 +115,7 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun downloadApkCancellationDeletesAllPartialFiles() = kotlinx.coroutines.runBlocking {
+    fun downloadApkCancellationDeletesAllPartialFiles(): Unit = kotlinx.coroutines.runBlocking<Unit> {
         val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-cancel-").toFile()
         val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
         val acceptedLatch = java.util.concurrent.CountDownLatch(1)
@@ -165,7 +165,7 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun downloadApkFailureCleansUpPartialFiles() = kotlinx.coroutines.runBlocking {
+    fun downloadApkFailureCleansUpPartialFiles(): Unit = kotlinx.coroutines.runBlocking<Unit> {
         val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-fail-").toFile()
         val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
         java.io.File(updatesDir, "stale.apk.tmp").writeText("stale")
