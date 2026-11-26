@@ -83,4 +83,42 @@ object ChainOrchestrator {
             protocolLabel = protoLabel
         )
     }
+
+    fun formatTopology(config: VpnConfig, activeProfile: SingBoxProfile? = null): String {
+        val prefix = "TUN (${VpnConfig.TUN_IPV4_ADDRESS}) -> HEV"
+        val warpHop = "Aether WARP (${VpnConfig.LOOPBACK_HOST}:${VpnConfig.DEFAULT_SOCKS_PORT})"
+        val psiphonHop = "Psiphon (${VpnConfig.LOOPBACK_HOST}:${VpnConfig.PSIPHON_SOCKS_PORT})"
+        val singBoxHop = "Sing-box (${VpnConfig.LOOPBACK_HOST}:${VpnConfig.SING_BOX_SOCKS_PORT})"
+        val outboundDesc = activeProfile?.let {
+            SingBoxConfigParser.formatOutboundDescriptor(it.rawUriOrJson, it.protocol)
+        } ?: "none"
+
+        if (config.singBoxEnabled) {
+            return when (config.chainMode) {
+                ChainMode.SINGBOX_ONLY -> "$prefix -> $singBoxHop -> $outboundDesc"
+                ChainMode.SINGBOX_TO_WARP -> "$prefix -> $warpHop -> $singBoxHop -> $outboundDesc"
+                ChainMode.SINGBOX_TO_PSIPHON -> "$prefix -> $psiphonHop -> $singBoxHop -> $outboundDesc"
+                ChainMode.SINGBOX_TO_WARP_TO_PSIPHON -> "$prefix -> $psiphonHop -> $warpHop -> $singBoxHop -> $outboundDesc"
+                ChainMode.SINGBOX_TO_PSIPHON_TO_WARP -> "$prefix -> $warpHop -> $psiphonHop -> $singBoxHop -> $outboundDesc"
+                ChainMode.WARP_TO_SINGBOX -> "$prefix -> $singBoxHop -> $warpHop -> $outboundDesc"
+                ChainMode.PSIPHON_TO_SINGBOX -> "$prefix -> $singBoxHop -> $psiphonHop -> $outboundDesc"
+            }
+        }
+
+        val upstreamHop = sanitizeUpstreamEndpoint(config.upstreamProxy)
+        val egressSuffix = if (upstreamHop != null) " -> Upstream ($upstreamHop)" else " -> Direct"
+        return when (config.psiphonMode) {
+            PsiphonMode.OFF -> "$prefix -> $warpHop$egressSuffix"
+            PsiphonMode.WARP_TO_PSIPHON -> "$prefix -> $psiphonHop -> $warpHop$egressSuffix"
+            PsiphonMode.PSIPHON_TO_WARP -> "$prefix -> $warpHop -> $psiphonHop$egressSuffix"
+            PsiphonMode.PSIPHON_ONLY -> "$prefix -> $psiphonHop$egressSuffix"
+        }
+    }
+
+    private fun sanitizeUpstreamEndpoint(rawUpstream: String): String? {
+        val trimmed = rawUpstream.trim()
+        if (trimmed.isBlank()) return null
+        val withoutScheme = trimmed.substringAfter("://", trimmed)
+        return withoutScheme.substringAfterLast("@").substringBefore("/").ifBlank { null }
+    }
 }

@@ -428,6 +428,45 @@ object SingBoxConfigParser {
         })
     }.toString(2)
 
+    fun formatOutboundDescriptor(rawUriOrJson: String, fallbackProtocol: String = "sing-box"): String {
+        val parsed = parse(rawUriOrJson).getOrNull()
+            ?: return fallbackProtocol.trim().ifBlank { "sing-box" }.lowercase()
+        val target = if (parsed.isFullConfig) {
+            val outbounds = parsed.outboundOrFullJson.optJSONArray("outbounds")
+            var chosen: JSONObject? = null
+            if (outbounds != null) {
+                for (i in 0 until outbounds.length()) {
+                    val ob = outbounds.optJSONObject(i) ?: continue
+                    val t = ob.optString("type").lowercase()
+                    if (ob.optString("tag") == "proxy" || (t.isNotBlank() && t !in SYSTEM_OUTBOUND_TYPES && ob.optString("tag") != UPSTREAM_SOCKS_TAG)) {
+                        chosen = ob
+                        break
+                    }
+                }
+            }
+            chosen ?: return parsed.protocol.lowercase()
+        } else {
+            parsed.outboundOrFullJson
+        }
+
+        val proto = target.optString("type", parsed.protocol).lowercase().ifBlank { parsed.protocol.lowercase() }
+        val transportType = target.optJSONObject("transport")?.optString("type")?.trim()?.lowercase().orEmpty()
+        val transport = when {
+            transportType.isNotBlank() -> transportType
+            proto in setOf("hysteria", "hysteria2", "tuic", "wireguard") -> "udp"
+            else -> "tcp"
+        }
+        val tlsObj = target.optJSONObject("tls")
+        val tls = if (tlsObj?.optBoolean("enabled", false) == true) {
+            val isReality = tlsObj.optJSONObject("reality")?.optBoolean("enabled", false) == true
+            if (isReality) "reality" else "tls"
+        } else {
+            null
+        }
+        val details = if (tls != null) "$transport+$tls" else transport
+        return "$proto ($details)"
+    }
+
     fun summarizeRuntimeConfig(runtimeJson: String): String {
         return runCatching {
             val root = JSONObject(runtimeJson)

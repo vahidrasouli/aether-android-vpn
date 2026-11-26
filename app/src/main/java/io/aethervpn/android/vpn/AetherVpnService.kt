@@ -330,6 +330,12 @@ class AetherVpnService : VpnService() {
     private suspend fun connectPipeline(isReconnect: Boolean) {
         val config = VpnConfig.load(this)
         val primaryProtocol = config.protocol
+        val activeProfile = if (config.singBoxEnabled) {
+            SingBoxProfileRepository.load(filesDir).activeProfile
+        } else {
+            null
+        }
+        DiagnosticsLog.record("Chain", ChainOrchestrator.formatTopology(config, activeProfile))
 
         if (config.singBoxEnabled) {
             val sbAttempt = attemptSingBoxChain(config, primaryProtocol, isReconnect)

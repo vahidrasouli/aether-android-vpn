@@ -218,6 +218,151 @@ class ChainOrchestratorTest {
         }
     }
 
+    @Test
+    fun chainedModeUses45sAetherStartupBudgetWhileDirectPreservesDirectBudget() {
+        val mgr = AetherEngineManager(tempFolder.newFolder("aether_budget"))
+
+        val chainedModes = listOf(
+            ChainMode.SINGBOX_TO_WARP,
+            ChainMode.SINGBOX_TO_WARP_TO_PSIPHON,
+            ChainMode.SINGBOX_TO_PSIPHON_TO_WARP
+        )
+        for (mode in chainedModes) {
+            val plan = ChainOrchestrator.plan(VpnConfig(singBoxEnabled = true, chainMode = mode))
+            val aetherCfg = plan.aetherEffectiveConfig!!
+            assertTrue(mgr.isChainedStartup(aetherCfg))
+            assertEquals(
+                "MASQUE_H3 chained budget must be 45s for $mode",
+                45_000L,
+                mgr.calculateStartupTimeoutMs(aetherCfg, AetherProtocol.MASQUE_H3)
+            )
+            assertEquals(
+                "WIREGUARD chained budget must be 45s for $mode",
+                45_000L,
+                mgr.calculateStartupTimeoutMs(aetherCfg, AetherProtocol.WIREGUARD)
+            )
+            val logLine = mgr.formatStartupLogLine(
+                proto = AetherProtocol.WIREGUARD,
+                effectiveTimeoutMs = 45_000L,
+                isChained = mgr.isChainedStartup(aetherCfg),
+                listenPort = VpnConfig.DEFAULT_SOCKS_PORT
+            )
+            assertEquals(
+                "Starting Aether (WireGuard (WARP)) [budget: 45s (chained), egress port: 1819]",
+                logLine
+            )
+        }
+
+        val directCfg = VpnConfig(
+            singBoxEnabled = false,
+            psiphonMode = PsiphonMode.OFF,
+            upstreamProxy = ""
+        )
+        assertFalse(mgr.isChainedStartup(directCfg))
+        assertEquals(35_000L, mgr.calculateStartupTimeoutMs(directCfg, AetherProtocol.WIREGUARD))
+        assertEquals(55_000L, mgr.calculateStartupTimeoutMs(directCfg, AetherProtocol.MASQUE_H3))
+        val directLogLine = mgr.formatStartupLogLine(
+            proto = AetherProtocol.WIREGUARD,
+            effectiveTimeoutMs = 35_000L,
+            isChained = mgr.isChainedStartup(directCfg),
+            listenPort = VpnConfig.DEFAULT_SOCKS_PORT
+        )
+        assertEquals(
+            "Starting Aether (WireGuard (WARP)) [budget: 35s (direct), egress port: 1819]",
+            directLogLine
+        )
+    }
+
+    @Test
+    fun formatTopologyEmitsExpectedHopByHopPathsForAllModes() {
+        val vmessJson = """{"v":"2","ps":"TestVMess","add":"198.51.100.11","port":"443","id":"11111111-2222-3333-4444-555555555555","aid":"0","net":"ws","type":"none","host":"cdn.example.com","path":"/ws","tls":"tls"}"""
+        val vmessUri = "vmess://" + java.util.Base64.getEncoder().encodeToString(vmessJson.toByteArray(Charsets.UTF_8))
+        val vmessProfile = SingBoxProfile(
+            id = "vmess-1",
+            name = "TestVMess",
+            protocol = "VMess",
+            rawUriOrJson = vmessUri
+        )
+        val vlessProfile = SingBoxProfile(
+            id = "vless-1",
+            name = "TestVLESS",
+            protocol = "VLESS",
+            rawUriOrJson = sampleVlessUri
+        )
+
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Aether WARP (127.0.0.1:1819) -> Sing-box (127.0.0.1:1825) -> vmess (ws+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_WARP),
+                vmessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Sing-box (127.0.0.1:1825) -> vless (tcp+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY),
+                vlessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Psiphon (127.0.0.1:1821) -> Sing-box (127.0.0.1:1825) -> vless (tcp+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_PSIPHON),
+                vlessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Psiphon (127.0.0.1:1821) -> Aether WARP (127.0.0.1:1819) -> Sing-box (127.0.0.1:1825) -> vless (tcp+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_WARP_TO_PSIPHON),
+                vlessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Aether WARP (127.0.0.1:1819) -> Psiphon (127.0.0.1:1821) -> Sing-box (127.0.0.1:1825) -> vless (tcp+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_PSIPHON_TO_WARP),
+                vlessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Sing-box (127.0.0.1:1825) -> Aether WARP (127.0.0.1:1819) -> vless (tcp+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.WARP_TO_SINGBOX),
+                vlessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Sing-box (127.0.0.1:1825) -> Psiphon (127.0.0.1:1821) -> vless (tcp+tls)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = true, chainMode = ChainMode.PSIPHON_TO_SINGBOX),
+                vlessProfile
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Aether WARP (127.0.0.1:1819) -> Psiphon (127.0.0.1:1821) -> Direct",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = false, psiphonMode = PsiphonMode.PSIPHON_TO_WARP)
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Aether WARP (127.0.0.1:1819) -> Direct",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(singBoxEnabled = false, psiphonMode = PsiphonMode.OFF)
+            )
+        )
+        assertEquals(
+            "TUN (172.19.0.1) -> HEV -> Aether WARP (127.0.0.1:1819) -> Upstream (127.0.0.1:10808)",
+            ChainOrchestrator.formatTopology(
+                VpnConfig(
+                    singBoxEnabled = false,
+                    psiphonMode = PsiphonMode.OFF,
+                    upstreamProxy = "socks5://user:secret@127.0.0.1:10808"
+                )
+            )
+        )
+    }
+
     private fun startMockTraceSocksServer(traceBody: String): Pair<Int, Thread> {
         val server = ServerSocket(0)
         val port = server.localPort

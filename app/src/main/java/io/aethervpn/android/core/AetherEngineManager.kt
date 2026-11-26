@@ -189,6 +189,19 @@ class AetherEngineManager(private val privateDataDir: File) {
         return args
     }
 
+    internal fun isChainedStartup(config: VpnConfig): Boolean =
+        config.upstreamProxy.isNotBlank() || config.psiphonMode != PsiphonMode.OFF
+
+    internal fun formatStartupLogLine(
+        proto: AetherProtocol,
+        effectiveTimeoutMs: Long,
+        isChained: Boolean,
+        listenPort: Int
+    ): String {
+        val modeTag = if (isChained) "chained" else "direct"
+        return "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s ($modeTag), egress port: $listenPort]"
+    }
+
     fun calculateStartupTimeoutMs(
         config: VpnConfig,
         overrideProtocol: AetherProtocol? = null
@@ -222,11 +235,13 @@ class AetherEngineManager(private val privateDataDir: File) {
             PsiphonMode.OFF -> baseTimeoutMs
         }
         return if (config.upstreamProxy.isNotBlank() &&
-            config.psiphonMode != PsiphonMode.PSIPHON_ONLY &&
-            proto != AetherProtocol.MASQUE_H2
+            config.psiphonMode != PsiphonMode.PSIPHON_ONLY
         ) {
-            val capMs = if (config.psiphonMode == PsiphonMode.PSIPHON_TO_WARP) 45_000L else 20_000L
-            minOf(rawTimeout, capMs)
+            if (proto == AetherProtocol.MASQUE_H2) {
+                maxOf(rawTimeout, 45_000L)
+            } else {
+                45_000L
+            }
         } else {
             rawTimeout
         }
@@ -317,7 +332,15 @@ class AetherEngineManager(private val privateDataDir: File) {
             config.psiphonMode == PsiphonMode.PSIPHON_ONLY
         val listenPort = if (usesPsiphonEgress) VpnConfig.PSIPHON_SOCKS_PORT else VpnConfig.DEFAULT_SOCKS_PORT
         val logStartCount = DiagnosticsLog.entries().size
-        DiagnosticsLog.record("Aether", "Starting Aether (${proto.label}) [budget: ${effectiveTimeoutMs / 1000}s, egress port: $listenPort]")
+        DiagnosticsLog.record(
+            "Aether",
+            formatStartupLogLine(
+                proto = proto,
+                effectiveTimeoutMs = effectiveTimeoutMs,
+                isChained = isChainedStartup(config),
+                listenPort = listenPort
+            )
+        )
         DiagnosticsLog.record("Aether", formatActiveLimitsSummary(config))
 
         val rawReply = AetherNative.nativeStartCore(JSONArray(cliArgs).toString())
