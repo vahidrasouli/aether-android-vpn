@@ -6,6 +6,7 @@ import android.text.TextWatcher
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.tabs.TabLayout
 import io.aethervpn.android.R
@@ -16,11 +17,8 @@ import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.core.VpnStateStore
 import io.aethervpn.android.databinding.ActivitySingboxTuningBinding
 import io.aethervpn.android.vpn.AetherVpnService
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,7 +30,6 @@ import kotlinx.coroutines.withContext
 class SingBoxTuningActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySingboxTuningBinding
-    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     @Volatile
     private var isBindingUi = false
@@ -50,7 +47,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
 
         binding.toolbarSingBoxTuning.setNavigationOnClickListener { finish() }
         binding.btnResetSingBoxDefaults.setOnClickListener {
-            uiScope.launch {
+            lifecycleScope.launch {
                 val base = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@SingBoxTuningActivity) }
                 val reset = base.resetSingBoxTuningDefaults()
                 persistConfigAsync(reset)
@@ -61,16 +58,11 @@ class SingBoxTuningActivity : AppCompatActivity() {
         setupTabs()
         setupListeners()
 
-        uiScope.launch {
+        lifecycleScope.launch {
             val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxTuningActivity) }
             cachedConfig = cfg
             bindConfigToUi(cfg)
         }
-    }
-
-    override fun onDestroy() {
-        uiScope.cancel()
-        super.onDestroy()
     }
 
     private fun setupTabs() {
@@ -97,7 +89,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
                 else -> SingBoxTuningPreset.CUSTOM
             }
             if (preset != SingBoxTuningPreset.CUSTOM) {
-                uiScope.launch {
+                lifecycleScope.launch {
                     val base = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@SingBoxTuningActivity) }
                     val updated = base.applySingBoxTuningPreset(preset)
                     if (updated != base) {
@@ -205,7 +197,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
                 if (isBindingUi) return
                 val nextValue = s?.toString()?.trim().orEmpty()
                 bypassDomainsDebounceJob?.cancel()
-                bypassDomainsDebounceJob = uiScope.launch {
+                bypassDomainsDebounceJob = lifecycleScope.launch {
                     delay(450L)
                     updateConfig { it.copy(sbCustomBypassDomains = nextValue) }
                 }
@@ -244,7 +236,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
     }
 
     private fun updateConfig(transform: (VpnConfig) -> VpnConfig) {
-        uiScope.launch {
+        lifecycleScope.launch {
             val base = withContext(Dispatchers.IO) { cachedConfig ?: VpnConfig.load(this@SingBoxTuningActivity) }
             val updated = transform(base)
             if (updated == base) return@launch

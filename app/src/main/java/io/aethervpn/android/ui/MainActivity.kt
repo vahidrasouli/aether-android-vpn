@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -35,6 +36,7 @@ import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.AppThemeMode
+import io.aethervpn.android.core.CacheHygiene
 import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.HevMode
@@ -45,6 +47,7 @@ import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.ProxyTestResult
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.SingBoxProfile
 import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.PsiphonProtocol
 import io.aethervpn.android.core.ReleaseInfo
@@ -104,6 +107,9 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var cachedConfig: VpnConfig? = null
 
+    @Volatile
+    private var cachedActiveSingBoxProfile: SingBoxProfile? = null
+
     private var activeSnackbar: Snackbar? = null
 
     private val statsIntervalsMs = longArrayOf(5_000L, 3_000L, 10_000L)
@@ -140,29 +146,48 @@ class MainActivity : AppCompatActivity() {
         setupAboutAndUpdater()
         bindActions()
 
-        // Clean up any leftover update installer APKs from previous updates
-        uiScope.launch(Dispatchers.IO) {
-            UpdateManager.cleanupInstalledApks(cacheDir)
+        // Purge stale cache directories on version upgrade; otherwise clean up leftover APKs
+        lifecycleScope.launch(Dispatchers.IO) {
+            val prefs = getSharedPreferences(CacheHygiene.PREFS_NAME, MODE_PRIVATE)
+            val purged = CacheHygiene.purgeStaleCacheOnVersionChange(
+                prefs = prefs,
+                currentVersionCode = BuildConfig.VERSION_CODE,
+                cacheDir = cacheDir
+            )
+            if (purged) {
+                DiagnosticsLog.record(
+                    "System",
+                    "Updated to v${BuildConfig.VERSION_NAME} — cleared stale cache"
+                )
+            } else {
+                UpdateManager.cleanupInstalledApks(cacheDir)
+            }
         }
 
-        // Load configuration asynchronously off the main thread
-        uiScope.launch {
-            val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@MainActivity) }
+        // Load configuration & active Sing-box profile asynchronously off the main thread
+        lifecycleScope.launch {
+            val (cfg, activeProfile) = withContext(Dispatchers.IO) {
+                VpnConfig.load(this@MainActivity) to SingBoxProfileRepository.load(filesDir).activeProfile
+            }
             cachedConfig = cfg
+            cachedActiveSingBoxProfile = activeProfile
             loadConfigIntoUi(cfg)
         }
     }
 
     override fun onResume() {
         super.onResume()
-        uiScope.launch {
-            val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@MainActivity) }
+        lifecycleScope.launch {
+            val (cfg, activeProfile) = withContext(Dispatchers.IO) {
+                VpnConfig.load(this@MainActivity) to SingBoxProfileRepository.load(filesDir).activeProfile
+            }
+            cachedActiveSingBoxProfile = activeProfile
             if (cfg != cachedConfig) {
                 cachedConfig = cfg
                 loadConfigIntoUi(cfg)
             } else {
-                refreshSingBoxSummary(cfg)
-                updateHomeBadges(cfg)
+                refreshSingBoxSummary(cfg, activeProfile)
+                updateHomeBadges(cfg, activeProfile)
             }
         }
     }
@@ -230,6 +255,7 @@ class MainActivity : AppCompatActivity() {
             stackFromEnd = true
         }
         binding.rvLogs.layoutManager = layoutManager
+        binding.rvLogs.setHasFixedSize(true)
         logAdapter = LogAdapter()
         binding.rvLogs.adapter = logAdapter
 
@@ -656,8 +682,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshSingBoxSummary(cfg: VpnConfig) {
-        val activeProfile = runCatching { SingBoxProfileRepository.load(filesDir).activeProfile }.getOrNull()
+    private fun refreshSingBoxSummary(
+        cfg: VpnConfig,
+        activeProfile: SingBoxProfile? = cachedActiveSingBoxProfile
+    ) {
         binding.layoutSingBoxChain.visibility = if (cfg.singBoxEnabled) View.VISIBLE else View.GONE
         binding.tvChainModeDetail.text = cfg.chainMode.description
         val summary = when {
@@ -670,10 +698,12 @@ class MainActivity : AppCompatActivity() {
         binding.tvSingBoxSummary.text = summary
     }
 
-    private fun updateHomeBadges(cfg: VpnConfig) {
+    private fun updateHomeBadges(
+        cfg: VpnConfig,
+        activeProfile: SingBoxProfile? = cachedActiveSingBoxProfile
+    ) {
         val iranTag = if (cfg.bypassIran) " • IR Direct" else ""
         if (cfg.singBoxEnabled) {
-            val activeProfile = runCatching { SingBoxProfileRepository.load(filesDir).activeProfile }.getOrNull()
             val profLabel = activeProfile?.let { "${it.protocol}: ${it.name}" } ?: "No Profile"
             binding.tvChainPill.text = "${cfg.chainMode.label}$iranTag"
             binding.tvActiveProfileBadge.text = "Engine: ${cfg.chainMode.label} ($profLabel) • 127.0.0.1:${cfg.effectiveSocksPort}"
@@ -1102,8 +1132,9 @@ class MainActivity : AppCompatActivity() {
                         binding.tvUpdateProgressDetail.visibility = View.GONE
                         binding.btnDownloadInstallUpdate.isEnabled = true
                         val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
-                        val hasPartial = rel.apkDownloadUrl != null &&
+                        val hasPartial = rel.apkDownloadUrl != null && withContext(Dispatchers.IO) {
                             UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                        }
                         binding.btnDownloadInstallUpdate.text = when {
                             rel.apkDownloadUrl == null -> "Open Release Page"
                             hasPartial -> getString(R.string.action_resume_download)
@@ -1160,34 +1191,36 @@ class MainActivity : AppCompatActivity() {
             }
 
             val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
-            val resumingBytes = UpdateManager.getPartialDownloadSize(fileName, cacheDir)
+            activeUpdateDownloadJob = lifecycleScope.launch {
+                val resumingBytes = withContext(Dispatchers.IO) {
+                    UpdateManager.getPartialDownloadSize(fileName, cacheDir)
+                }
 
-            applyUpdateDownloadButtonStyle(isCancelMode = true)
-            binding.progressUpdateDownload.visibility = View.VISIBLE
-            binding.progressUpdateDownload.isIndeterminate = false
-            if (resumingBytes == 0L) {
-                binding.progressUpdateDownload.progress = 0
-            }
-            binding.tvUpdateProgressDetail.visibility = View.VISIBLE
-            binding.tvUpdateProgressDetail.text = if (resumingBytes > 0L) {
-                String.format(Locale.US, "Resuming from %.1f MB…", resumingBytes / (1024.0 * 1024.0))
-            } else {
-                "0% • Starting download…"
-            }
-            binding.tvUpdateStatus.text = if (resumingBytes > 0L) {
-                "Resuming ${rel.apkFileName ?: "update"}..."
-            } else {
-                "Downloading ${rel.apkFileName ?: "update"}..."
-            }
+                applyUpdateDownloadButtonStyle(isCancelMode = true)
+                binding.progressUpdateDownload.visibility = View.VISIBLE
+                binding.progressUpdateDownload.isIndeterminate = false
+                if (resumingBytes == 0L) {
+                    binding.progressUpdateDownload.progress = 0
+                }
+                binding.tvUpdateProgressDetail.visibility = View.VISIBLE
+                binding.tvUpdateProgressDetail.text = if (resumingBytes > 0L) {
+                    String.format(Locale.US, "Resuming from %.1f MB…", resumingBytes / (1024.0 * 1024.0))
+                } else {
+                    "0% • Starting download…"
+                }
+                binding.tvUpdateStatus.text = if (resumingBytes > 0L) {
+                    "Resuming ${rel.apkFileName ?: "update"}..."
+                } else {
+                    "Downloading ${rel.apkFileName ?: "update"}..."
+                }
 
-            activeUpdateDownloadJob = uiScope.launch {
                 try {
                     val downloadResult = UpdateManager.downloadApk(
                         downloadUrl = apkUrl,
                         fileName = fileName,
                         cacheDir = cacheDir
                     ) { progress ->
-                        uiScope.launch {
+                        lifecycleScope.launch {
                             if (activeUpdateDownloadJob?.isActive == true) {
                                 binding.progressUpdateDownload.progress = progress.percent
                                 binding.tvUpdateProgressDetail.text = progress.formatLabel()
@@ -1203,7 +1236,9 @@ class MainActivity : AppCompatActivity() {
                         binding.tvUpdateStatus.text = "Download complete. Launching installer..."
                         installDownloadedApk(file)
                     }.onFailure { err ->
-                        val hasPart = UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                        val hasPart = withContext(Dispatchers.IO) {
+                            UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                        }
                         if (hasPart) {
                             binding.btnDownloadInstallUpdate.text = getString(R.string.action_resume_download)
                             binding.tvUpdateStatus.text = "Download paused (${err.message ?: "network error"})"

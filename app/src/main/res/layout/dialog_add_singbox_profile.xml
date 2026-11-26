@@ -73,6 +73,33 @@
             android:visibility="gone" />
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/layoutQrImportActions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnScanQrCamera"
+            style="@style/Widget.Aether.Button.Tonal"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:text="@string/action_scan_qr"
+            android:textColor="@color/accent_primary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPickQrGallery"
+            style="@style/Widget.Aether.Button.Tonal"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="@string/action_pick_qr_image"
+            android:textColor="@color/text_primary" />
+    </LinearLayout>
+
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

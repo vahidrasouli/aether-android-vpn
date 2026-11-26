@@ -232,4 +232,22 @@ object SingBoxProfileRepository {
         save(filesDir, updated)
         return updated
     }
+
+    /**
+     * Formats all saved profiles as newline-separated URIs (or compacted single-line JSON)
+     * suitable for clipboard/file export and round-trip import via [addProfilesBulk].
+     */
+    fun exportAllUris(profiles: List<SingBoxProfile>): String {
+        return profiles.mapNotNull { profile ->
+            val raw = profile.rawUriOrJson.trim()
+            if (raw.isEmpty()) {
+                null
+            } else if (raw.startsWith("{")) {
+                runCatching { JSONObject(raw).toString() }
+                    .getOrDefault(raw.replace(Regex("\\s+"), " ").trim())
+            } else {
+                raw
+            }
+        }.joinToString("\n")
+    }
 }

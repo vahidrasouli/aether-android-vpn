@@ -3,6 +3,7 @@ package io.aethervpn.android.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -11,19 +12,28 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.PopupMenu
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.SimpleItemAnimator
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
-import java.net.HttpURLConnection
-import java.net.URL
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.aethervpn.android.R
 import io.aethervpn.android.core.ChainMode
+import io.aethervpn.android.core.QrCodeHelper
 import io.aethervpn.android.core.SingBoxConfigParser
 import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfile
@@ -32,14 +42,12 @@ import io.aethervpn.android.core.SingBoxProfileStoreState
 import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.databinding.ActivitySingboxProfilesBinding
 import io.aethervpn.android.databinding.DialogAddSingboxProfileBinding
+import io.aethervpn.android.databinding.DialogShareQrBinding
 import io.aethervpn.android.databinding.ItemSingboxProfileBinding
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -48,12 +56,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
 
 class SingBoxProfilesActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySingboxProfilesBinding
-    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var storeState = SingBoxProfileStoreState()
     private val testingIds = mutableSetOf<String>()
@@ -62,8 +71,40 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     private var testAllJob: Job? = null
     private var isBindingSwitches = false
     private var controlsExpanded = false
+    private var pendingQrTargetInput: TextInputEditText? = null
 
     private val adapter = ProfilesAdapter()
+
+    private val pickQrImageLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        decodeQrFromGalleryUri(uri)
+    }
+
+    private val exportProfilesDocLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        val profilesSnapshot = storeState.profiles.toList()
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val payload = SingBoxProfileRepository.exportAllUris(profilesSnapshot)
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(payload.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    } ?: throw IllegalStateException("Unable to open output stream")
+                    profilesSnapshot.size
+                }
+            }
+            if (result.isSuccess) {
+                showSnack("Exported ${result.getOrThrow()} profiles to file")
+            } else {
+                showSnack("Export failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +120,14 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 }
                 R.id.action_sort_ping -> {
                     sortByPing()
+                    true
+                }
+                R.id.action_scan_qr -> {
+                    launchQrScanner(targetInput = null)
+                    true
+                }
+                R.id.action_export_profiles -> {
+                    showExportOptionsDialog()
                     true
                 }
                 R.id.action_singbox_tuning -> {
@@ -101,17 +150,14 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         }
 
         binding.rvSingBoxProfiles.layoutManager = LinearLayoutManager(this)
+        binding.rvSingBoxProfiles.setHasFixedSize(true)
+        (binding.rvSingBoxProfiles.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
         binding.rvSingBoxProfiles.adapter = adapter
 
         binding.fabAddSingBoxProfile.setOnClickListener { showProfileSheet() }
 
         bindSwitches()
         refreshAll()
-    }
-
-    override fun onDestroy() {
-        uiScope.cancel()
-        super.onDestroy()
     }
 
     private fun bindSwitches() {
@@ -123,7 +169,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
         binding.switchSingBoxMaster.setOnCheckedChangeListener { _, isChecked ->
             if (isBindingSwitches) return@setOnCheckedChangeListener
-            uiScope.launch {
+            lifecycleScope.launch {
                 val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
                 val updated = cfg.copy(
                     singBoxEnabled = isChecked,
@@ -138,7 +184,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
                 if (isBindingSwitches) return
                 val selectedChain = ChainMode.entries[pos]
-                uiScope.launch {
+                lifecycleScope.launch {
                     val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
                     val updated = cfg.copy(
                         singBoxEnabled = true,
@@ -172,10 +218,17 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     }
 
     private fun refreshAll() {
-        uiScope.launch {
-            val (cfg, state) = withContext(Dispatchers.IO) {
-                VpnConfig.load(this@SingBoxProfilesActivity) to SingBoxProfileRepository.load(filesDir)
+        lifecycleScope.launch {
+            val (cfg, state, previews) = withContext(Dispatchers.IO) {
+                val loadedCfg = VpnConfig.load(this@SingBoxProfilesActivity)
+                val loadedState = SingBoxProfileRepository.load(filesDir)
+                val previewMap = loadedState.profiles.associate { p ->
+                    p.id to (serverPreviewCache[p.id] ?: SingBoxConfigParser.extractServerPreview(p.rawUriOrJson))
+                }
+                Triple(loadedCfg, loadedState, previewMap)
             }
+            serverPreviewCache.clear()
+            serverPreviewCache.putAll(previews)
             syncSwitches(cfg)
             storeState = state
             renderList()
@@ -186,7 +239,21 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         val empty = storeState.profiles.isEmpty()
         binding.tvProfilesEmpty.visibility = if (empty) View.VISIBLE else View.GONE
         binding.rvSingBoxProfiles.visibility = if (empty) View.GONE else View.VISIBLE
-        adapter.notifyDataSetChanged()
+        submitProfilesList()
+    }
+
+    private fun submitProfilesList() {
+        val activeId = storeState.activeProfile?.id
+        val rows = storeState.profiles.map { profile ->
+            SingBoxProfileRow(
+                profile = profile,
+                isActive = profile.id == activeId,
+                isTesting = testingIds.contains(profile.id),
+                errorMessage = testErrors[profile.id],
+                serverPreview = serverPreviewCache[profile.id] ?: ""
+            )
+        }
+        adapter.submitList(rows)
     }
 
     private fun showProfileSheet(editingProfile: SingBoxProfile? = null) {
@@ -202,6 +269,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         }
         sheetBinding.btnCopyShareUri.visibility = if (isEditing) View.VISIBLE else View.GONE
         sheetBinding.btnImportSubscription.visibility = if (isEditing) View.GONE else View.VISIBLE
+        sheetBinding.layoutQrImportActions.visibility = if (isEditing) View.GONE else View.VISIBLE
 
         if (editingProfile != null) {
             sheetBinding.etSingBoxUriOrJson.setText(editingProfile.rawUriOrJson)
@@ -237,6 +305,17 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             showImportSubscriptionDialog(dialog)
         }
 
+        sheetBinding.btnScanQrCamera.setOnClickListener {
+            launchQrScanner(targetInput = sheetBinding.etSingBoxUriOrJson)
+        }
+
+        sheetBinding.btnPickQrGallery.setOnClickListener {
+            pendingQrTargetInput = sheetBinding.etSingBoxUriOrJson
+            pickQrImageLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        }
+
         sheetBinding.btnCopyShareUri.setOnClickListener {
             val textToCopy = sheetBinding.etSingBoxUriOrJson.text?.toString()?.trim().orEmpty()
                 .ifEmpty { editingProfile?.rawUriOrJson.orEmpty() }
@@ -250,7 +329,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         sheetBinding.btnSaveSingBoxProfile.setOnClickListener {
             val raw = sheetBinding.etSingBoxUriOrJson.text?.toString().orEmpty().trim()
             val customName = sheetBinding.etSingBoxCustomName.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-            uiScope.launch {
+            lifecycleScope.launch {
                 if (editingProfile != null) {
                     val res = withContext(Dispatchers.IO) {
                         SingBoxProfileRepository.updateProfile(filesDir, editingProfile.id, raw, customName)
@@ -305,7 +384,162 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             }
         }
 
+        dialog.setOnDismissListener {
+            if (pendingQrTargetInput === sheetBinding.etSingBoxUriOrJson) {
+                pendingQrTargetInput = null
+            }
+        }
         dialog.show()
+    }
+
+    private fun launchQrScanner(targetInput: TextInputEditText?) {
+        pendingQrTargetInput = targetInput
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+        runCatching {
+            val scanner = GmsBarcodeScanning.getClient(this, options)
+            scanner.startScan()
+                .addOnSuccessListener { barcode ->
+                    val rawValue = barcode.rawValue?.trim().orEmpty()
+                    if (rawValue.isNotEmpty()) {
+                        handleDecodedQrText(rawValue)
+                    } else {
+                        showSnack("Scanned QR code is empty")
+                    }
+                }
+                .addOnFailureListener {
+                    // Gracefully fall back to modern Photo Picker when Play Services scanner is unavailable
+                    showSnack("Camera scanner unavailable — pick a QR image from gallery")
+                    pickQrImageLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
+        }.onFailure {
+            showSnack("Camera scanner unavailable — pick a QR image from gallery")
+            pickQrImageLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        }
+    }
+
+    private fun decodeQrFromGalleryUri(uri: Uri) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                QrCodeHelper.decodeQrFromUri(contentResolver, uri)
+            }
+            if (result.isSuccess) {
+                handleDecodedQrText(result.getOrThrow())
+            } else {
+                showSnack("No QR code found in selected image")
+            }
+        }
+    }
+
+    private fun handleDecodedQrText(decodedText: String) {
+        val target = pendingQrTargetInput
+        pendingQrTargetInput = null
+        if (target != null && target.isAttachedToWindow) {
+            target.setText(decodedText)
+            showSnack("QR code decoded")
+            return
+        }
+
+        lifecycleScope.launch {
+            val isSingleJson = decodedText.startsWith("{")
+            val nonEmptyLines = decodedText.lines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("//") }
+
+            if (!isSingleJson && nonEmptyLines.size > 1) {
+                val bulkRes = withContext(Dispatchers.IO) {
+                    SingBoxProfileRepository.addProfilesBulk(filesDir, decodedText)
+                }
+                if (bulkRes.isSuccess) {
+                    val (imported, _) = bulkRes.getOrThrow()
+                    refreshAll()
+                    showSnack("Imported ${imported.size} profiles from QR")
+                } else {
+                    showSnack(bulkRes.exceptionOrNull()?.message ?: "Invalid QR profile")
+                }
+            } else {
+                val res = withContext(Dispatchers.IO) {
+                    SingBoxProfileRepository.addProfile(filesDir, decodedText)
+                }
+                if (res.isSuccess) {
+                    refreshAll()
+                    showSnack("Imported ${res.getOrThrow().name} from QR")
+                } else {
+                    showSnack(res.exceptionOrNull()?.message ?: "Unsupported QR payload")
+                }
+            }
+        }
+    }
+
+    private fun showShareQrSheet(profile: SingBoxProfile) {
+        lifecycleScope.launch {
+            val qrResult = withContext(Dispatchers.IO) {
+                QrCodeHelper.renderQrBitmap(profile.rawUriOrJson, sizePx = 640)
+            }
+            if (qrResult.isFailure) {
+                showSnack("Profile is too large for a QR code — use Copy URI or Export instead")
+                return@launch
+            }
+
+            val dialog = BottomSheetDialog(
+                this@SingBoxProfilesActivity,
+                com.google.android.material.R.style.Theme_Design_BottomSheetDialog
+            )
+            val qrBinding = DialogShareQrBinding.inflate(layoutInflater)
+            dialog.setContentView(qrBinding.root)
+
+            qrBinding.tvQrProfileName.text = profile.name
+            qrBinding.tvQrProtocolBadge.text = profile.protocol
+            qrBinding.ivQrCode.setImageBitmap(qrResult.getOrThrow())
+            qrBinding.btnQrCopyUri.setOnClickListener {
+                copyProfileUri(profile)
+            }
+            qrBinding.btnQrClose.setOnClickListener {
+                dialog.dismiss()
+            }
+            dialog.show()
+        }
+    }
+
+    private fun copyProfileUri(profile: SingBoxProfile) {
+        val cm = getSystemService(ClipboardManager::class.java)
+        cm?.setPrimaryClip(ClipData.newPlainText("Sing-box Profile", profile.rawUriOrJson))
+        showSnack("Copied ${profile.name} URI to clipboard")
+    }
+
+    private fun showExportOptionsDialog() {
+        val profiles = storeState.profiles
+        if (profiles.isEmpty()) {
+            showSnack("No profiles to export")
+            return
+        }
+        val options = arrayOf(
+            getString(R.string.action_copy_all_uris),
+            getString(R.string.action_save_to_file)
+        )
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.action_export_profiles))
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        val payload = SingBoxProfileRepository.exportAllUris(profiles)
+                        val cm = getSystemService(ClipboardManager::class.java)
+                        cm?.setPrimaryClip(ClipData.newPlainText("Sing-box Profiles", payload))
+                        showSnack("Copied ${profiles.size} profile URIs to clipboard")
+                    }
+                    1 -> {
+                        exportProfilesDocLauncher.launch("aether-singbox-profiles.txt")
+                    }
+                }
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
     }
 
     private fun showImportSubscriptionDialog(parentSheet: BottomSheetDialog) {
@@ -347,7 +581,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
     private fun importSubscriptionFromUrl(urlStr: String) {
         showSnack("Fetching subscription…")
-        uiScope.launch {
+        lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
@@ -403,7 +637,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             return
         }
 
-        testAllJob = uiScope.launch {
+        testAllJob = lifecycleScope.launch {
             binding.layoutTestAllProgress.visibility = View.VISIBLE
             binding.tvTestAllStatus.text = "Testing 0 / ${snapshot.size}…"
             val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
@@ -423,7 +657,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                                     testErrors.remove(profile.id)
                                     binding.tvTestAllStatus.text =
                                         "Testing ${completedCount.get()} / ${snapshot.size} (${testingIds.size} active)…"
-                                    adapter.notifyDataSetChanged()
+                                    submitProfilesList()
                                 }
 
                                 val result = SingBoxEngineManager.runEphemeralTraceTest(
@@ -457,7 +691,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                                     }
                                     val done = completedCount.incrementAndGet()
                                     binding.tvTestAllStatus.text = "Tested $done / ${snapshot.size}"
-                                    adapter.notifyDataSetChanged()
+                                    submitProfilesList()
                                 }
                             }
                         }
@@ -477,13 +711,13 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         testAllJob = null
         testingIds.clear()
         binding.layoutTestAllProgress.visibility = View.GONE
-        adapter.notifyDataSetChanged()
+        submitProfilesList()
         showSnack("Test All cancelled")
     }
 
     private fun sortByPing() {
         if (storeState.profiles.size < 2) return
-        uiScope.launch {
+        lifecycleScope.launch {
             val updated = withContext(Dispatchers.IO) {
                 SingBoxProfileRepository.sortProfilesByPing(filesDir)
             }
@@ -497,9 +731,9 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         if (testingIds.contains(profile.id)) return
         testingIds.add(profile.id)
         testErrors.remove(profile.id)
-        adapter.notifyDataSetChanged()
+        submitProfilesList()
 
-        uiScope.launch {
+        lifecycleScope.launch {
             val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
             val result = withContext(Dispatchers.IO) {
                 SingBoxEngineManager.runEphemeralTraceTest(
@@ -525,7 +759,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 val err = result.exceptionOrNull()?.message ?: "Trace test failed"
                 testErrors[profile.id] = err
             }
-            adapter.notifyDataSetChanged()
+            submitProfilesList()
         }
     }
 
@@ -537,7 +771,24 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         }
     }
 
-    private inner class ProfilesAdapter : RecyclerView.Adapter<ProfilesAdapter.ProfileVH>() {
+    private data class SingBoxProfileRow(
+        val profile: SingBoxProfile,
+        val isActive: Boolean,
+        val isTesting: Boolean,
+        val errorMessage: String?,
+        val serverPreview: String
+    )
+
+    private object ProfileDiffCallback : DiffUtil.ItemCallback<SingBoxProfileRow>() {
+        override fun areItemsTheSame(oldItem: SingBoxProfileRow, newItem: SingBoxProfileRow): Boolean =
+            oldItem.profile.id == newItem.profile.id
+
+        override fun areContentsTheSame(oldItem: SingBoxProfileRow, newItem: SingBoxProfileRow): Boolean =
+            oldItem == newItem
+    }
+
+    private inner class ProfilesAdapter :
+        ListAdapter<SingBoxProfileRow, ProfilesAdapter.ProfileVH>(ProfileDiffCallback) {
 
         inner class ProfileVH(val itemBinding: ItemSingboxProfileBinding) :
             RecyclerView.ViewHolder(itemBinding.root)
@@ -547,14 +798,13 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             return ProfileVH(b)
         }
 
-        override fun getItemCount(): Int = storeState.profiles.size
-
         override fun onBindViewHolder(holder: ProfileVH, position: Int) {
-            val p = storeState.profiles[position]
+            val row = getItem(position)
+            val p = row.profile
             val b = holder.itemBinding
-            val isActive = p.id == storeState.activeProfile?.id
-            val isTesting = testingIds.contains(p.id)
-            val err = testErrors[p.id]
+            val isActive = row.isActive
+            val isTesting = row.isTesting
+            val err = row.errorMessage
 
             b.radioActiveProfile.isChecked = isActive
             b.tvProtocolBadge.text = p.protocol
@@ -563,11 +813,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 this@SingBoxProfilesActivity,
                 if (isActive) R.color.accent_primary else R.color.card_border
             )
-
-            val preview = serverPreviewCache.getOrPut(p.id) {
-                SingBoxConfigParser.extractServerPreview(p.rawUriOrJson)
-            }
-            b.tvServerPreview.text = preview
+            b.tvServerPreview.text = row.serverPreview
 
             when {
                 isTesting -> {
@@ -606,12 +852,12 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             b.btnTestProfile.alpha = if (isTesting) 0.4f else 1.0f
 
             val selectAction = View.OnClickListener {
-                uiScope.launch {
+                lifecycleScope.launch {
                     val updated = withContext(Dispatchers.IO) {
                         SingBoxProfileRepository.setActiveProfile(filesDir, p.id)
                     }
                     storeState = updated
-                    notifyDataSetChanged()
+                    submitProfilesList()
                 }
             }
             b.cardProfileItem.setOnClickListener(selectAction)
@@ -621,7 +867,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             b.btnEditProfile.setOnClickListener { showProfileSheet(p) }
 
             b.btnDeleteProfile.setOnClickListener {
-                uiScope.launch {
+                lifecycleScope.launch {
                     val updated = withContext(Dispatchers.IO) {
                         SingBoxProfileRepository.deleteProfile(filesDir, p.id)
                     }
@@ -630,6 +876,27 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     serverPreviewCache.remove(p.id)
                     storeState = updated
                     renderList()
+                }
+            }
+
+            b.btnMoreProfile.setOnClickListener { anchor ->
+                PopupMenu(this@SingBoxProfilesActivity, anchor).apply {
+                    menu.add(0, 1, 0, R.string.action_share_qr)
+                    menu.add(0, 2, 1, R.string.action_copy_uri)
+                    setOnMenuItemClickListener { menuItem ->
+                        when (menuItem.itemId) {
+                            1 -> {
+                                showShareQrSheet(p)
+                                true
+                            }
+                            2 -> {
+                                copyProfileUri(p)
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    show()
                 }
             }
         }

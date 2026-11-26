@@ -14,9 +14,21 @@
         android:title="@string/action_sort_ping"
         app:showAsAction="always" />
     <item
+        android:id="@+id/action_scan_qr"
+        android:icon="@drawable/ic_qr_code_24"
+        android:iconTint="@color/text_primary"
+        android:title="@string/action_scan_qr"
+        app:showAsAction="ifRoom" />
+    <item
+        android:id="@+id/action_export_profiles"
+        android:icon="@drawable/ic_file_export_24"
+        android:iconTint="@color/text_primary"
+        android:title="@string/action_export_profiles"
+        app:showAsAction="ifRoom" />
+    <item
         android:id="@+id/action_singbox_tuning"
         android:icon="@drawable/ic_tune_24"
         android:iconTint="@color/text_primary"
         android:title="@string/title_singbox_tuning"
-        app:showAsAction="always" />
+        app:showAsAction="ifRoom" />
 </menu>

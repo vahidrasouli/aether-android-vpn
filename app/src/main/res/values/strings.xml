@@ -85,6 +85,14 @@
     <string name="action_test_all">Test All</string>
     <string name="action_sort_ping">Sort by Ping</string>
     <string name="action_edit_profile">Edit Profile</string>
-    <string name="action_copy_uri">Copy Share URI</string>
+    <string name="action_copy_uri">Copy URI</string>
+    <string name="action_share_qr">Share QR</string>
+    <string name="action_scan_qr">Scan QR</string>
+    <string name="action_pick_qr_image">QR Image</string>
+    <string name="action_export_profiles">Export</string>
+    <string name="action_copy_all_uris">Copy All URIs</string>
+    <string name="action_save_to_file">Save to File (.txt)</string>
+    <string name="action_more_options">More options</string>
+    <string name="qr_share_hint">Scan with any compatible Sing-box or V2Ray client</string>
     <string name="action_cancel">Cancel</string>
 </resources>
