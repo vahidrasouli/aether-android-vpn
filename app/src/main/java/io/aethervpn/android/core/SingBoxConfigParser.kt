@@ -196,6 +196,7 @@ object SingBoxConfigParser {
                 put("inbounds", newInbounds)
 
                 optJSONObject("route")?.put("auto_detect_interface", false)
+                optJSONObject("dns")?.put("strategy", "ipv4_only")
 
                 if (upstreamSocksPort != null) {
                     val existingOutbounds = optJSONArray("outbounds") ?: JSONArray()
@@ -230,6 +231,7 @@ object SingBoxConfigParser {
         } else {
             val outbound = JSONObject(parsed.outboundOrFullJson.toString()).apply {
                 put("tag", "proxy")
+                put("domain_strategy", "ipv4_only")
                 put("connect_timeout", "${config.sbConnectTimeoutSec.coerceIn(3, 60)}s")
                 if (config.sbTcpFastOpen) {
                     put("tcp_fast_open", true)
@@ -256,7 +258,7 @@ object SingBoxConfigParser {
             }
             JSONObject().apply {
                 put("log", buildLogObject(config))
-                val effectiveStrategy = config.sbDnsStrategy.ifBlank { "ipv4_only" }
+                val effectiveStrategy = "ipv4_only"
                 put("dns", JSONObject().apply {
                     put("servers", JSONArray().apply {
                         put(buildRemoteDnsServer(config.sbRemoteDns))
@@ -299,6 +301,7 @@ object SingBoxConfigParser {
                     put(JSONObject().apply {
                         put("type", "direct")
                         put("tag", "direct")
+                        put("domain_strategy", "ipv4_only")
                     })
                 })
                 put("route", JSONObject().apply {
@@ -418,6 +421,7 @@ object SingBoxConfigParser {
             put(JSONObject().apply {
                 put("type", "direct")
                 put("tag", "direct")
+                put("domain_strategy", "ipv4_only")
             })
         })
     }.toString(2)
@@ -484,14 +488,57 @@ object SingBoxConfigParser {
         }.getOrElse { "Outbound shape: unavailable" }
     }
 
+    fun redactRuntimeConfigJson(runtimeJson: String): String {
+        return runCatching {
+            val root = JSONObject(runtimeJson)
+            redactJsonObject(root)
+            root.toString(2)
+        }.getOrElse { "<unable to redact runtime config JSON>" }
+    }
+
+    private fun redactJsonObject(obj: JSONObject) {
+        val keys = obj.keys().asSequence().toList()
+        for (key in keys) {
+            val value = obj.opt(key)
+            if (key.lowercase() in REDACTED_JSON_KEYS) {
+                when (value) {
+                    is JSONArray -> {
+                        val masked = JSONArray()
+                        for (i in 0 until value.length()) {
+                            masked.put("***")
+                        }
+                        obj.put(key, masked)
+                    }
+                    null, JSONObject.NULL -> Unit
+                    else -> obj.put(key, "***")
+                }
+            } else {
+                when (value) {
+                    is JSONObject -> redactJsonObject(value)
+                    is JSONArray -> redactJsonArray(value)
+                }
+            }
+        }
+    }
+
+    private fun redactJsonArray(arr: JSONArray) {
+        for (i in 0 until arr.length()) {
+            when (val item = arr.opt(i)) {
+                is JSONObject -> redactJsonObject(item)
+                is JSONArray -> redactJsonArray(item)
+            }
+        }
+    }
+
+    private val REDACTED_JSON_KEYS = setOf("uuid", "password", "private_key", "short_id")
     private const val UPSTREAM_SOCKS_TAG = "upstream-socks"
     private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
     private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
     private val MULTIPLEX_SUPPORTED_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks")
 
-    private fun buildLogObject(config: VpnConfig): JSONObject = JSONObject().apply {
+    private fun buildLogObject(@Suppress("UNUSED_PARAMETER") config: VpnConfig): JSONObject = JSONObject().apply {
         put("disabled", false)
-        put("level", config.sbLogLevel.ifBlank { "warn" })
+        put("level", "debug")
         put("timestamp", false)
     }
 

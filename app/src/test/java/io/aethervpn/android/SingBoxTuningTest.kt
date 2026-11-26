@@ -134,7 +134,7 @@ class SingBoxTuningTest {
             sbGoGc = "100"
         )
         val env = SingBoxEngineManager.resolveGoEnvironment(cfg)
-        assertEquals("64MiB", env["GOMEMLIMIT"])
+        assertNull(env["GOMEMLIMIT"])
         assertEquals("4", env["GOMAXPROCS"])
         assertEquals("100", env["GOGC"])
 
@@ -197,12 +197,12 @@ class SingBoxTuningTest {
             SingBoxConfigParser.buildRuntimeConfig(sampleHy2Uri, config = tuned).getOrThrow()
         )
 
-        // Log
-        assertEquals("info", runtime.getJSONObject("log").getString("level"))
+        // Log (forced to debug for temporary transparent diagnostics)
+        assertEquals("debug", runtime.getJSONObject("log").getString("level"))
 
-        // DNS 1.12 (runtime & ephemeral test config must omit detour on dns-local)
+        // DNS 1.12 (forced ipv4_only to eliminate IPv6 dial stalls; dns-local must omit detour)
         val dns = runtime.getJSONObject("dns")
-        assertEquals("prefer_ipv6", dns.getString("strategy"))
+        assertEquals("ipv4_only", dns.getString("strategy"))
         val servers = dns.getJSONArray("servers")
         val remote = servers.getJSONObject(0)
         assertEquals("https", remote.getString("type"))

@@ -592,5 +592,83 @@ class SingBoxConfigParserTest {
         assertEquals(1, direct.getJSONArray("outbounds").length())
         assertEquals("direct", direct.getJSONArray("outbounds").getJSONObject(0).getString("type"))
         assertEquals("direct", direct.getJSONArray("outbounds").getJSONObject(0).getString("tag"))
+        assertEquals("ipv4_only", direct.getJSONArray("outbounds").getJSONObject(0).getString("domain_strategy"))
+    }
+
+    @Test
+    fun forcesIpv4OnlyAndDebugLoggingAcrossDnsAndOutbounds() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
+        val cfg = VpnConfig(sbDnsStrategy = "prefer_ipv6", sbLogLevel = "error")
+        val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, config = cfg).getOrThrow())
+
+        val logObj = runtime.getJSONObject("log")
+        assertEquals("debug", logObj.getString("level"))
+        assertFalse(logObj.getBoolean("timestamp"))
+
+        assertEquals("ipv4_only", runtime.getJSONObject("dns").getString("strategy"))
+
+        val outbounds = runtime.getJSONArray("outbounds")
+        val proxy = outbounds.getJSONObject(0)
+        assertEquals("proxy", proxy.getString("tag"))
+        assertEquals("ipv4_only", proxy.getString("domain_strategy"))
+
+        val direct = outbounds.getJSONObject(1)
+        assertEquals("direct", direct.getString("tag"))
+        assertEquals("ipv4_only", direct.getString("domain_strategy"))
+    }
+
+    @Test
+    fun unsetsGoMemLimitWhileKeepingGoGc100() {
+        val defaultEnv = SingBoxEngineManager.resolveGoEnvironment(VpnConfig())
+        assertTrue(defaultEnv.containsKey("GOMEMLIMIT"))
+        assertNull(defaultEnv["GOMEMLIMIT"])
+        assertEquals("100", defaultEnv["GOGC"])
+
+        val cappedConfigEnv = SingBoxEngineManager.resolveGoEnvironment(VpnConfig(sbGoMemLimit = "96MiB", sbGoGc = "100"))
+        assertNull(cappedConfigEnv["GOMEMLIMIT"])
+        assertEquals("100", cappedConfigEnv["GOGC"])
+    }
+
+    @Test
+    fun redactRuntimeConfigJsonMasksSecretsAndPreservesStructure() {
+        val secretUuid = "99999999-8888-7777-6666-555555555555"
+        val secretShortId = "deadbeef1234"
+        val secretPassword = "super-secret-password"
+        val secretPrivateKey = "private-key-material-xyz"
+
+        val vlessRealityUri =
+            "vless://$secretUuid@198.51.100.10:443?security=reality&sni=www.cloudflare.com&pbk=pubKey&sid=$secretShortId#Reality"
+        val vlessJson = SingBoxConfigParser.buildRuntimeConfig(vlessRealityUri).getOrThrow()
+        val redactedVless = SingBoxConfigParser.redactRuntimeConfigJson(vlessJson)
+
+        assertFalse(redactedVless.contains(secretUuid))
+        assertFalse(redactedVless.contains(secretShortId))
+        val parsedVless = JSONObject(redactedVless)
+        assertTrue(parsedVless.has("inbounds"))
+        assertTrue(parsedVless.has("outbounds"))
+        assertTrue(parsedVless.has("route"))
+        assertTrue(parsedVless.has("dns"))
+        val proxyOut = parsedVless.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("***", proxyOut.getString("uuid"))
+        assertEquals("***", proxyOut.getJSONObject("tls").getJSONObject("reality").getString("short_id"))
+
+        val fullJsonWithSecrets = """
+            {
+              "outbounds": [
+                {
+                  "type": "wireguard",
+                  "tag": "proxy",
+                  "private_key": "$secretPrivateKey",
+                  "password": "$secretPassword"
+                }
+              ]
+            }
+        """.trimIndent()
+        val redactedFull = SingBoxConfigParser.redactRuntimeConfigJson(fullJsonWithSecrets)
+        assertFalse(redactedFull.contains(secretPrivateKey))
+        assertFalse(redactedFull.contains(secretPassword))
+        val parsedFull = JSONObject(redactedFull).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("***", parsedFull.getString("private_key"))
+        assertEquals("***", parsedFull.getString("password"))
     }
 }

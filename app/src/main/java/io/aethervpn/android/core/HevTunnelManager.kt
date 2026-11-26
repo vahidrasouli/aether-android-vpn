@@ -62,7 +62,7 @@ class HevTunnelManager(private val cacheDir: File) {
             append("  udp-read-write-timeout: ").append(config.udpTimeoutMs).append('\n')
             append("  limit-nofile: 65535\n")
             append("  log-file: 'stderr'\n")
-            append("  log-level: 'warn'\n")
+            append("  log-level: 'debug'\n")
         }
     }
 

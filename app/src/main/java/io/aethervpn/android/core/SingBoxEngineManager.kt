@@ -91,11 +91,19 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         activeConfigFile = configFile
 
         val envMap = resolveGoEnvironment(config)
+        val versionInfo = queryBinaryVersion(binary)
+        if (!versionInfo.isNullOrBlank()) {
+            DiagnosticsLog.record("SingBox", "Binary version: $versionInfo")
+        }
         DiagnosticsLog.record(
             "SingBox",
-            "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "auto"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "100"}, log=${config.sbLogLevel}, dns=${config.sbRemoteDns}, tfo=${config.sbTcpFastOpen}]"
+            "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "unset"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "100"}, log=debug, dns=${config.sbRemoteDns}, tfo=${config.sbTcpFastOpen}]"
         )
         DiagnosticsLog.record("SingBox", SingBoxConfigParser.summarizeRuntimeConfig(runtimeJson))
+        DiagnosticsLog.record(
+            "SingBox",
+            "Runtime config JSON:\n${SingBoxConfigParser.redactRuntimeConfigJson(runtimeJson)}"
+        )
 
         val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
             .directory(stateDir)
@@ -216,11 +224,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
         internal fun resolveGoEnvironment(config: VpnConfig): Map<String, String?> {
             val env = linkedMapOf<String, String?>()
-            env["GOMEMLIMIT"] = if (config.sbGoMemLimit.equals("Auto", ignoreCase = true) || config.sbGoMemLimit.isBlank()) {
-                null
-            } else {
-                config.sbGoMemLimit
-            }
+            // Unset GOMEMLIMIT so Go's GC never pauses TCP streams during downloads.
+            env["GOMEMLIMIT"] = null
             env["GOGC"] = config.sbGoGc.ifBlank { "100" }
             env["GOMAXPROCS"] = if (config.sbGoMaxProcs.equals("Auto", ignoreCase = true) || config.sbGoMaxProcs.isBlank()) {
                 null
@@ -228,6 +233,26 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 config.sbGoMaxProcs
             }
             return env
+        }
+
+        internal fun queryBinaryVersion(binary: File): String? {
+            return runCatching {
+                val proc = ProcessBuilder(binary.absolutePath, "version")
+                    .redirectErrorStream(true)
+                    .start()
+                val finished = proc.waitFor(2, TimeUnit.SECONDS)
+                if (!finished) {
+                    proc.destroyForcibly()
+                    return@runCatching null
+                }
+                val output = proc.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                output.lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .take(2)
+                    .joinToString(" | ")
+                    .takeIf { it.isNotBlank() }
+            }.getOrNull()
         }
 
         internal fun resolveEphemeralTestGoEnvironment(): Map<String, String> = linkedMapOf(
@@ -304,7 +329,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             config: VpnConfig,
             rawUriOrJson: String,
             traceTimeoutMs: Long = EPHEMERAL_TEST_TIMEOUT_MS,
-            speedProbeTimeoutMs: Int = 15_000
+            speedProbeTimeoutMs: Int = 20_000
         ): Result<EphemeralTestWithSpeedResult> {
             val baseResult = withEphemeralSingBox(
                 context = context,
@@ -628,7 +653,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         fun runDirectSocks5SpeedProbe(
             socksPort: Int,
             bytesToDownload: Int = SPEED_PROBE_BYTES,
-            timeoutMs: Int = 15_000,
+            timeoutMs: Int = 20_000,
             host: String = SPEED_PROBE_HOST,
             port: Int = SPEED_PROBE_PORT,
             path: String = "/__down?bytes=$bytesToDownload",
@@ -640,6 +665,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             var bodyBytesRead = 0
             return try {
                 rawSocket = Socket()
+                rawSocket.tcpNoDelay = true
                 rawSocket.soTimeout = timeoutMs
                 rawSocket.connect(VpnConfig.loopbackSocketAddress(socksPort), timeoutMs)
 
@@ -694,6 +720,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 if (useTls) {
                     val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
                     sslSocket = (sslFactory.createSocket(rawSocket, host, port, true) as SSLSocket).apply {
+                        tcpNoDelay = true
                         soTimeout = timeoutMs
                         startHandshake()
                     }
@@ -723,7 +750,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 }
 
                 val startNs = System.nanoTime()
-                val buf = ByteArray(8192)
+                val buf = ByteArray(16 * 1024)
                 while (!exactBytesRequired || bodyBytesRead < bytesToDownload) {
                     val n = httpIn.read(buf)
                     if (n < 0) break
