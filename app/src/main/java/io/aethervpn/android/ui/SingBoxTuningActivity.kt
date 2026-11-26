@@ -152,7 +152,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
         }
 
         binding.switchSbSniff.setOnCheckedChangeListener { _, isChecked ->
-            if (isBindingUi) return@setOnCheckedStateChangeListener
+            if (isBindingUi) return@setOnCheckedChangeListener
             updateConfig { it.copy(sbSniffEnabled = isChecked) }
         }
 
@@ -167,12 +167,12 @@ class SingBoxTuningActivity : AppCompatActivity() {
         }
 
         binding.switchSbBypassPrivateIp.setOnCheckedChangeListener { _, isChecked ->
-            if (isBindingUi) return@setOnCheckedStateChangeListener
+            if (isBindingUi) return@setOnCheckedChangeListener
             updateConfig { it.copy(sbBypassPrivateIp = isChecked) }
         }
 
         binding.switchSbBypassIrDomains.setOnCheckedChangeListener { _, isChecked ->
-            if (isBindingUi) return@setOnCheckedStateChangeListener
+            if (isBindingUi) return@setOnCheckedChangeListener
             updateConfig { it.copy(sbBypassIrDomains = isChecked) }
         }
 
@@ -187,7 +187,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
         }
 
         binding.switchSbTcpFastOpen.setOnCheckedChangeListener { _, isChecked ->
-            if (isBindingUi) return@setOnCheckedStateChangeListener
+            if (isBindingUi) return@setOnCheckedChangeListener
             updateConfig { it.copy(sbTcpFastOpen = isChecked) }
         }
 
