@@ -648,4 +648,301 @@ class UpdateManagerTest {
 
         assertTrue("UpdateActivity missing from AndroidManifest.xml", foundUpdateActivity)
     }
+
+    @Test
+    fun downloadProgressFormatsLiveSpeedWhenPositive() {
+        val mbProgress = io.aethervpn.android.core.DownloadProgress(
+            downloadedBytes = (4.2 * 1024 * 1024).toLong(),
+            totalBytes = (7.1 * 1024 * 1024).toLong(),
+            percent = 59,
+            speedBytesPerSec = (1.4 * 1024 * 1024).toLong()
+        )
+        assertEquals("59% • 4.2 / 7.1 MB • 1.4 MB/s", mbProgress.formatLabel())
+
+        val kbProgress = io.aethervpn.android.core.DownloadProgress(
+            downloadedBytes = (0.5 * 1024 * 1024).toLong(),
+            totalBytes = (2.0 * 1024 * 1024).toLong(),
+            percent = 25,
+            speedBytesPerSec = 512L * 1024L
+        )
+        assertEquals("25% • 0.5 / 2.0 MB • 512 KB/s", kbProgress.formatLabel())
+    }
+
+    @Test
+    fun parallelFourChunkDownloadAssemblesExactSha256AcrossRedirect(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val payload = ByteArray(2_500_000)
+        java.util.Random(42L).nextBytes(payload)
+        val expectedSha = io.aethervpn.android.core.BsPatch.sha256Hex(
+            java.nio.file.Files.createTempFile("aether-sha-", ".bin").toFile().apply {
+                writeBytes(payload)
+                deleteOnExit()
+            }
+        )
+
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-p4-").toFile()
+        val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
+        val staleChunks = java.io.File(updatesDir, "b99.apk.part.chunks.json").apply { writeText("{}") }
+
+        val server = java.net.ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
+        val pool = java.util.concurrent.Executors.newCachedThreadPool()
+        val cdnGetCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val redirectGetCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+        val acceptThread = Thread {
+            while (!server.isClosed) {
+                try {
+                    val sock = server.accept()
+                    pool.execute {
+                        sock.use { s ->
+                            val inp = java.io.BufferedReader(java.io.InputStreamReader(s.getInputStream()))
+                            val reqLine = inp.readLine() ?: return@use
+                            var rangeHeader: String? = null
+                            var line = inp.readLine()
+                            while (!line.isNullOrEmpty()) {
+                                if (line.startsWith("Range:", ignoreCase = true)) {
+                                    rangeHeader = line.substringAfter(":").trim()
+                                }
+                                line = inp.readLine()
+                            }
+                            val parts = reqLine.split(" ")
+                            val method = parts.getOrNull(0) ?: "GET"
+                            val path = parts.getOrNull(1) ?: "/"
+                            val out = s.getOutputStream()
+
+                            if (path.startsWith("/redirect/")) {
+                                if (method == "GET") redirectGetCount.incrementAndGet()
+                                out.write(
+                                    ("HTTP/1.1 302 Found\r\n" +
+                                        "Location: http://127.0.0.1:${server.localPort}/cdn/update.apk\r\n" +
+                                        "Content-Length: 0\r\nConnection: close\r\n\r\n").toByteArray()
+                                )
+                                out.flush()
+                                return@use
+                            }
+
+                            if (method == "HEAD") {
+                                out.write(
+                                    ("HTTP/1.1 200 OK\r\n" +
+                                        "Content-Length: ${payload.size}\r\n" +
+                                        "Accept-Ranges: bytes\r\n" +
+                                        "Connection: close\r\n\r\n").toByteArray()
+                                )
+                                out.flush()
+                                return@use
+                            }
+
+                            cdnGetCount.incrementAndGet()
+                            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                                val spec = rangeHeader.removePrefix("bytes=").split("-")
+                                val start = spec[0].toInt()
+                                val end = spec.getOrNull(1)?.takeIf { it.isNotEmpty() }?.toInt() ?: (payload.size - 1)
+                                val len = end - start + 1
+                                out.write(
+                                    ("HTTP/1.1 206 Partial Content\r\n" +
+                                        "Content-Range: bytes $start-$end/${payload.size}\r\n" +
+                                        "Content-Length: $len\r\n" +
+                                        "Accept-Ranges: bytes\r\n" +
+                                        "Connection: close\r\n\r\n").toByteArray()
+                                )
+                                out.write(payload, start, len)
+                                out.flush()
+                            } else {
+                                out.write(
+                                    ("HTTP/1.1 200 OK\r\n" +
+                                        "Content-Length: ${payload.size}\r\n" +
+                                        "Connection: close\r\n\r\n").toByteArray()
+                                )
+                                out.write(payload)
+                                out.flush()
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+        }
+        acceptThread.isDaemon = true
+        acceptThread.start()
+
+        try {
+            val res = UpdateManager.downloadApk(
+                downloadUrl = "http://127.0.0.1:${server.localPort}/redirect/update.apk",
+                fileName = "aether-android-arm64-v1.1.0-debug-b100.apk",
+                cacheDir = tempCacheDir,
+                partFileNameOverride = "b100.apk.part",
+                expectedTotalBytes = payload.size.toLong(),
+                preservePartialOnCancel = true
+            ) {}
+
+            assertTrue("Expected parallel 4-chunk download to succeed", res.isSuccess)
+            val downloaded = res.getOrThrow()
+            assertEquals(expectedSha, io.aethervpn.android.core.BsPatch.sha256Hex(downloaded))
+            assertEquals("Expected 4 parallel chunk GETs on resolved CDN URL", 4, cdnGetCount.get())
+            assertEquals("Expected 0 GETs on redirect URL", 0, redirectGetCount.get())
+            assertFalse("Expected stale .chunks.json to be deleted", staleChunks.exists())
+            assertFalse(
+                "Expected completed .chunks.json to be deleted",
+                java.io.File(updatesDir, "b100.apk.part.chunks.json").exists()
+            )
+        } finally {
+            runCatching { server.close() }
+            pool.shutdownNow()
+            tempCacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun parallelChunkCancellationAndResumePreservesExactPercentageAndSha256(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val payload = ByteArray(2_097_152) // 2 MB -> 512 KB per chunk
+        java.util.Random(77L).nextBytes(payload)
+        val expectedSha = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(payload)
+            .joinToString("") { "%02x".format(it) }
+
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-p4-resume-").toFile()
+        val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
+        val fileName = "aether-android-arm64-v1.1.0-debug-b77.apk"
+
+        val server = java.net.ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
+        val pool = java.util.concurrent.Executors.newCachedThreadPool()
+        val throttleFirstPhase = java.util.concurrent.atomic.AtomicBoolean(true)
+        val phase1BytesSentLatch = java.util.concurrent.CountDownLatch(4)
+        val resumedRangeStarts = java.util.Collections.synchronizedList(mutableListOf<Int>())
+
+        val acceptThread = Thread {
+            while (!server.isClosed) {
+                try {
+                    val sock = server.accept()
+                    pool.execute {
+                        sock.use { s ->
+                            val inp = java.io.BufferedReader(java.io.InputStreamReader(s.getInputStream()))
+                            val reqLine = inp.readLine() ?: return@use
+                            var rangeHeader: String? = null
+                            var line = inp.readLine()
+                            while (!line.isNullOrEmpty()) {
+                                if (line.startsWith("Range:", ignoreCase = true)) {
+                                    rangeHeader = line.substringAfter(":").trim()
+                                }
+                                line = inp.readLine()
+                            }
+                            val method = reqLine.split(" ").getOrNull(0) ?: "GET"
+                            val out = s.getOutputStream()
+
+                            if (method == "HEAD") {
+                                out.write(
+                                    ("HTTP/1.1 200 OK\r\n" +
+                                        "Content-Length: ${payload.size}\r\n" +
+                                        "Accept-Ranges: bytes\r\n" +
+                                        "Connection: close\r\n\r\n").toByteArray()
+                                )
+                                out.flush()
+                                return@use
+                            }
+
+                            val spec = rangeHeader!!.removePrefix("bytes=").split("-")
+                            val start = spec[0].toInt()
+                            val end = spec[1].toInt()
+                            val len = end - start + 1
+                            if (!throttleFirstPhase.get()) {
+                                resumedRangeStarts.add(start)
+                            }
+
+                            out.write(
+                                ("HTTP/1.1 206 Partial Content\r\n" +
+                                    "Content-Range: bytes $start-$end/${payload.size}\r\n" +
+                                    "Content-Length: $len\r\n" +
+                                    "Accept-Ranges: bytes\r\n" +
+                                    "Connection: close\r\n\r\n").toByteArray()
+                            )
+                            if (throttleFirstPhase.get()) {
+                                val firstSlice = minOf(131_072, len)
+                                out.write(payload, start, firstSlice)
+                                out.flush()
+                                phase1BytesSentLatch.countDown()
+                                Thread.sleep(4_000)
+                            } else {
+                                out.write(payload, start, len)
+                                out.flush()
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+        }
+        acceptThread.isDaemon = true
+        acceptThread.start()
+
+        try {
+            val url = "http://127.0.0.1:${server.localPort}/update.apk"
+            val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                UpdateManager.downloadApk(
+                    downloadUrl = url,
+                    fileName = fileName,
+                    cacheDir = tempCacheDir,
+                    partFileNameOverride = "b77.apk.part",
+                    expectedTotalBytes = payload.size.toLong(),
+                    preservePartialOnCancel = true
+                ) {}
+            }
+
+            assertTrue(phase1BytesSentLatch.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            Thread.sleep(200)
+            job.cancel()
+            job.join()
+
+            val savedBytes = UpdateManager.getPartialDownloadSize(
+                fileName = fileName,
+                cacheDir = tempCacheDir,
+                targetVersionCode = 77,
+                isPatch = false
+            )
+            assertTrue("Expected partial bytes > 0 after cancel, got $savedBytes", savedBytes > 0L)
+            assertTrue("Expected partial bytes < total, got $savedBytes", savedBytes < payload.size)
+            val expectedResumePct = ((savedBytes * 100L) / payload.size).toInt().coerceIn(0, 100)
+            assertTrue("Expected resume percentage > 0, got $expectedResumePct", expectedResumePct > 0)
+
+            throttleFirstPhase.set(false)
+            val resumeProgress = java.util.Collections.synchronizedList(
+                mutableListOf<io.aethervpn.android.core.DownloadProgress>()
+            )
+            val resumeRes = UpdateManager.downloadApk(
+                downloadUrl = url,
+                fileName = fileName,
+                cacheDir = tempCacheDir,
+                partFileNameOverride = "b77.apk.part",
+                expectedTotalBytes = payload.size.toLong(),
+                preservePartialOnCancel = true
+            ) { p ->
+                resumeProgress.add(p)
+            }
+
+            assertTrue("Expected resumed download to succeed", resumeRes.isSuccess)
+            assertTrue("Expected progress events on resume", resumeProgress.isNotEmpty())
+            assertEquals(
+                "Resume progress must start at exact prior percentage",
+                expectedResumePct,
+                resumeProgress.first().percent
+            )
+            assertTrue(
+                "Resume progress must never reset below prior percentage",
+                resumeProgress.all { it.percent >= expectedResumePct }
+            )
+            assertEquals("Resume progress must finish at 100%", 100, resumeProgress.last().percent)
+            assertTrue(
+                "Expected resumed chunks to start at non-zero offsets",
+                resumedRangeStarts.all { it > 0 }
+            )
+
+            val finalFile = resumeRes.getOrThrow()
+            assertEquals(expectedSha, io.aethervpn.android.core.BsPatch.sha256Hex(finalFile))
+            assertFalse(java.io.File(updatesDir, "b77.apk.part.chunks.json").exists())
+        } finally {
+            runCatching { server.close() }
+            pool.shutdownNow()
+            tempCacheDir.deleteRecursively()
+        }
+    }
 }

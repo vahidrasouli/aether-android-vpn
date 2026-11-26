@@ -20,6 +20,7 @@ import io.aethervpn.android.databinding.ActivityUpdateBinding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -245,17 +246,25 @@ class UpdateActivity : AppCompatActivity() {
             } else {
                 "Downloading..."
             }
+            val expectedTotalBytes = rel.deltaManifest?.matchedPatch?.patchSize
+                ?: rel.deltaManifest?.fullSize
+                ?: -1L
             binding.progressUpdateDownload.visibility = View.VISIBLE
             binding.progressUpdateDownload.isIndeterminate = false
-            if (resumingBytes == 0L) {
+            if (resumingBytes > 0L && expectedTotalBytes > 0L) {
+                val initPct = ((resumingBytes * 100L) / expectedTotalBytes).toInt().coerceIn(0, 100)
+                binding.progressUpdateDownload.progress = initPct
+                binding.tvUpdateProgressDetail.text =
+                    io.aethervpn.android.core.DownloadProgress(resumingBytes, expectedTotalBytes, initPct).formatLabel()
+            } else {
                 binding.progressUpdateDownload.progress = 0
+                binding.tvUpdateProgressDetail.text = if (resumingBytes > 0L) {
+                    String.format(Locale.US, "Resuming from %.1f MB…", resumingBytes / (1024.0 * 1024.0))
+                } else {
+                    "0% • Starting download…"
+                }
             }
             binding.tvUpdateProgressDetail.visibility = View.VISIBLE
-            binding.tvUpdateProgressDetail.text = if (resumingBytes > 0L) {
-                String.format(Locale.US, "Resuming from %.1f MB…", resumingBytes / (1024.0 * 1024.0))
-            } else {
-                "0% • Starting download…"
-            }
             binding.tvUpdateStatus.text = binding.tvUpdateStageLabel.text
 
             try {
@@ -324,8 +333,22 @@ class UpdateActivity : AppCompatActivity() {
                     }
                 }
             } catch (_: CancellationException) {
-                UpdateManager.cancelPartialDownloads(rel, cacheDir)
-                resetDownloadProgressUi("Download cancelled")
+                val savedBytes = withContext(NonCancellable + Dispatchers.IO) {
+                    UpdateManager.getPartialDownloadSize(rel, cacheDir)
+                }
+                if (savedBytes > 0L) {
+                    binding.btnCancelUpdate.visibility = View.GONE
+                    binding.progressUpdateDownload.isIndeterminate = false
+                    binding.tvUpdateStageLabel.text = "Download paused"
+                    binding.tvUpdateStatus.text = "Download paused • Tap Resume to continue"
+                    applyPrimaryButtonStyle(
+                        enabled = true,
+                        label = getString(R.string.action_resume_download),
+                        activeStyle = false
+                    )
+                } else {
+                    resetDownloadProgressUi("Download cancelled")
+                }
             } finally {
                 activeUpdateDownloadJob = null
             }
@@ -333,15 +356,8 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun cancelActiveDownload() {
+        binding.btnCancelUpdate.visibility = View.GONE
         activeUpdateDownloadJob?.cancel()
-        activeUpdateDownloadJob = null
-        val rel = pendingUpdateRelease
-        if (rel != null) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                UpdateManager.cancelPartialDownloads(rel, cacheDir)
-            }
-        }
-        resetDownloadProgressUi("Download cancelled")
     }
 
     private fun resetDownloadProgressUi(statusMessage: String) {

@@ -9,14 +9,25 @@ import io.aethervpn.android.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicLongArray
 import kotlin.coroutines.coroutineContext
 
 data class SemVer(
@@ -171,15 +182,28 @@ data class ReleaseInfo(
 data class DownloadProgress(
     val downloadedBytes: Long,
     val totalBytes: Long,
-    val percent: Int
+    val percent: Int,
+    val speedBytesPerSec: Long = 0L
 ) {
     fun formatLabel(): String {
         val dlMb = downloadedBytes / (1024.0 * 1024.0)
+        val speedSuffix = formatSpeedSuffix(speedBytesPerSec)
         return if (totalBytes > 0L) {
             val totMb = totalBytes / (1024.0 * 1024.0)
-            String.format(java.util.Locale.US, "%d%% • %.1f / %.1f MB", percent, dlMb, totMb)
+            String.format(java.util.Locale.US, "%d%% • %.1f / %.1f MB%s", percent, dlMb, totMb, speedSuffix)
         } else {
-            String.format(java.util.Locale.US, "%.1f MB", dlMb)
+            String.format(java.util.Locale.US, "%.1f MB%s", dlMb, speedSuffix)
+        }
+    }
+
+    companion object {
+        private fun formatSpeedSuffix(bytesPerSec: Long): String {
+            if (bytesPerSec <= 0L) return ""
+            return if (bytesPerSec >= 1024L * 1024L) {
+                String.format(java.util.Locale.US, " • %.1f MB/s", bytesPerSec / (1024.0 * 1024.0))
+            } else {
+                String.format(java.util.Locale.US, " • %.0f KB/s", bytesPerSec / 1024.0)
+            }
         }
     }
 }
@@ -450,6 +474,98 @@ object UpdateManager {
         "${sanitizeFileName(fileName)}.part"
     }
 
+    internal const val PARALLEL_MIN_BYTES = 1_048_576L
+    internal const val PARALLEL_CHUNK_COUNT = 4
+    private const val CHUNK_BUFFER_SIZE = 64 * 1024
+    private const val CHUNKS_META_SUFFIX = ".chunks.json"
+    private const val MAX_REDIRECTS = 5
+
+    internal data class ChunkState(
+        val index: Int,
+        val start: Long,
+        val end: Long,
+        val downloaded: Long
+    ) {
+        val length: Long get() = (end - start + 1L).coerceAtLeast(0L)
+        val isComplete: Boolean get() = downloaded >= length
+    }
+
+    private data class ProbeResult(
+        val resolvedUrl: String,
+        val totalBytes: Long,
+        val acceptRanges: Boolean
+    )
+
+    internal fun chunksFileFor(partFile: File): File =
+        File(partFile.parentFile, "${partFile.name}$CHUNKS_META_SUFFIX")
+
+    internal fun buildInitialChunks(
+        totalBytes: Long,
+        chunkCount: Int = PARALLEL_CHUNK_COUNT
+    ): List<ChunkState> {
+        val baseSize = totalBytes / chunkCount
+        return (0 until chunkCount).map { i ->
+            val start = i * baseSize
+            val end = if (i == chunkCount - 1) totalBytes - 1L else (i + 1) * baseSize - 1L
+            ChunkState(index = i, start = start, end = end, downloaded = 0L)
+        }
+    }
+
+    internal fun loadChunkStates(
+        chunksFile: File,
+        partFile: File,
+        expectedTotalBytes: Long = -1L
+    ): List<ChunkState>? {
+        if (!chunksFile.isFile || !partFile.isFile) return null
+        val obj = runCatching { JSONObject(chunksFile.readText()) }.getOrNull() ?: return null
+        val totalBytes = obj.optLong("totalBytes", -1L)
+        if (totalBytes <= 0L || partFile.length() != totalBytes) return null
+        if (expectedTotalBytes > 0L && totalBytes != expectedTotalBytes) return null
+
+        val arr = obj.optJSONArray("chunks") ?: return null
+        if (arr.length() != PARALLEL_CHUNK_COUNT) return null
+        val expected = buildInitialChunks(totalBytes, PARALLEL_CHUNK_COUNT)
+        val loaded = ArrayList<ChunkState>(PARALLEL_CHUNK_COUNT)
+        for (i in 0 until PARALLEL_CHUNK_COUNT) {
+            val item = arr.optJSONObject(i) ?: return null
+            val idx = item.optInt("index", -1)
+            val start = item.optLong("start", -1L)
+            val end = item.optLong("end", -1L)
+            val downloaded = item.optLong("downloaded", -1L)
+            val exp = expected[i]
+            if (idx != exp.index || start != exp.start || end != exp.end) return null
+            if (downloaded < 0L || downloaded > exp.length) return null
+            loaded.add(ChunkState(index = idx, start = start, end = end, downloaded = downloaded))
+        }
+        return loaded
+    }
+
+    private fun saveChunkStates(
+        chunksFile: File,
+        totalBytes: Long,
+        resolvedUrl: String,
+        chunks: List<ChunkState>,
+        downloadedPerChunk: AtomicLongArray
+    ) {
+        val arr = JSONArray()
+        for (c in chunks) {
+            arr.put(
+                JSONObject().apply {
+                    put("index", c.index)
+                    put("start", c.start)
+                    put("end", c.end)
+                    put("downloaded", downloadedPerChunk.get(c.index))
+                }
+            )
+        }
+        val root = JSONObject().apply {
+            put("totalBytes", totalBytes)
+            put("url", resolvedUrl)
+            put("chunks", arr)
+        }
+        runCatching { chunksFile.writeText(root.toString()) }
+    }
+
     fun getPartialDownloadSize(
         fileName: String,
         cacheDir: File,
@@ -458,7 +574,13 @@ object UpdateManager {
     ): Long {
         val updatesDir = File(cacheDir, "updates")
         val partFile = File(updatesDir, partFileNameFor(fileName, targetVersionCode, isPatch))
-        return if (partFile.exists() && partFile.isFile) partFile.length() else 0L
+        if (!partFile.exists() || !partFile.isFile) return 0L
+        val chunksFile = chunksFileFor(partFile)
+        val chunkStates = loadChunkStates(chunksFile, partFile)
+        if (chunkStates != null) {
+            return chunkStates.sumOf { it.downloaded }
+        }
+        return partFile.length()
     }
 
     fun getPartialDownloadSize(release: ReleaseInfo, cacheDir: File): Long {
@@ -481,6 +603,10 @@ object UpdateManager {
     ) {
         val updatesDir = File(cacheDir, "updates")
         val partFile = File(updatesDir, partFileNameFor(fileName, targetVersionCode, isPatch))
+        val chunksFile = chunksFileFor(partFile)
+        if (chunksFile.exists()) {
+            runCatching { chunksFile.delete() }
+        }
         if (partFile.exists()) {
             runCatching { partFile.delete() }
         }
@@ -510,16 +636,19 @@ object UpdateManager {
     }
 
     internal fun cleanupUpdatesDir(updatesDir: File, keepPartFileName: String? = null) {
+        val keepPartFile = keepPartFileName?.let { File(updatesDir, it) }
+        val keepPartExists = keepPartFile != null && keepPartFile.isFile && keepPartFile.length() > 0L
+        val keepChunksName = if (keepPartExists) "${keepPartFileName}$CHUNKS_META_SUFFIX" else null
         updatesDir.listFiles()?.forEach { file ->
             if (!file.isFile) return@forEach
-            val isSamePart = keepPartFileName != null &&
-                file.name == keepPartFileName &&
-                file.length() > 0L
-            if (isSamePart) return@forEach
+            val isSamePart = keepPartExists && file.name == keepPartFileName
+            val isSameChunks = keepChunksName != null && file.name == keepChunksName
+            if (isSamePart || isSameChunks) return@forEach
             if (file.name.endsWith(".apk", ignoreCase = true) ||
                 file.name.endsWith(".tmp", ignoreCase = true) ||
                 file.name.endsWith(".part", ignoreCase = true) ||
-                file.name.endsWith(".patch", ignoreCase = true)
+                file.name.endsWith(".patch", ignoreCase = true) ||
+                file.name.endsWith(CHUNKS_META_SUFFIX, ignoreCase = true)
             ) {
                 runCatching { file.delete() }
             }
@@ -558,6 +687,8 @@ object UpdateManager {
                 fileName = matchedPatch.patchAssetName,
                 cacheDir = cacheDir,
                 partFileNameOverride = patchPartName,
+                expectedTotalBytes = matchedPatch.patchSize,
+                preservePartialOnCancel = true,
                 onProgress = onProgress
             )
             if (patchResult.isSuccess) {
@@ -639,6 +770,8 @@ object UpdateManager {
             fileName = fullFileName,
             cacheDir = cacheDir,
             partFileNameOverride = fullPartName,
+            expectedTotalBytes = delta?.fullSize ?: -1L,
+            preservePartialOnCancel = true,
             onProgress = onProgress
         )
         return fullResult.fold(
@@ -674,6 +807,8 @@ object UpdateManager {
         fileName: String,
         cacheDir: File,
         partFileNameOverride: String? = null,
+        expectedTotalBytes: Long = -1L,
+        preservePartialOnCancel: Boolean = false,
         onProgress: (DownloadProgress) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
@@ -682,11 +817,343 @@ object UpdateManager {
         val partFile = File(updatesDir, partFileNameOverride ?: "$safeName.part")
         cleanupUpdatesDir(updatesDir, keepPartFileName = partFile.name)
 
+        var completed = false
+        var cancelled = false
+        try {
+            coroutineContext.ensureActive()
+            val probe = runCatching { probeDownloadTarget(downloadUrl, expectedTotalBytes) }.getOrNull()
+            coroutineContext.ensureActive()
+
+            if (probe != null && probe.acceptRanges && probe.totalBytes >= PARALLEL_MIN_BYTES) {
+                downloadParallelChunks(
+                    resolvedUrl = probe.resolvedUrl,
+                    totalBytes = probe.totalBytes,
+                    partFile = partFile,
+                    targetFile = targetFile,
+                    preservePartialOnCancel = preservePartialOnCancel,
+                    onProgress = onProgress
+                )
+            } else {
+                downloadSingleStream(
+                    downloadUrl = probe?.resolvedUrl ?: downloadUrl,
+                    partFile = partFile,
+                    targetFile = targetFile,
+                    expectedTotalBytes = probe?.totalBytes?.takeIf { it > 0L } ?: expectedTotalBytes,
+                    onProgress = onProgress
+                )
+            }
+            completed = true
+            Result.success(targetFile)
+        } catch (e: CancellationException) {
+            cancelled = true
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            if (!completed) {
+                val keepName = if ((!cancelled || preservePartialOnCancel) && partFile.exists() && partFile.length() > 0L) {
+                    partFile.name
+                } else {
+                    null
+                }
+                cleanupUpdatesDir(updatesDir, keepPartFileName = keepName)
+            }
+        }
+    }
+
+    private fun openRedirectFollowedProbe(
+        initialUrl: String,
+        method: String,
+        rangeHeader: String? = null
+    ): Pair<String, HttpURLConnection> {
+        var currentUrl = initialUrl
+        for (hop in 0..MAX_REDIRECTS) {
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                instanceFollowRedirects = false
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("User-Agent", "AetherVpnAndroid")
+                if (rangeHeader != null) {
+                    setRequestProperty("Range", rangeHeader)
+                }
+            }
+            val code = conn.responseCode
+            if (code == HttpURLConnection.HTTP_MOVED_PERM ||
+                code == HttpURLConnection.HTTP_MOVED_TEMP ||
+                code == HttpURLConnection.HTTP_SEE_OTHER ||
+                code == 307 ||
+                code == 308
+            ) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location.isNullOrBlank()) {
+                    throw IllegalStateException("Redirect without Location header (HTTP $code)")
+                }
+                currentUrl = URL(URL(currentUrl), location).toString()
+                continue
+            }
+            return currentUrl to conn
+        }
+        throw IllegalStateException("Too many redirects while probing update URL")
+    }
+
+    private fun probeDownloadTarget(initialUrl: String, expectedTotalBytes: Long): ProbeResult {
+        var headPair: Pair<String, HttpURLConnection>? = null
+        try {
+            headPair = openRedirectFollowedProbe(initialUrl, "HEAD")
+            val (resolvedUrl, conn) = headPair
+            val code = conn.responseCode
+            if (code in 200..299) {
+                val len = conn.contentLengthLong.takeIf { it > 0L } ?: expectedTotalBytes
+                val ranges = conn.getHeaderField("Accept-Ranges")?.contains("bytes", ignoreCase = true) == true
+                if (ranges && len > 0L) {
+                    return ProbeResult(resolvedUrl, len, true)
+                }
+                if (len < 0L || (!ranges && (len >= PARALLEL_MIN_BYTES || expectedTotalBytes >= PARALLEL_MIN_BYTES))) {
+                    conn.disconnect()
+                    headPair = null
+                    return probeWithRangeGet(resolvedUrl, expectedTotalBytes.coerceAtLeast(len))
+                }
+                return ProbeResult(resolvedUrl, len, ranges)
+            }
+        } finally {
+            headPair?.second?.disconnect()
+        }
+        return probeWithRangeGet(initialUrl, expectedTotalBytes)
+    }
+
+    private fun probeWithRangeGet(initialUrl: String, expectedTotalBytes: Long): ProbeResult {
+        val (resolvedUrl, conn) = openRedirectFollowedProbe(initialUrl, "GET", rangeHeader = "bytes=0-0")
+        return try {
+            val code = conn.responseCode
+            when (code) {
+                HttpURLConnection.HTTP_PARTIAL -> {
+                    val total = parseTotalBytesFromContentRange(conn.getHeaderField("Content-Range"))
+                        ?: expectedTotalBytes
+                    ProbeResult(resolvedUrl, total, acceptRanges = true)
+                }
+                in 200..299 -> {
+                    val len = conn.contentLengthLong.takeIf { it > 0L } ?: expectedTotalBytes
+                    val ranges = conn.getHeaderField("Accept-Ranges")?.contains("bytes", ignoreCase = true) == true
+                    ProbeResult(resolvedUrl, len, ranges)
+                }
+                else -> ProbeResult(resolvedUrl, expectedTotalBytes, acceptRanges = false)
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private suspend fun downloadParallelChunks(
+        resolvedUrl: String,
+        totalBytes: Long,
+        partFile: File,
+        targetFile: File,
+        preservePartialOnCancel: Boolean,
+        onProgress: (DownloadProgress) -> Unit
+    ) {
+        val chunksFile = chunksFileFor(partFile)
+        val chunks = loadChunkStates(chunksFile, partFile, totalBytes) ?: run {
+            // If an unchunked .part file existed from a fallback/old run, replace it cleanly.
+            RandomAccessFile(partFile, "rw").use { raf ->
+                raf.setLength(totalBytes)
+            }
+            buildInitialChunks(totalBytes, PARALLEL_CHUNK_COUNT)
+        }
+
+        val downloadedPerChunk = AtomicLongArray(PARALLEL_CHUNK_COUNT)
+        val totalDownloaded = AtomicLong(0L)
+        for (c in chunks) {
+            downloadedPerChunk.set(c.index, c.downloaded)
+            totalDownloaded.addAndGet(c.downloaded)
+        }
+
+        val metaLock = Any()
+        val progressLock = Any()
+        var lastReportedPct = -1
+        var lastReportedBytes = totalDownloaded.get()
+        var lastMetaSaveBytes = totalDownloaded.get()
+        var lastMetaSaveNs = System.nanoTime()
+        var lastSpeedSampleNs = System.nanoTime()
+        var lastSpeedSampleBytes = totalDownloaded.get()
+        var currentSpeedBps = 0L
+
+        if (totalDownloaded.get() > 0L) {
+            val initPct = ((totalDownloaded.get() * 100L) / totalBytes).toInt().coerceIn(0, 100)
+            lastReportedPct = initPct
+            onProgress(DownloadProgress(totalDownloaded.get(), totalBytes, initPct, 0L))
+        } else {
+            synchronized(metaLock) {
+                saveChunkStates(chunksFile, totalBytes, resolvedUrl, chunks, downloadedPerChunk)
+            }
+        }
+
+        val activeConnections = Collections.synchronizedSet(mutableSetOf<HttpURLConnection>())
+        var completed = false
+        var cancelled = false
+
+        val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
+            if (cause != null) {
+                activeConnections.toList().forEach { runCatching { it.disconnect() } }
+            }
+        }
+
+        try {
+            FileChannel.open(
+                partFile.toPath(),
+                StandardOpenOption.READ,
+                StandardOpenOption.WRITE
+            ).use { channel ->
+                coroutineScope {
+                    val workers = chunks.map { chunk ->
+                        async(Dispatchers.IO) {
+                            if (chunk.isComplete) return@async
+                            val startOffset = chunk.start + downloadedPerChunk.get(chunk.index)
+                            if (startOffset > chunk.end) return@async
+
+                            var conn: HttpURLConnection? = null
+                            try {
+                                conn = (URL(resolvedUrl).openConnection() as HttpURLConnection).apply {
+                                    requestMethod = "GET"
+                                    instanceFollowRedirects = true
+                                    connectTimeout = CONNECT_TIMEOUT_MS
+                                    readTimeout = 30_000
+                                    setRequestProperty("User-Agent", "AetherVpnAndroid")
+                                    setRequestProperty("Range", "bytes=$startOffset-${chunk.end}")
+                                }
+                                activeConnections.add(conn)
+
+                                coroutineContext.ensureActive()
+                                val code = conn.responseCode
+                                val validSingleChunk200 = code in 200..299 &&
+                                    startOffset == 0L &&
+                                    chunk.end == totalBytes - 1L
+                                if (code != HttpURLConnection.HTTP_PARTIAL && !validSingleChunk200) {
+                                    throw IllegalStateException("Chunk ${chunk.index} failed (HTTP $code)")
+                                }
+
+                                val buffer = ByteArray(CHUNK_BUFFER_SIZE)
+                                var chunkPos = startOffset
+                                conn.inputStream.use { input ->
+                                    while (chunkPos <= chunk.end) {
+                                        coroutineContext.ensureActive()
+                                        val read = input.read(buffer)
+                                        if (read <= 0) break
+                                        coroutineContext.ensureActive()
+
+                                        val remaining = (chunk.end - chunkPos + 1L)
+                                        val toWrite = minOf(read.toLong(), remaining).toInt()
+                                        val byteBuf = ByteBuffer.wrap(buffer, 0, toWrite)
+                                        var writePos = chunkPos
+                                        while (byteBuf.hasRemaining()) {
+                                            writePos += channel.write(byteBuf, writePos)
+                                        }
+                                        chunkPos += toWrite
+
+                                        downloadedPerChunk.addAndGet(chunk.index, toWrite.toLong())
+                                        val newTotal = totalDownloaded.addAndGet(toWrite.toLong())
+
+                                        val nowNs = System.nanoTime()
+                                        var progressToEmit: DownloadProgress? = null
+                                        var shouldSaveMeta = false
+                                        synchronized(progressLock) {
+                                            val speedElapsedNs = nowNs - lastSpeedSampleNs
+                                            if (speedElapsedNs >= 400_000_000L) {
+                                                val deltaBytes = (newTotal - lastSpeedSampleBytes).coerceAtLeast(0L)
+                                                currentSpeedBps = (deltaBytes * 1_000_000_000L) / speedElapsedNs
+                                                lastSpeedSampleNs = nowNs
+                                                lastSpeedSampleBytes = newTotal
+                                            }
+                                            val pct = ((newTotal * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                                            if (pct != lastReportedPct || newTotal - lastReportedBytes >= 131_072L) {
+                                                lastReportedPct = pct
+                                                lastReportedBytes = newTotal
+                                                progressToEmit = DownloadProgress(
+                                                    downloadedBytes = newTotal,
+                                                    totalBytes = totalBytes,
+                                                    percent = pct,
+                                                    speedBytesPerSec = currentSpeedBps
+                                                )
+                                            }
+                                            if (newTotal - lastMetaSaveBytes >= 262_144L || nowNs - lastMetaSaveNs >= 500_000_000L) {
+                                                lastMetaSaveBytes = newTotal
+                                                lastMetaSaveNs = nowNs
+                                                shouldSaveMeta = true
+                                            }
+                                        }
+                                        if (shouldSaveMeta) {
+                                            synchronized(metaLock) {
+                                                saveChunkStates(chunksFile, totalBytes, resolvedUrl, chunks, downloadedPerChunk)
+                                            }
+                                        }
+                                        progressToEmit?.let { onProgress(it) }
+                                    }
+                                }
+                                if (chunkPos <= chunk.end) {
+                                    throw IllegalStateException(
+                                        "Chunk ${chunk.index} ended early at $chunkPos/${chunk.end}"
+                                    )
+                                }
+                            } finally {
+                                if (conn != null) {
+                                    activeConnections.remove(conn)
+                                    runCatching { conn.disconnect() }
+                                }
+                            }
+                        }
+                    }
+                    workers.awaitAll()
+                }
+                channel.force(false)
+            }
+
+            coroutineContext.ensureActive()
+            val finalTotal = totalDownloaded.get()
+            if (finalTotal != totalBytes) {
+                throw IllegalStateException("Incomplete parallel download: $finalTotal/$totalBytes bytes")
+            }
+
+            if (targetFile.exists()) {
+                targetFile.delete()
+            }
+            if (!partFile.renameTo(targetFile)) {
+                partFile.copyTo(targetFile, overwrite = true)
+                partFile.delete()
+            }
+            runCatching { chunksFile.delete() }
+            completed = true
+            onProgress(DownloadProgress(totalBytes, totalBytes, 100, currentSpeedBps))
+        } catch (e: CancellationException) {
+            cancelled = true
+            throw e
+        } finally {
+            cancelHandle?.dispose()
+            activeConnections.toList().forEach { runCatching { it.disconnect() } }
+            if (!completed && (!cancelled || preservePartialOnCancel)) {
+                synchronized(metaLock) {
+                    saveChunkStates(chunksFile, totalBytes, resolvedUrl, chunks, downloadedPerChunk)
+                }
+            }
+        }
+    }
+
+    private suspend fun downloadSingleStream(
+        downloadUrl: String,
+        partFile: File,
+        targetFile: File,
+        expectedTotalBytes: Long,
+        onProgress: (DownloadProgress) -> Unit
+    ) {
+        // If a stale .chunks.json exists for a single-stream fallback, remove it
+        val chunksFile = chunksFileFor(partFile)
+        if (chunksFile.exists()) {
+            runCatching { chunksFile.delete() }
+        }
+
         val existingBytes = if (partFile.exists() && partFile.isFile) partFile.length() else 0L
         var conn: HttpURLConnection? = null
         var cancelHandle: kotlinx.coroutines.DisposableHandle? = null
-        var completed = false
-        var cancelled = false
         try {
             conn = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -709,14 +1176,12 @@ object UpdateManager {
             val code = conn.responseCode
             val isPartial = code == HttpURLConnection.HTTP_PARTIAL
             if (!isPartial && code !in 200..299) {
-                return@withContext Result.failure(
-                    IllegalStateException("Download failed (HTTP $code)")
-                )
+                throw IllegalStateException("Download failed (HTTP $code)")
             }
 
             val appendMode = isPartial && existingBytes > 0L
             val contentLength = conn.contentLengthLong
-            val totalBytes = if (appendMode) {
+            val totalBytes = expectedTotalBytes.takeIf { it > 0L } ?: if (appendMode) {
                 parseTotalBytesFromContentRange(conn.getHeaderField("Content-Range"))
                     ?: if (contentLength > 0L) existingBytes + contentLength else -1L
             } else {
@@ -725,16 +1190,19 @@ object UpdateManager {
             var downloadedBytes = if (appendMode) existingBytes else 0L
             var lastReportedPct = -1
             var lastReportedBytes = downloadedBytes
+            var lastSpeedSampleNs = System.nanoTime()
+            var lastSpeedSampleBytes = downloadedBytes
+            var currentSpeedBps = 0L
 
             if (appendMode && totalBytes > 0L) {
                 val initPct = ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
                 lastReportedPct = initPct
-                onProgress(DownloadProgress(downloadedBytes, totalBytes, initPct))
+                onProgress(DownloadProgress(downloadedBytes, totalBytes, initPct, 0L))
             }
 
             conn.inputStream.use { input ->
                 FileOutputStream(partFile, appendMode).use { output ->
-                    val buffer = ByteArray(16 * 1024)
+                    val buffer = ByteArray(CHUNK_BUFFER_SIZE)
                     while (true) {
                         coroutineContext.ensureActive()
                         val read = input.read(buffer)
@@ -742,6 +1210,14 @@ object UpdateManager {
                         coroutineContext.ensureActive()
                         output.write(buffer, 0, read)
                         downloadedBytes += read
+                        val nowNs = System.nanoTime()
+                        val speedElapsedNs = nowNs - lastSpeedSampleNs
+                        if (speedElapsedNs >= 400_000_000L) {
+                            val deltaBytes = (downloadedBytes - lastSpeedSampleBytes).coerceAtLeast(0L)
+                            currentSpeedBps = (deltaBytes * 1_000_000_000L) / speedElapsedNs
+                            lastSpeedSampleNs = nowNs
+                            lastSpeedSampleBytes = downloadedBytes
+                        }
                         val pct = if (totalBytes > 0L) {
                             ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
                         } else {
@@ -750,7 +1226,7 @@ object UpdateManager {
                         if (pct != lastReportedPct || downloadedBytes - lastReportedBytes >= 131_072L) {
                             lastReportedPct = pct
                             lastReportedBytes = downloadedBytes
-                            onProgress(DownloadProgress(downloadedBytes, totalBytes, pct))
+                            onProgress(DownloadProgress(downloadedBytes, totalBytes, pct, currentSpeedBps))
                         }
                     }
                     output.flush()
@@ -764,25 +1240,10 @@ object UpdateManager {
                 partFile.copyTo(targetFile, overwrite = true)
                 partFile.delete()
             }
-            completed = true
-            onProgress(DownloadProgress(downloadedBytes, totalBytes.coerceAtLeast(downloadedBytes), 100))
-            Result.success(targetFile)
-        } catch (e: CancellationException) {
-            cancelled = true
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
+            onProgress(DownloadProgress(downloadedBytes, totalBytes.coerceAtLeast(downloadedBytes), 100, currentSpeedBps))
         } finally {
             cancelHandle?.dispose()
             runCatching { conn?.disconnect() }
-            if (!completed) {
-                val keepName = if (!cancelled && partFile.exists() && partFile.length() > 0L) {
-                    partFile.name
-                } else {
-                    null
-                }
-                cleanupUpdatesDir(updatesDir, keepPartFileName = keepName)
-            }
         }
     }
 
