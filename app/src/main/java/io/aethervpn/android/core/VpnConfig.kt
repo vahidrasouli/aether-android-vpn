@@ -194,6 +194,19 @@ enum class EngineLabPreset(val label: String) {
     CUSTOM("Custom")
 }
 
+enum class SingBoxTuningPreset(val label: String) {
+    ECO("Eco (Battery)"),
+    BALANCED("Balanced (Default)"),
+    TURBO("Turbo (Speed)"),
+    CUSTOM("Custom")
+}
+
+enum class SingBoxBlockQuicMode(val label: String) {
+    AUTO_TCP_OUTBOUNDS("Auto (TCP Outbounds)"),
+    ALWAYS("Always"),
+    OFF("Off")
+}
+
 /**
  * Complete configuration model mapped 1:1 to verified CluvexStudio/Aether v2.4.0 capabilities.
  * Local SOCKS5 endpoint is permanently locked to loopback (127.0.0.1).
@@ -250,7 +263,21 @@ data class VpnConfig(
     // Sing-box integration (Phase 1 & Phase 2 multi-hop chaining)
     val singBoxEnabled: Boolean = false,
     val singBoxOnly: Boolean = false,
-    val chainMode: ChainMode = ChainMode.SINGBOX_ONLY
+    val chainMode: ChainMode = ChainMode.SINGBOX_ONLY,
+    // Dedicated Sing-box Engine & Tuning Lab config (independent of Psiphon Go limits)
+    val sbGoMemLimit: String = "48MiB",
+    val sbGoMaxProcs: String = "2",
+    val sbGoGc: String = "50",
+    val sbRemoteDns: String = "https://1.1.1.1/dns-query",
+    val sbDirectDns: String = "1.1.1.1",
+    val sbDnsStrategy: String = "prefer_ipv4",
+    val sbSniffEnabled: Boolean = true,
+    val sbBlockQuic: SingBoxBlockQuicMode = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
+    val sbBypassPrivateIp: Boolean = true,
+    val sbBypassIrDomains: Boolean = false,
+    val sbConnectTimeoutSec: Int = 10,
+    val sbTcpFastOpen: Boolean = false,
+    val sbLogLevel: String = "warn"
 ) {
     val isSingBoxOnlyActive: Boolean
         get() = singBoxEnabled && chainMode == ChainMode.SINGBOX_ONLY
@@ -363,6 +390,101 @@ data class VpnConfig(
         mapDnsEnabled = true
     )
 
+    fun detectSingBoxTuningPreset(): SingBoxTuningPreset {
+        val baseRoutingAndDnsDefaults =
+            sbRemoteDns == "https://1.1.1.1/dns-query" &&
+                sbDirectDns == "1.1.1.1" &&
+                sbSniffEnabled &&
+                sbBypassPrivateIp &&
+                !sbBypassIrDomains
+        if (!baseRoutingAndDnsDefaults) return SingBoxTuningPreset.CUSTOM
+
+        return when {
+            sbGoMemLimit == "32MiB" &&
+                sbGoMaxProcs == "1" &&
+                sbGoGc == "25" &&
+                sbLogLevel == "error" &&
+                sbBlockQuic == SingBoxBlockQuicMode.ALWAYS &&
+                sbDnsStrategy == "ipv4_only" &&
+                sbConnectTimeoutSec == 10 &&
+                !sbTcpFastOpen -> SingBoxTuningPreset.ECO
+
+            sbGoMemLimit == "48MiB" &&
+                sbGoMaxProcs == "2" &&
+                sbGoGc == "50" &&
+                sbLogLevel == "warn" &&
+                sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
+                sbDnsStrategy == "prefer_ipv4" &&
+                sbConnectTimeoutSec == 10 &&
+                !sbTcpFastOpen -> SingBoxTuningPreset.BALANCED
+
+            sbGoMemLimit == "64MiB" &&
+                sbGoMaxProcs == "4" &&
+                sbGoGc == "100" &&
+                sbLogLevel == "warn" &&
+                sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
+                sbDnsStrategy == "prefer_ipv4" &&
+                sbConnectTimeoutSec == 5 &&
+                sbTcpFastOpen -> SingBoxTuningPreset.TURBO
+
+            else -> SingBoxTuningPreset.CUSTOM
+        }
+    }
+
+    fun applySingBoxTuningPreset(preset: SingBoxTuningPreset): VpnConfig = when (preset) {
+        SingBoxTuningPreset.ECO -> copy(
+            sbGoMemLimit = "32MiB",
+            sbGoMaxProcs = "1",
+            sbGoGc = "25",
+            sbRemoteDns = "https://1.1.1.1/dns-query",
+            sbDirectDns = "1.1.1.1",
+            sbDnsStrategy = "ipv4_only",
+            sbSniffEnabled = true,
+            sbBlockQuic = SingBoxBlockQuicMode.ALWAYS,
+            sbBypassPrivateIp = true,
+            sbBypassIrDomains = false,
+            sbConnectTimeoutSec = 10,
+            sbTcpFastOpen = false,
+            sbLogLevel = "error"
+        )
+
+        SingBoxTuningPreset.BALANCED -> copy(
+            sbGoMemLimit = "48MiB",
+            sbGoMaxProcs = "2",
+            sbGoGc = "50",
+            sbRemoteDns = "https://1.1.1.1/dns-query",
+            sbDirectDns = "1.1.1.1",
+            sbDnsStrategy = "prefer_ipv4",
+            sbSniffEnabled = true,
+            sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
+            sbBypassPrivateIp = true,
+            sbBypassIrDomains = false,
+            sbConnectTimeoutSec = 10,
+            sbTcpFastOpen = false,
+            sbLogLevel = "warn"
+        )
+
+        SingBoxTuningPreset.TURBO -> copy(
+            sbGoMemLimit = "64MiB",
+            sbGoMaxProcs = "4",
+            sbGoGc = "100",
+            sbRemoteDns = "https://1.1.1.1/dns-query",
+            sbDirectDns = "1.1.1.1",
+            sbDnsStrategy = "prefer_ipv4",
+            sbSniffEnabled = true,
+            sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
+            sbBypassPrivateIp = true,
+            sbBypassIrDomains = false,
+            sbConnectTimeoutSec = 5,
+            sbTcpFastOpen = true,
+            sbLogLevel = "warn"
+        )
+
+        SingBoxTuningPreset.CUSTOM -> this
+    }
+
+    fun resetSingBoxTuningDefaults(): VpnConfig = applySingBoxTuningPreset(SingBoxTuningPreset.BALANCED)
+
     val hasExitLocationPolicy: Boolean
         get() = exitLocation.isNotBlank() &&
             !exitLocation.equals("any", ignoreCase = true) &&
@@ -464,6 +586,19 @@ data class VpnConfig(
             put("singBoxEnabled", singBoxEnabled)
             put("singBoxOnly", chainMode == ChainMode.SINGBOX_ONLY)
             put("chainMode", chainMode.name)
+            put("sbGoMemLimit", sbGoMemLimit)
+            put("sbGoMaxProcs", sbGoMaxProcs)
+            put("sbGoGc", sbGoGc)
+            put("sbRemoteDns", sbRemoteDns)
+            put("sbDirectDns", sbDirectDns)
+            put("sbDnsStrategy", sbDnsStrategy)
+            put("sbSniffEnabled", sbSniffEnabled)
+            put("sbBlockQuic", sbBlockQuic.name)
+            put("sbBypassPrivateIp", sbBypassPrivateIp)
+            put("sbBypassIrDomains", sbBypassIrDomains)
+            put("sbConnectTimeoutSec", sbConnectTimeoutSec)
+            put("sbTcpFastOpen", sbTcpFastOpen)
+            put("sbLogLevel", sbLogLevel)
         }.toString(2)
     }
 
@@ -598,7 +733,20 @@ data class VpnConfig(
                 mapDnsEnabled = o.optBoolean("mapDnsEnabled", true),
                 singBoxEnabled = o.optBoolean("singBoxEnabled", false),
                 singBoxOnly = o.optBoolean("singBoxOnly", false),
-                chainMode = enumOrDefault(o.optString("chainMode"), ChainMode.SINGBOX_ONLY)
+                chainMode = enumOrDefault(o.optString("chainMode"), ChainMode.SINGBOX_ONLY),
+                sbGoMemLimit = o.optString("sbGoMemLimit", "48MiB").ifBlank { "48MiB" },
+                sbGoMaxProcs = o.optString("sbGoMaxProcs", "2").ifBlank { "2" },
+                sbGoGc = o.optString("sbGoGc", "50").ifBlank { "50" },
+                sbRemoteDns = o.optString("sbRemoteDns", "https://1.1.1.1/dns-query").ifBlank { "https://1.1.1.1/dns-query" },
+                sbDirectDns = o.optString("sbDirectDns", "1.1.1.1").ifBlank { "1.1.1.1" },
+                sbDnsStrategy = o.optString("sbDnsStrategy", "prefer_ipv4").ifBlank { "prefer_ipv4" },
+                sbSniffEnabled = o.optBoolean("sbSniffEnabled", true),
+                sbBlockQuic = enumOrDefault(o.optString("sbBlockQuic"), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
+                sbBypassPrivateIp = o.optBoolean("sbBypassPrivateIp", true),
+                sbBypassIrDomains = o.optBoolean("sbBypassIrDomains", false),
+                sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
+                sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
+                sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" }
             )
         }
 
@@ -653,7 +801,20 @@ data class VpnConfig(
                 mapDnsEnabled = p.getBoolean("map_dns_enabled", true),
                 singBoxEnabled = p.getBoolean("sing_box_enabled", false),
                 singBoxOnly = p.getBoolean("sing_box_only", false),
-                chainMode = enumOrDefault(p.getString("chain_mode", null), ChainMode.SINGBOX_ONLY)
+                chainMode = enumOrDefault(p.getString("chain_mode", null), ChainMode.SINGBOX_ONLY),
+                sbGoMemLimit = p.getString("sb_go_mem_limit", "48MiB").orEmpty().ifBlank { "48MiB" },
+                sbGoMaxProcs = p.getString("sb_go_max_procs", "2").orEmpty().ifBlank { "2" },
+                sbGoGc = p.getString("sb_go_gc", "50").orEmpty().ifBlank { "50" },
+                sbRemoteDns = p.getString("sb_remote_dns", "https://1.1.1.1/dns-query").orEmpty().ifBlank { "https://1.1.1.1/dns-query" },
+                sbDirectDns = p.getString("sb_direct_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
+                sbDnsStrategy = p.getString("sb_dns_strategy", "prefer_ipv4").orEmpty().ifBlank { "prefer_ipv4" },
+                sbSniffEnabled = p.getBoolean("sb_sniff_enabled", true),
+                sbBlockQuic = enumOrDefault(p.getString("sb_block_quic", null), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
+                sbBypassPrivateIp = p.getBoolean("sb_bypass_private_ip", true),
+                sbBypassIrDomains = p.getBoolean("sb_bypass_ir_domains", false),
+                sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
+                sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
+                sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" }
             )
         }
 
@@ -709,6 +870,19 @@ data class VpnConfig(
                 .putBoolean("sing_box_enabled", config.singBoxEnabled)
                 .putBoolean("sing_box_only", config.chainMode == ChainMode.SINGBOX_ONLY)
                 .putString("chain_mode", config.chainMode.name)
+                .putString("sb_go_mem_limit", config.sbGoMemLimit)
+                .putString("sb_go_max_procs", config.sbGoMaxProcs)
+                .putString("sb_go_gc", config.sbGoGc)
+                .putString("sb_remote_dns", config.sbRemoteDns)
+                .putString("sb_direct_dns", config.sbDirectDns)
+                .putString("sb_dns_strategy", config.sbDnsStrategy)
+                .putBoolean("sb_sniff_enabled", config.sbSniffEnabled)
+                .putString("sb_block_quic", config.sbBlockQuic.name)
+                .putBoolean("sb_bypass_private_ip", config.sbBypassPrivateIp)
+                .putBoolean("sb_bypass_ir_domains", config.sbBypassIrDomains)
+                .putInt("sb_connect_timeout_sec", config.sbConnectTimeoutSec)
+                .putBoolean("sb_tcp_fast_open", config.sbTcpFastOpen)
+                .putString("sb_log_level", config.sbLogLevel)
                 .apply()
         }
 

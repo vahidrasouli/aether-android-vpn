@@ -51,6 +51,12 @@
             android:label="@string/title_singbox_profiles"
             android:parentActivityName=".ui.MainActivity" />
 
+        <activity
+            android:name=".ui.SingBoxTuningActivity"
+            android:exported="false"
+            android:label="@string/title_singbox_tuning"
+            android:parentActivityName=".ui.SingBoxProfilesActivity" />
+
         <service
             android:name=".vpn.AetherVpnService"
             android:exported="false"

@@ -71,6 +71,9 @@
     <string name="action_reconnect">Reconnect</string>
 
     <string name="title_singbox_profiles">Sing-box Profiles</string>
+    <string name="title_singbox_tuning">Sing-box Engine Lab</string>
+    <string name="singbox_tuning_entry_title">Sing-box Engine &amp; Tuning Lab</string>
+    <string name="singbox_tuning_entry_subtitle">Tune Go memory, DNS 1.12, QUIC blocking &amp; dialer</string>
     <string name="singbox_entry_title">Sing-box Core</string>
     <string name="singbox_entry_subtitle">Manage VLESS, VMess, Trojan, SS, HY2, WireGuard &amp; JSON profiles</string>
     <string name="action_add_profile">Add Profile</string>

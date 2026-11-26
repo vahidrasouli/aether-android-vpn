@@ -54,7 +54,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         val runtimeJsonResult = SingBoxConfigParser.buildRuntimeConfig(
             rawUriOrJson = rawUriOrJson,
             listenPort = listenPort,
-            upstreamSocksPort = upstreamSocksPort
+            upstreamSocksPort = upstreamSocksPort,
+            config = config
         )
         if (runtimeJsonResult.isFailure) {
             return Result.failure(
@@ -73,7 +74,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         val envMap = resolveGoEnvironment(config)
         DiagnosticsLog.record(
             "SingBox",
-            "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "auto"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "50"}]"
+            "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "auto"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "50"}, log=${config.sbLogLevel}, dns=${config.sbRemoteDns}, tfo=${config.sbTcpFastOpen}]"
         )
 
         val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
@@ -167,16 +168,16 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
         internal fun resolveGoEnvironment(config: VpnConfig): Map<String, String?> {
             val env = linkedMapOf<String, String?>()
-            env["GOMEMLIMIT"] = if (config.goMemLimit.equals("Auto", ignoreCase = true) || config.goMemLimit.isBlank()) {
+            env["GOMEMLIMIT"] = if (config.sbGoMemLimit.equals("Auto", ignoreCase = true) || config.sbGoMemLimit.isBlank()) {
                 null
             } else {
-                config.goMemLimit
+                config.sbGoMemLimit
             }
-            env["GOGC"] = config.goGc.ifBlank { "50" }
-            env["GOMAXPROCS"] = if (config.goMaxProcs.equals("Auto", ignoreCase = true) || config.goMaxProcs.isBlank()) {
+            env["GOGC"] = config.sbGoGc.ifBlank { "50" }
+            env["GOMAXPROCS"] = if (config.sbGoMaxProcs.equals("Auto", ignoreCase = true) || config.sbGoMaxProcs.isBlank()) {
                 null
             } else {
-                config.goMaxProcs
+                config.sbGoMaxProcs
             }
             return env
         }
@@ -231,7 +232,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
             val runtimeJsonResult = SingBoxConfigParser.buildRuntimeConfig(
                 rawUriOrJson = rawUriOrJson,
-                listenPort = ephemeralPort
+                listenPort = ephemeralPort,
+                config = config
             )
             if (runtimeJsonResult.isFailure) {
                 return Result.failure(

@@ -1,6 +1,7 @@
 package io.aethervpn.android.ui
 
 import android.content.ClipboardManager
+import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -51,6 +52,17 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.toolbarSingBox.setNavigationOnClickListener { finish() }
+        binding.toolbarSingBox.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.action_singbox_tuning) {
+                startActivity(Intent(this, SingBoxTuningActivity::class.java))
+                true
+            } else {
+                false
+            }
+        }
+        binding.layoutOpenSingBoxLab.setOnClickListener {
+            startActivity(Intent(this, SingBoxTuningActivity::class.java))
+        }
 
         binding.rvSingBoxProfiles.layoutManager = LinearLayoutManager(this)
         binding.rvSingBoxProfiles.adapter = adapter

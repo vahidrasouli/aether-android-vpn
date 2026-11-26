@@ -73,12 +73,13 @@ object SingBoxConfigParser {
     fun buildRuntimeConfig(
         rawUriOrJson: String,
         listenPort: Int = VpnConfig.SING_BOX_SOCKS_PORT,
-        upstreamSocksPort: Int? = null
+        upstreamSocksPort: Int? = null,
+        config: VpnConfig = VpnConfig()
     ): Result<String> = runCatching {
         val parsed = parse(rawUriOrJson).getOrThrow()
         val root = if (parsed.isFullConfig) {
             JSONObject(parsed.outboundOrFullJson.toString()).apply {
-                put("log", buildLogObject())
+                put("log", buildLogObject(config))
                 val existingInbounds = optJSONArray("inbounds")
                 val newInbounds = JSONArray()
                 newInbounds.put(buildMixedInbound(listenPort))
@@ -126,31 +127,34 @@ object SingBoxConfigParser {
         } else {
             val outbound = JSONObject(parsed.outboundOrFullJson.toString()).apply {
                 put("tag", "proxy")
-                put("connect_timeout", "10s")
+                put("connect_timeout", "${config.sbConnectTimeoutSec.coerceIn(3, 60)}s")
+                if (config.sbTcpFastOpen) {
+                    put("tcp_fast_open", true)
+                }
                 if (upstreamSocksPort != null) {
                     put("detour", UPSTREAM_SOCKS_TAG)
                 }
             }
             val isTcpOutbound = outbound.optString("type").lowercase() in TCP_BASED_OUTBOUND_TYPES
+            val shouldBlockQuic = when (config.sbBlockQuic) {
+                SingBoxBlockQuicMode.ALWAYS -> true
+                SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS -> isTcpOutbound
+                SingBoxBlockQuicMode.OFF -> false
+            }
             JSONObject().apply {
-                put("log", buildLogObject())
+                put("log", buildLogObject(config))
                 put("dns", JSONObject().apply {
                     put("servers", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("tag", "dns-remote")
-                            put("type", "https")
-                            put("server", "1.1.1.1")
-                            put("detour", "proxy")
-                        })
+                        put(buildRemoteDnsServer(config.sbRemoteDns))
                         put(JSONObject().apply {
                             put("tag", "dns-local")
                             put("type", "udp")
-                            put("server", "1.1.1.1")
+                            put("server", config.sbDirectDns.ifBlank { "1.1.1.1" })
                             put("detour", "direct")
                         })
                     })
                     put("final", "dns-remote")
-                    put("strategy", "ipv4_only")
+                    put("strategy", config.sbDnsStrategy.ifBlank { "prefer_ipv4" })
                 })
                 put("inbounds", JSONArray().apply {
                     put(buildMixedInbound(listenPort))
@@ -167,18 +171,28 @@ object SingBoxConfigParser {
                 })
                 put("route", JSONObject().apply {
                     put("rules", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("action", "sniff")
-                        })
+                        if (config.sbSniffEnabled) {
+                            put(JSONObject().apply {
+                                put("action", "sniff")
+                            })
+                        }
                         put(JSONObject().apply {
                             put("protocol", "dns")
                             put("action", "hijack-dns")
                         })
-                        put(JSONObject().apply {
-                            put("ip_is_private", true)
-                            put("outbound", "direct")
-                        })
-                        if (isTcpOutbound) {
+                        if (config.sbBypassPrivateIp) {
+                            put(JSONObject().apply {
+                                put("ip_is_private", true)
+                                put("outbound", "direct")
+                            })
+                        }
+                        if (config.sbBypassIrDomains) {
+                            put(JSONObject().apply {
+                                put("domain_suffix", JSONArray().apply { put(".ir") })
+                                put("outbound", "direct")
+                            })
+                        }
+                        if (shouldBlockQuic) {
                             put(JSONObject().apply {
                                 put("protocol", "quic")
                                 put("action", "reject")
@@ -198,10 +212,35 @@ object SingBoxConfigParser {
     private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
     private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
 
-    private fun buildLogObject(): JSONObject = JSONObject().apply {
+    private fun buildLogObject(config: VpnConfig): JSONObject = JSONObject().apply {
         put("disabled", false)
-        put("level", "warn")
+        put("level", config.sbLogLevel.ifBlank { "warn" })
         put("timestamp", false)
+    }
+
+    private fun buildRemoteDnsServer(rawRemoteDns: String): JSONObject {
+        val trimmed = rawRemoteDns.trim().ifBlank { "https://1.1.1.1/dns-query" }
+        return if (trimmed.startsWith("https://", ignoreCase = true)) {
+            val parsedUri = runCatching { URI(trimmed) }.getOrNull()
+            val host = parsedUri?.host?.takeIf { it.isNotBlank() } ?: "1.1.1.1"
+            val path = parsedUri?.rawPath?.takeIf { it.isNotBlank() && it != "/dns-query" }
+            JSONObject().apply {
+                put("tag", "dns-remote")
+                put("type", "https")
+                put("server", host)
+                if (path != null) {
+                    put("path", path)
+                }
+                put("detour", "proxy")
+            }
+        } else {
+            JSONObject().apply {
+                put("tag", "dns-remote")
+                put("type", "udp")
+                put("server", trimmed)
+                put("detour", "proxy")
+            }
+        }
     }
 
     private fun buildUpstreamSocksOutbound(upstreamSocksPort: Int): JSONObject = JSONObject().apply {
