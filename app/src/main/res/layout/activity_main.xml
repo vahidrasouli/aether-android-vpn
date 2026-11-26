@@ -843,6 +843,27 @@
                                 android:textSize="12sp"
                                 android:visibility="gone" />
                         </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginTop="12dp"
+                            android:layout_marginBottom="4dp"
+                            android:background="@color/divider_line" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchSbTlsFragment"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/sb_tls_fragment_title"
+                            android:textColor="@color/text_primary" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/sb_tls_fragment_subtitle"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11.5sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

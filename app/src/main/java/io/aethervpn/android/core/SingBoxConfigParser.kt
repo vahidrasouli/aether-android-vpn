@@ -213,6 +213,9 @@ object SingBoxConfigParser {
                             ob.put("detour", UPSTREAM_SOCKS_TAG)
                             detourApplied = true
                         }
+                        if (config.sbTlsFragment && !isSystemType) {
+                            applyTlsFragmentIfEnabled(ob)
+                        }
                         newOutbounds.put(ob)
                     }
                     if (!detourApplied) {
@@ -226,6 +229,16 @@ object SingBoxConfigParser {
                     }
                     newOutbounds.put(buildUpstreamSocksOutbound(upstreamSocksPort))
                     put("outbounds", newOutbounds)
+                } else if (config.sbTlsFragment) {
+                    val existingOutbounds = optJSONArray("outbounds")
+                    if (existingOutbounds != null) {
+                        for (i in 0 until existingOutbounds.length()) {
+                            val ob = existingOutbounds.optJSONObject(i) ?: continue
+                            if (ob.optString("type") !in SYSTEM_OUTBOUND_TYPES) {
+                                applyTlsFragmentIfEnabled(ob)
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -247,6 +260,9 @@ object SingBoxConfigParser {
                         put("protocol", "h2mux")
                         put("max_connections", 4)
                     })
+                }
+                if (config.sbTlsFragment) {
+                    applyTlsFragmentIfEnabled(this)
                 }
             }
             val isTcpOutbound = outbound.optString("type").lowercase() in TCP_BASED_OUTBOUND_TYPES
@@ -448,6 +464,11 @@ object SingBoxConfigParser {
             } else {
                 "none"
             }
+            val fragStr = if (tlsObj?.optBoolean("enabled", false) == true && tlsObj.optBoolean("fragment", false)) {
+                "on"
+            } else {
+                "off"
+            }
             val utlsStr = tlsObj?.optJSONObject("utls")
                 ?.takeIf { it.optBoolean("enabled", false) }
                 ?.optString("fingerprint")
@@ -466,6 +487,7 @@ object SingBoxConfigParser {
                 append("Outbound shape: proto=").append(proto)
                 append(", transport=").append(transportStr)
                 append(", tls=").append(tlsStr)
+                append(", frag=").append(fragStr)
                 append(", utls=").append(utlsStr)
                 append(", alpn=[").append(alpnStr).append(']')
                 if (flow != null) append(", flow=").append(flow)
@@ -1075,6 +1097,13 @@ object SingBoxConfigParser {
             else -> clean
         }
         return String(Base64.getDecoder().decode(padded), Charsets.UTF_8)
+    }
+
+    private fun applyTlsFragmentIfEnabled(outbound: JSONObject) {
+        val tls = outbound.optJSONObject("tls") ?: return
+        if (!tls.optBoolean("enabled", false)) return
+        tls.put("fragment", true)
+        tls.put("fragment_fallback_delay", "500ms")
     }
 
     private fun isTruthy(value: String?): Boolean {

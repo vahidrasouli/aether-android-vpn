@@ -381,6 +381,7 @@ class MainActivity : AppCompatActivity() {
             binding.switchQuickReconnect,
             binding.switchBypassIran,
             binding.switchTlsFragment,
+            binding.switchSbTlsFragment,
             binding.switchEch,
             binding.switchTlsVerify,
             binding.switchUpstreamProxy
@@ -564,6 +565,7 @@ class MainActivity : AppCompatActivity() {
             scanMode = ScanMode.entries[binding.spinnerScanMode.selectedItemPosition],
             noizeProfile = NoizeProfile.entries[binding.spinnerNoize.selectedItemPosition],
             tlsFragmentation = binding.switchTlsFragment.isChecked,
+            sbTlsFragment = binding.switchSbTlsFragment.isChecked,
             masqueSni = binding.etMasqueSni.text.toString().trim(),
             echEnabled = binding.switchEch.isChecked,
             tlsVerify = binding.switchTlsVerify.isChecked,
@@ -636,6 +638,7 @@ class MainActivity : AppCompatActivity() {
         try {
             updateHomeBadges(cfg)
             binding.switchSingBoxEnabled.isChecked = cfg.singBoxEnabled
+            binding.switchSbTlsFragment.isChecked = cfg.sbTlsFragment
             binding.spinnerChainMode.setSelection(cfg.chainMode.ordinal, false)
             refreshSingBoxSummary(cfg)
             binding.tvEngineLabSummary.text =

@@ -279,6 +279,7 @@ data class VpnConfig(
     val sbMultiplexEnabled: Boolean = false,
     val sbConnectTimeoutSec: Int = 10,
     val sbTcpFastOpen: Boolean = false,
+    val sbTlsFragment: Boolean = false,
     val sbLogLevel: String = "warn"
 ) {
     val isSingBoxOnlyActive: Boolean
@@ -622,6 +623,7 @@ data class VpnConfig(
             put("sbMultiplexEnabled", sbMultiplexEnabled)
             put("sbConnectTimeoutSec", sbConnectTimeoutSec)
             put("sbTcpFastOpen", sbTcpFastOpen)
+            put("sbTlsFragment", sbTlsFragment)
             put("sbLogLevel", sbLogLevel)
         }.toString(2)
     }
@@ -776,6 +778,7 @@ data class VpnConfig(
                 sbMultiplexEnabled = o.optBoolean("sbMultiplexEnabled", false),
                 sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
+                sbTlsFragment = o.optBoolean("sbTlsFragment", false),
                 sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" }
             )
         }
@@ -846,6 +849,7 @@ data class VpnConfig(
                 sbMultiplexEnabled = p.getBoolean("sb_multiplex_enabled", false),
                 sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
+                sbTlsFragment = p.getBoolean("sb_tls_fragment", false),
                 sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" }
             )
         }
@@ -916,6 +920,7 @@ data class VpnConfig(
                 .putBoolean("sb_multiplex_enabled", config.sbMultiplexEnabled)
                 .putInt("sb_connect_timeout_sec", config.sbConnectTimeoutSec)
                 .putBoolean("sb_tcp_fast_open", config.sbTcpFastOpen)
+                .putBoolean("sb_tls_fragment", config.sbTlsFragment)
                 .putString("sb_log_level", config.sbLogLevel)
                 .apply()
         }

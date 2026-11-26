@@ -85,6 +85,8 @@
     <string name="singbox_tuning_entry_subtitle">Tune Go memory, DNS 1.12, QUIC blocking &amp; dialer</string>
     <string name="singbox_entry_title">Sing-box Core</string>
     <string name="singbox_entry_subtitle">Manage VLESS, VMess, Trojan, SS, HY2, WireGuard &amp; JSON profiles</string>
+    <string name="sb_tls_fragment_title">TLS Fragment (DPI Bypass)</string>
+    <string name="sb_tls_fragment_subtitle">Split TLS ClientHello packets to bypass ISP throttling on VLESS/Trojan TLS configs</string>
     <string name="action_add_profile">Add Profile</string>
     <string name="action_paste_clipboard">Paste</string>
     <string name="action_import_sub">Import Sub</string>

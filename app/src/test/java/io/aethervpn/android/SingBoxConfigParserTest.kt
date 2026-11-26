@@ -691,4 +691,42 @@ class SingBoxConfigParserTest {
         assertEquals("***", parsedFull.getString("private_key"))
         assertEquals("***", parsedFull.getString("password"))
     }
+
+    @Test
+    fun emitsTlsFragmentOnTlsOutboundsWhenEnabledAndOmitsWhenDisabledOrNonTls() {
+        val vlessTlsUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls&sni=example.com#VlessTls"
+        val trojanUri = "trojan://secretPass@trojan.example.com:443?sni=trojan.example.com#TrojanTls"
+        val ssUser = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("aes-256-gcm:myPass123".toByteArray(Charsets.UTF_8))
+        val ssUri = "ss://$ssUser@198.51.100.20:8388#SS"
+
+        // Enabled on TLS outbounds -> emits fragment: true and fragment_fallback_delay: "500ms", frag=on
+        val enabledCfg = VpnConfig(sbTlsFragment = true)
+        for (uri in listOf(vlessTlsUri, trojanUri)) {
+            val runtimeJson = SingBoxConfigParser.buildRuntimeConfig(uri, config = enabledCfg).getOrThrow()
+            val proxyOutbound = JSONObject(runtimeJson).getJSONArray("outbounds").getJSONObject(0)
+            val tls = proxyOutbound.getJSONObject("tls")
+            assertTrue(tls.getBoolean("enabled"))
+            assertTrue(tls.getBoolean("fragment"))
+            assertEquals("500ms", tls.getString("fragment_fallback_delay"))
+
+            val summary = SingBoxConfigParser.summarizeRuntimeConfig(runtimeJson)
+            assertTrue("Expected frag=on in summary: $summary", summary.contains("frag=on"))
+        }
+
+        // Disabled on TLS outbound -> omits fragment fields, frag=off
+        val disabledCfg = VpnConfig(sbTlsFragment = false)
+        val disabledJson = SingBoxConfigParser.buildRuntimeConfig(vlessTlsUri, config = disabledCfg).getOrThrow()
+        val disabledTls = JSONObject(disabledJson).getJSONArray("outbounds").getJSONObject(0).getJSONObject("tls")
+        assertTrue(disabledTls.getBoolean("enabled"))
+        assertFalse(disabledTls.has("fragment"))
+        assertFalse(disabledTls.has("fragment_fallback_delay"))
+        assertTrue(SingBoxConfigParser.summarizeRuntimeConfig(disabledJson).contains("frag=off"))
+
+        // Enabled on non-TLS outbound (Shadowsocks) -> omits tls/fragment fields, frag=off
+        val ssJson = SingBoxConfigParser.buildRuntimeConfig(ssUri, config = enabledCfg).getOrThrow()
+        val ssOutbound = JSONObject(ssJson).getJSONArray("outbounds").getJSONObject(0)
+        assertFalse(ssOutbound.has("tls"))
+        assertTrue(SingBoxConfigParser.summarizeRuntimeConfig(ssJson).contains("frag=off"))
+    }
 }
