@@ -29,7 +29,8 @@ data class SpeedProbeResult(
 
 data class EphemeralTestWithSpeedResult(
     val validation: ValidationResult,
-    val speedProbe: Result<SpeedProbeResult>
+    val speedProbe: Result<SpeedProbeResult>,
+    val isolationLogs: List<String> = emptyList()
 )
 
 /**
@@ -293,6 +294,10 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         /**
          * Runs an isolated ephemeral sing-box trace test followed by a 256KB direct SOCKS5
          * throughput probe while VpnService is OFF (A/B isolation vs. VPN ON).
+         * If the normal 256KB probe stalls/fails, runs a 3-way isolation diagnostic:
+         * 1. Bare-bones proxy config (no DNS, no sniff, no route rules, debug log)
+         * 2. Last 5 sing-box debug lines if bare-bones also stalls
+         * 3. Local sing-box direct-outbound probe (no remote proxy)
          */
         suspend fun runEphemeralTraceAndSpeedTest(
             context: Context,
@@ -301,7 +306,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             traceTimeoutMs: Long = EPHEMERAL_TEST_TIMEOUT_MS,
             speedProbeTimeoutMs: Int = 15_000
         ): Result<EphemeralTestWithSpeedResult> {
-            return withEphemeralSingBox(
+            val baseResult = withEphemeralSingBox(
                 context = context,
                 config = config,
                 rawUriOrJson = rawUriOrJson,
@@ -330,6 +335,103 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     )
                 )
             }
+            val base = baseResult.getOrNull() ?: return baseResult
+            if (base.speedProbe.isSuccess) {
+                return baseResult
+            }
+            val isolationLogs = runStallIsolationProbes(
+                context = context,
+                rawUriOrJson = rawUriOrJson,
+                timeoutMs = speedProbeTimeoutMs
+            )
+            return Result.success(base.copy(isolationLogs = isolationLogs))
+        }
+
+        private suspend fun runStallIsolationProbes(
+            context: Context,
+            rawUriOrJson: String,
+            timeoutMs: Int
+        ): List<String> {
+            val logs = mutableListOf<String>()
+
+            // 1. Bare-bones JSON check (no DNS, no sniff, no route rules) with debug logging
+            val bareConfigJson = SingBoxConfigParser.buildBareBonesConfig(
+                rawUriOrJson = rawUriOrJson,
+                logLevel = "debug"
+            )
+            if (bareConfigJson.isFailure) {
+                logs += "Bare-bones proxy probe: config error (${bareConfigJson.exceptionOrNull()?.message})"
+            } else {
+                var capturedDebugTail: List<String> = emptyList()
+                val bareResult = withEphemeralSingBoxJson(
+                    context = context,
+                    configJsonProvider = { port ->
+                        SingBoxConfigParser.buildBareBonesConfig(
+                            rawUriOrJson = rawUriOrJson,
+                            listenPort = port,
+                            logLevel = "debug"
+                        ).getOrThrow()
+                    },
+                    timeoutMs = EPHEMERAL_TEST_TIMEOUT_MS,
+                    maxLogLines = 30
+                ) { ephemeralPort, _, recentLogs ->
+                    val probeRes = runDirectSocks5SpeedProbe(
+                        socksPort = ephemeralPort,
+                        timeoutMs = timeoutMs
+                    )
+                    if (probeRes.isFailure) {
+                        capturedDebugTail = recentLogs().takeLast(5)
+                    }
+                    probeRes
+                }
+                logs += "Bare-bones proxy probe: ${formatIsolationOutcome(bareResult)}"
+                if (bareResult.isFailure) {
+                    val tailSummary = if (capturedDebugTail.isNotEmpty()) {
+                        capturedDebugTail.joinToString(" | ")
+                    } else {
+                        "<no debug output>"
+                    }
+                    logs += "Bare-bones debug tail (last ${capturedDebugTail.size}): $tailSummary"
+                }
+            }
+
+            // 2. Local sing-box direct-outbound check (no remote proxy)
+            val directResult = withEphemeralSingBoxJson(
+                context = context,
+                configJsonProvider = { port ->
+                    SingBoxConfigParser.buildDirectOutboundConfig(
+                        listenPort = port,
+                        logLevel = "warn"
+                    )
+                },
+                timeoutMs = EPHEMERAL_TEST_TIMEOUT_MS,
+                maxLogLines = 15
+            ) { ephemeralPort, _, _ ->
+                val primary = runDirectSocks5SpeedProbe(
+                    socksPort = ephemeralPort,
+                    host = SPEED_PROBE_HOST,
+                    port = 80,
+                    path = "/__down?bytes=$SPEED_PROBE_BYTES",
+                    useTls = false,
+                    timeoutMs = timeoutMs
+                )
+                if (primary.isSuccess || extractStalledKb(primary.exceptionOrNull()) != null) {
+                    primary
+                } else {
+                    runDirectSocks5SpeedProbe(
+                        socksPort = ephemeralPort,
+                        host = "www.google.com",
+                        port = 443,
+                        path = "/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png",
+                        useTls = true,
+                        exactBytesRequired = false,
+                        timeoutMs = timeoutMs
+                    )
+                }
+            }
+            logs += "Direct-outbound probe: ${formatIsolationOutcome(directResult)}"
+
+            return logs
         }
 
         private suspend fun <T> withEphemeralSingBox(
@@ -338,6 +440,26 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             rawUriOrJson: String,
             timeoutMs: Long,
             block: suspend (ephemeralPort: Int, totalDeadline: Long) -> Result<T>
+        ): Result<T> = withEphemeralSingBoxJson(
+            context = context,
+            configJsonProvider = { ephemeralPort ->
+                SingBoxConfigParser.buildRuntimeConfig(
+                    rawUriOrJson = rawUriOrJson,
+                    listenPort = ephemeralPort,
+                    config = config
+                ).getOrThrow()
+            },
+            timeoutMs = timeoutMs
+        ) { ephemeralPort, totalDeadline, _ ->
+            block(ephemeralPort, totalDeadline)
+        }
+
+        private suspend fun <T> withEphemeralSingBoxJson(
+            context: Context,
+            configJsonProvider: (ephemeralPort: Int) -> String,
+            timeoutMs: Long,
+            maxLogLines: Int = 20,
+            block: suspend (ephemeralPort: Int, totalDeadline: Long, recentLogs: () -> List<String>) -> Result<T>
         ): Result<T> {
             val binary = findSingBoxBinary(context)
                 ?: return Result.failure(IllegalStateException("libsing-box.so not found in nativeLibraryDir"))
@@ -348,25 +470,18 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 return Result.failure(IllegalStateException("Failed to allocate ephemeral port: ${it.message}"))
             }
 
-            val runtimeJsonResult = SingBoxConfigParser.buildRuntimeConfig(
-                rawUriOrJson = rawUriOrJson,
-                listenPort = ephemeralPort,
-                config = config
-            )
-            if (runtimeJsonResult.isFailure) {
-                return Result.failure(
-                    runtimeJsonResult.exceptionOrNull()
-                        ?: IllegalStateException("Invalid sing-box profile")
-                )
+            val runtimeJson = runCatching { configJsonProvider(ephemeralPort) }.getOrElse {
+                return Result.failure(it)
             }
 
             val testDir = File(context.cacheDir, "singbox-test").apply { mkdirs() }
             val testConfig = File(testDir, "test-$ephemeralPort.json")
-            testConfig.writeText(runtimeJsonResult.getOrThrow(), Charsets.UTF_8)
+            testConfig.writeText(runtimeJson, Charsets.UTF_8)
 
             var proc: Process? = null
             var drainJob: Job? = null
             val outputTail = StringBuilder()
+            val recentLines = ArrayDeque<String>()
             val envMap = resolveEphemeralTestGoEnvironment()
             val cancelHandle = coroutineContext[Job]?.invokeOnCompletion {
                 runCatching { proc?.destroyForcibly() }
@@ -384,13 +499,17 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                         BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
                             var line: String? = reader.readLine()
                             while (isActive && line != null) {
-                                val cleaned = stripAnsiCodes(line).trim()
+                                val cleaned = cleanSingBoxLogLine(line)
                                 if (cleaned.isNotEmpty()) {
                                     synchronized(outputTail) {
                                         if (outputTail.isNotEmpty()) outputTail.append('\n')
                                         outputTail.append(cleaned)
                                         if (outputTail.length > 600) {
                                             outputTail.delete(0, outputTail.length - 300)
+                                        }
+                                        recentLines.addLast(cleaned)
+                                        while (recentLines.size > maxLogLines) {
+                                            recentLines.removeFirst()
                                         }
                                     }
                                 }
@@ -424,7 +543,10 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     return Result.failure(IllegalStateException("Timed out waiting for test sing-box listener"))
                 }
 
-                block(ephemeralPort, totalDeadline)
+                val recentLogsProvider: () -> List<String> = {
+                    synchronized(outputTail) { recentLines.toList() }
+                }
+                block(ephemeralPort, totalDeadline, recentLogsProvider)
             } catch (e: Exception) {
                 Result.failure(e)
             } finally {
@@ -461,35 +583,57 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             )
         }
 
-        fun formatCompactSpeedBadge(result: Result<SpeedProbeResult>): String {
+        private fun extractStalledKb(err: Throwable?): Int? {
+            val msg = err?.message.orEmpty()
+            val stalledMatch = STALLED_KB_REGEX.find(msg)
+            if (stalledMatch != null) {
+                return stalledMatch.groupValues[1].toIntOrNull()
+            }
+            val incompleteMatch = INCOMPLETE_BYTES_REGEX.find(msg)
+            if (incompleteMatch != null) {
+                val bytes = incompleteMatch.groupValues[1].toIntOrNull() ?: 0
+                return bytes / 1024
+            }
+            return null
+        }
+
+        private fun formatIsolationOutcome(result: Result<SpeedProbeResult>): String {
             return result.fold(
                 onSuccess = { probe -> "${probe.kbPerSec} KB/s" },
                 onFailure = { err ->
-                    val msg = err.message.orEmpty()
-                    val stalledMatch = STALLED_KB_REGEX.find(msg)
-                    if (stalledMatch != null) {
-                        "stalled at ${stalledMatch.groupValues[1]} KB"
+                    val stalledKb = extractStalledKb(err)
+                    if (stalledKb != null) {
+                        "stalled at $stalledKb KB"
                     } else {
-                        val incompleteMatch = INCOMPLETE_BYTES_REGEX.find(msg)
-                        if (incompleteMatch != null) {
-                            val bytes = incompleteMatch.groupValues[1].toIntOrNull() ?: 0
-                            "stalled at ${bytes / 1024} KB"
-                        } else {
-                            "speed err"
-                        }
+                        "failed (${err.message ?: err.javaClass.simpleName})"
                     }
                 }
             )
         }
 
+        fun formatCompactSpeedBadge(result: Result<SpeedProbeResult>): String {
+            return result.fold(
+                onSuccess = { probe -> "${probe.kbPerSec} KB/s" },
+                onFailure = { err ->
+                    val stalledKb = extractStalledKb(err)
+                    if (stalledKb != null) "stalled at $stalledKb KB" else "speed err"
+                }
+            )
+        }
+
         /**
-         * Downloads [bytesToDownload] bytes from https://speed.cloudflare.com/__down directly through
+         * Downloads [bytesToDownload] bytes from [host]:[port][path] directly through
          * the local SOCKS5 listener on 127.0.0.1:[socksPort] to isolate sing-box vs HEV TUN stalls.
          */
         fun runDirectSocks5SpeedProbe(
             socksPort: Int,
             bytesToDownload: Int = SPEED_PROBE_BYTES,
-            timeoutMs: Int = 15_000
+            timeoutMs: Int = 15_000,
+            host: String = SPEED_PROBE_HOST,
+            port: Int = SPEED_PROBE_PORT,
+            path: String = "/__down?bytes=$bytesToDownload",
+            useTls: Boolean = true,
+            exactBytesRequired: Boolean = true
         ): Result<SpeedProbeResult> {
             var rawSocket: Socket? = null
             var sslSocket: Socket? = null
@@ -512,8 +656,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     return Result.failure(IllegalStateException("SOCKS5 greeting rejected (${greeting[0]}, ${greeting[1]})"))
                 }
 
-                // 2. SOCKS5 CONNECT to speed.cloudflare.com:443 (ATYP=0x03 domain)
-                val hostBytes = SPEED_PROBE_HOST.toByteArray(Charsets.US_ASCII)
+                // 2. SOCKS5 CONNECT to host:port (ATYP=0x03 domain)
+                val hostBytes = host.toByteArray(Charsets.US_ASCII)
                 val connectReq = ByteArray(4 + 1 + hostBytes.size + 2)
                 connectReq[0] = 0x05
                 connectReq[1] = 0x01
@@ -521,8 +665,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 connectReq[3] = 0x03
                 connectReq[4] = hostBytes.size.toByte()
                 System.arraycopy(hostBytes, 0, connectReq, 5, hostBytes.size)
-                connectReq[5 + hostBytes.size] = (SPEED_PROBE_PORT shr 8).toByte()
-                connectReq[6 + hostBytes.size] = (SPEED_PROBE_PORT and 0xFF).toByte()
+                connectReq[5 + hostBytes.size] = (port shr 8).toByte()
+                connectReq[6 + hostBytes.size] = (port and 0xFF).toByte()
                 outStream.write(connectReq)
                 outStream.flush()
 
@@ -544,42 +688,49 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     else -> return Result.failure(IllegalStateException("Unknown SOCKS5 ATYP: ${replyHeader[3]}"))
                 }
 
-                // 3. TLS upgrade + HTTP/1.1 GET /__down?bytes=...
-                val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
-                sslSocket = (sslFactory.createSocket(rawSocket, SPEED_PROBE_HOST, SPEED_PROBE_PORT, true) as SSLSocket).apply {
-                    soTimeout = timeoutMs
-                    startHandshake()
+                // 3. Optional TLS upgrade + HTTP/1.1 GET
+                val httpOut: java.io.OutputStream
+                val httpIn: InputStream
+                if (useTls) {
+                    val sslFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
+                    sslSocket = (sslFactory.createSocket(rawSocket, host, port, true) as SSLSocket).apply {
+                        soTimeout = timeoutMs
+                        startHandshake()
+                    }
+                    httpOut = sslSocket.getOutputStream()
+                    httpIn = sslSocket.getInputStream()
+                } else {
+                    httpOut = outStream
+                    httpIn = inStream
                 }
-                val sslOut = sslSocket.getOutputStream()
-                val sslIn = sslSocket.getInputStream()
-                val req = "GET /__down?bytes=$bytesToDownload HTTP/1.1\r\n" +
-                    "Host: $SPEED_PROBE_HOST\r\n" +
+                val req = "GET $path HTTP/1.1\r\n" +
+                    "Host: $host\r\n" +
                     "User-Agent: AetherAndroid/2.4.0\r\n" +
                     "Connection: close\r\n\r\n"
-                sslOut.write(req.toByteArray(Charsets.US_ASCII))
-                sslOut.flush()
+                httpOut.write(req.toByteArray(Charsets.US_ASCII))
+                httpOut.flush()
 
                 // Parse HTTP status and skip headers byte-by-byte so buffered reads don't eat body bytes
-                val statusLine = readHttpLine(sslIn)
+                val statusLine = readHttpLine(httpIn)
                     ?: return Result.failure(EOFException("Empty HTTP response from speed probe"))
                 val statusCode = statusLine.split(" ", limit = 3).getOrNull(1)?.toIntOrNull() ?: 0
                 if (statusCode !in 200..299) {
                     return Result.failure(IllegalStateException("HTTP $statusCode: $statusLine"))
                 }
                 while (true) {
-                    val hdr = readHttpLine(sslIn) ?: break
+                    val hdr = readHttpLine(httpIn) ?: break
                     if (hdr.isEmpty()) break
                 }
 
                 val startNs = System.nanoTime()
                 val buf = ByteArray(8192)
-                while (bodyBytesRead < bytesToDownload) {
-                    val n = sslIn.read(buf)
+                while (!exactBytesRequired || bodyBytesRead < bytesToDownload) {
+                    val n = httpIn.read(buf)
                     if (n < 0) break
                     bodyBytesRead += n
                 }
                 val elapsedMs = ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1L)
-                if (bodyBytesRead < bytesToDownload) {
+                if ((exactBytesRequired && bodyBytesRead < bytesToDownload) || (!exactBytesRequired && bodyBytesRead == 0)) {
                     return Result.failure(
                         EOFException("Incomplete download: ${bodyBytesRead}B of ${bytesToDownload}B after ${elapsedMs}ms")
                     )

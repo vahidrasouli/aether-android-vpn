@@ -287,7 +287,6 @@ object SingBoxConfigParser {
                     })
                     put("final", "dns-remote")
                     put("strategy", effectiveStrategy)
-                    put("independent_cache", true)
                 })
                 put("inbounds", JSONArray().apply {
                     put(buildSocksInbound(listenPort))
@@ -355,6 +354,76 @@ object SingBoxConfigParser {
         }
         root.toString(2)
     }
+
+    /**
+     * Builds a minimal sing-box config with ONLY `log`, `inbounds: [socks]`, and
+     * `outbounds: [proxy]` (no `dns`, no `route`, no `sniff`) to isolate JSON/routing
+     * issues from core proxy/runtime behavior during VPN-OFF diagnostics.
+     */
+    fun buildBareBonesConfig(
+        rawUriOrJson: String,
+        listenPort: Int = VpnConfig.SING_BOX_SOCKS_PORT,
+        logLevel: String = "debug"
+    ): Result<String> = runCatching {
+        val parsed = parse(rawUriOrJson).getOrThrow()
+        val outbound = if (parsed.isFullConfig) {
+            val outbounds = parsed.outboundOrFullJson.optJSONArray("outbounds")
+                ?: throw IllegalStateException("No outbounds array in config")
+            var found: JSONObject? = null
+            for (i in 0 until outbounds.length()) {
+                val ob = outbounds.optJSONObject(i) ?: continue
+                if (ob.optString("type").lowercase() !in SYSTEM_OUTBOUND_TYPES) {
+                    found = JSONObject(ob.toString()).apply { put("tag", "proxy") }
+                    break
+                }
+            }
+            found ?: throw IllegalStateException("No proxy outbound found in config")
+        } else {
+            JSONObject(parsed.outboundOrFullJson.toString()).apply {
+                put("tag", "proxy")
+                if (optString("type").equals("shadowsocks", ignoreCase = true) && has("method")) {
+                    put("method", normalizeShadowsocksMethod(optString("method")))
+                }
+            }
+        }
+        JSONObject().apply {
+            put("log", JSONObject().apply {
+                put("disabled", false)
+                put("level", logLevel.ifBlank { "debug" })
+                put("timestamp", false)
+            })
+            put("inbounds", JSONArray().apply {
+                put(buildSocksInbound(listenPort))
+            })
+            put("outbounds", JSONArray().apply {
+                put(outbound)
+            })
+        }.toString(2)
+    }
+
+    /**
+     * Builds a minimal sing-box config with ONLY `log`, `inbounds: [socks]`, and
+     * `outbounds: [{ "type": "direct", "tag": "direct" }]` (no remote proxy, no DNS, no rules).
+     */
+    fun buildDirectOutboundConfig(
+        listenPort: Int = VpnConfig.SING_BOX_SOCKS_PORT,
+        logLevel: String = "warn"
+    ): String = JSONObject().apply {
+        put("log", JSONObject().apply {
+            put("disabled", false)
+            put("level", logLevel.ifBlank { "warn" })
+            put("timestamp", false)
+        })
+        put("inbounds", JSONArray().apply {
+            put(buildSocksInbound(listenPort))
+        })
+        put("outbounds", JSONArray().apply {
+            put(JSONObject().apply {
+                put("type", "direct")
+                put("tag", "direct")
+            })
+        })
+    }.toString(2)
 
     fun summarizeRuntimeConfig(runtimeJson: String): String {
         return runCatching {

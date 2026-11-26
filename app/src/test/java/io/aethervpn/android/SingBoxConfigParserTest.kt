@@ -189,11 +189,11 @@ class SingBoxConfigParserTest {
             assertEquals("warn", log.getString("level"))
             assertFalse(log.getBoolean("timestamp"))
 
-            // Sing-box 1.12 typed DNS servers
+            // Sing-box 1.12 typed DNS servers (1.14+ deprecated independent_cache removed)
             val dns = runtime.getJSONObject("dns")
             assertEquals("dns-remote", dns.getString("final"))
             assertEquals("ipv4_only", dns.getString("strategy"))
-            assertTrue(dns.getBoolean("independent_cache"))
+            assertFalse(dns.has("independent_cache"))
             val servers = dns.getJSONArray("servers")
             assertEquals(2, servers.length())
 
@@ -552,5 +552,28 @@ class SingBoxConfigParserTest {
             assertTrue("10.10.34.0/24 reject rule must exist", poisonIdx >= 0)
             assertTrue("10.10.34.0/24 reject rule must appear strictly before ip_is_private", poisonIdx < privateIpIdx)
         }
+    }
+
+    @Test
+    fun buildsMinimalBareBonesAndDirectOutboundConfigsWithoutDnsOrRoute() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
+        val bare = JSONObject(SingBoxConfigParser.buildBareBonesConfig(vlessUri, listenPort = 1831).getOrThrow())
+        assertFalse(bare.has("dns"))
+        assertFalse(bare.has("route"))
+        assertEquals("debug", bare.getJSONObject("log").getString("level"))
+        assertEquals(1, bare.getJSONArray("inbounds").length())
+        assertEquals(1831, bare.getJSONArray("inbounds").getJSONObject(0).getInt("listen_port"))
+        assertEquals(1, bare.getJSONArray("outbounds").length())
+        assertEquals("proxy", bare.getJSONArray("outbounds").getJSONObject(0).getString("tag"))
+        assertEquals("vless", bare.getJSONArray("outbounds").getJSONObject(0).getString("type"))
+
+        val direct = JSONObject(SingBoxConfigParser.buildDirectOutboundConfig(listenPort = 1832))
+        assertFalse(direct.has("dns"))
+        assertFalse(direct.has("route"))
+        assertEquals(1, direct.getJSONArray("inbounds").length())
+        assertEquals(1832, direct.getJSONArray("inbounds").getJSONObject(0).getInt("listen_port"))
+        assertEquals(1, direct.getJSONArray("outbounds").length())
+        assertEquals("direct", direct.getJSONArray("outbounds").getJSONObject(0).getString("type"))
+        assertEquals("direct", direct.getJSONArray("outbounds").getJSONObject(0).getString("tag"))
     }
 }

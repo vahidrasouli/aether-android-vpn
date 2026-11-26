@@ -790,6 +790,9 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     "SingBox",
                     "VPN-OFF A/B test '${profile.name}': ${v.publicIp} • ${v.latencyMs}ms • $speedLabel (${SingBoxEngineManager.formatSpeedProbeLog(res.speedProbe)})"
                 )
+                res.isolationLogs.forEach { line ->
+                    DiagnosticsLog.record("SingBox", line)
+                }
                 showSnack("${v.publicIp} • ${v.latencyMs}ms • $speedLabel")
             } else {
                 val err = result.exceptionOrNull()?.message ?: "Trace test failed"
