@@ -457,16 +457,21 @@ class SingBoxConfigParserTest {
     }
 
     @Test
-    fun emitsUtlsDefaultChromeAndPreservesCustomFpAndVlessXudp() {
-        // VLESS TLS without explicit fp -> defaults to utls.fingerprint = "chrome" and packet_encoding = "xudp"
+    fun omitsUtlsWhenFpAbsentAndEmitsWhenExplicitFpPresentAndVlessXudp() {
+        // VLESS TLS without explicit fp -> omits utls and sets packet_encoding = "xudp"
         val vlessDefault = "vless://11111111-2222-3333-4444-555555555555@vless.example.com:443?type=ws&security=tls&alpn=h2,http/1.1#VlessDefault"
         val vlessOut = SingBoxConfigParser.parse(vlessDefault).getOrThrow().outboundOrFullJson
         assertEquals("xudp", vlessOut.getString("packet_encoding"))
-        val vlessUtls = vlessOut.getJSONObject("tls").getJSONObject("utls")
-        assertTrue(vlessUtls.getBoolean("enabled"))
-        assertEquals("chrome", vlessUtls.getString("fingerprint"))
+        assertFalse("tls.utls must be omitted when fp= is absent", vlessOut.getJSONObject("tls").has("utls"))
         val alpn = vlessOut.getJSONObject("tls").getJSONArray("alpn")
         assertEquals(listOf("h2", "http/1.1"), (0 until alpn.length()).map { alpn.getString(it) })
+
+        // VLESS TLS with explicit fp=chrome -> emits utls.fingerprint = "chrome"
+        val vlessWithFp = "vless://11111111-2222-3333-4444-555555555555@vless.example.com:443?type=ws&security=tls&fp=chrome#VlessChrome"
+        val vlessWithFpOut = SingBoxConfigParser.parse(vlessWithFp).getOrThrow().outboundOrFullJson
+        val vlessUtls = vlessWithFpOut.getJSONObject("tls").getJSONObject("utls")
+        assertTrue(vlessUtls.getBoolean("enabled"))
+        assertEquals("chrome", vlessUtls.getString("fingerprint"))
 
         // VMess TLS with explicit fp=firefox -> utls.fingerprint = "firefox"
         val vmessJson = """
@@ -479,11 +484,16 @@ class SingBoxConfigParserTest {
         assertTrue(vmessTls.getJSONObject("utls").getBoolean("enabled"))
         assertEquals("firefox", vmessTls.getJSONObject("utls").getString("fingerprint"))
 
-        // Trojan TLS without explicit fp -> defaults to utls.fingerprint = "chrome"
+        // Trojan TLS without explicit fp -> omits utls
         val trojanUri = "trojan://secret@trojan.example.com:443?sni=trojan.example.com#TrojanDefault"
         val trojanOut = SingBoxConfigParser.parse(trojanUri).getOrThrow().outboundOrFullJson
-        assertTrue(trojanOut.getJSONObject("tls").getJSONObject("utls").getBoolean("enabled"))
-        assertEquals("chrome", trojanOut.getJSONObject("tls").getJSONObject("utls").getString("fingerprint"))
+        assertFalse("tls.utls must be omitted for trojan when fp= is absent", trojanOut.getJSONObject("tls").has("utls"))
+
+        // Trojan TLS with explicit fp=chrome -> emits utls.fingerprint = "chrome"
+        val trojanWithFpUri = "trojan://secret@trojan.example.com:443?sni=trojan.example.com&fp=chrome#TrojanChrome"
+        val trojanWithFpOut = SingBoxConfigParser.parse(trojanWithFpUri).getOrThrow().outboundOrFullJson
+        assertTrue(trojanWithFpOut.getJSONObject("tls").getJSONObject("utls").getBoolean("enabled"))
+        assertEquals("chrome", trojanWithFpOut.getJSONObject("tls").getJSONObject("utls").getString("fingerprint"))
     }
 
     @Test

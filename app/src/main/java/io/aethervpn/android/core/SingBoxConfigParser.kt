@@ -934,11 +934,12 @@ object SingBoxConfigParser {
             params["alpn"]?.takeIf { it.isNotBlank() }?.let { alpn ->
                 put("alpn", JSONArray(alpn.split(",").map { it.trim() }.filter { it.isNotEmpty() }))
             }
-            val fp = params["fp"]?.takeIf { it.isNotBlank() } ?: "chrome"
-            put("utls", JSONObject().apply {
-                put("enabled", true)
-                put("fingerprint", fp)
-            })
+            params["fp"]?.takeIf { it.isNotBlank() }?.let { fp ->
+                put("utls", JSONObject().apply {
+                    put("enabled", true)
+                    put("fingerprint", fp)
+                })
+            }
             if (isReality) {
                 val pbk = params["pbk"]?.takeIf { it.isNotBlank() }
                     ?: throw IllegalArgumentException("Reality profile missing public key (pbk)")
