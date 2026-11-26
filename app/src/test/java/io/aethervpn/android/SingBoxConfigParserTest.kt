@@ -232,15 +232,15 @@ class SingBoxConfigParserTest {
             assertFalse("dns-local must NOT have detour in sing-box 1.12", localDns.has("detour"))
             assertFalse(localDns.has("address"))
 
-            // Socks inbound & proxy outbound must NOT force local domain_strategy
+            // Socks inbound must NOT force local domain_strategy
             val socksInbound = runtime.getJSONArray("inbounds").getJSONObject(0)
             assertEquals("socks", socksInbound.getString("type"))
             assertFalse(socksInbound.has("domain_strategy"))
 
-            // Proxy outbound dial timeout field (no invalid tcp_keep_alive fields for sing-box 1.12)
+            // Proxy outbound forces ipv4_only domain_strategy and omits invalid tcp_keep_alive fields for sing-box 1.12
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
             assertEquals("proxy", proxyOutbound.getString("tag"))
-            assertFalse(proxyOutbound.has("domain_strategy"))
+            assertEquals("ipv4_only", proxyOutbound.getString("domain_strategy"))
             assertFalse(proxyOutbound.has("tcp_keep_alive"))
             assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
             assertEquals("10s", proxyOutbound.getString("connect_timeout"))
