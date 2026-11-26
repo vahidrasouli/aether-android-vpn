@@ -195,6 +195,8 @@ object SingBoxConfigParser {
                 }
                 put("inbounds", newInbounds)
 
+                optJSONObject("route")?.put("auto_detect_interface", false)
+
                 if (upstreamSocksPort != null) {
                     val existingOutbounds = optJSONArray("outbounds") ?: JSONArray()
                     val finalTag = optJSONObject("route")?.optString("final")?.takeIf { it.isNotBlank() }

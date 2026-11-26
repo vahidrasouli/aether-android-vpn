@@ -1153,6 +1153,11 @@ class AetherVpnService : VpnService() {
             }
         }
 
+        DiagnosticsLog.record(
+            "Tunnel",
+            "Per-app routing before establish(): mode=${config.splitTunnelMode}, selfExcluded=${packageName !in plan.allowedPackages}"
+        )
+
         val summary = when (config.splitTunnelMode) {
             SplitTunnelMode.ALL_APPS -> "All apps (self $packageName excluded)"
             SplitTunnelMode.BYPASS_SELECTED -> "Bypass ${plan.disallowedPackages.size - 1} app(s) + self excluded"

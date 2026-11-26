@@ -70,6 +70,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     private var storeState = SingBoxProfileStoreState()
     private val testingIds = mutableSetOf<String>()
     private val testErrors = mutableMapOf<String, String>()
+    private val testSpeeds = mutableMapOf<String, String>()
     private val serverPreviewCache = mutableMapOf<String, String>()
     private var testAllJob: Job? = null
     private var isBindingSwitches = false
@@ -257,6 +258,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 isActive = profile.id == activeId,
                 isTesting = testingIds.contains(profile.id),
                 errorMessage = testErrors[profile.id],
+                speedLabel = testSpeeds[profile.id],
                 serverPreview = serverPreviewCache[profile.id] ?: ""
             )
         }
@@ -756,12 +758,13 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         if (testingIds.contains(profile.id)) return
         testingIds.add(profile.id)
         testErrors.remove(profile.id)
+        testSpeeds.remove(profile.id)
         submitProfilesList()
 
         lifecycleScope.launch {
             val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
             val result = withContext(Dispatchers.IO) {
-                SingBoxEngineManager.runEphemeralTraceTest(
+                SingBoxEngineManager.runEphemeralTraceAndSpeedTest(
                     context = this@SingBoxProfilesActivity,
                     config = cfg,
                     rawUriOrJson = profile.rawUriOrJson
@@ -769,7 +772,10 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             }
             testingIds.remove(profile.id)
             if (result.isSuccess) {
-                val v = result.getOrThrow()
+                val res = result.getOrThrow()
+                val v = res.validation
+                val speedLabel = SingBoxEngineManager.formatCompactSpeedBadge(res.speedProbe)
+                testSpeeds[profile.id] = speedLabel
                 val updatedState = withContext(Dispatchers.IO) {
                     SingBoxProfileRepository.updateTestResult(
                         filesDir = filesDir,
@@ -780,6 +786,11 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     )
                 }
                 storeState = updatedState
+                DiagnosticsLog.record(
+                    "SingBox",
+                    "VPN-OFF A/B test '${profile.name}': ${v.publicIp} • ${v.latencyMs}ms • $speedLabel (${SingBoxEngineManager.formatSpeedProbeLog(res.speedProbe)})"
+                )
+                showSnack("${v.publicIp} • ${v.latencyMs}ms • $speedLabel")
             } else {
                 val err = result.exceptionOrNull()?.message ?: "Trace test failed"
                 testErrors[profile.id] = err
@@ -801,6 +812,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         val isActive: Boolean,
         val isTesting: Boolean,
         val errorMessage: String?,
+        val speedLabel: String? = null,
         val serverPreview: String
     )
 
@@ -858,7 +870,8 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     b.tvProfilePingBadge.visibility = View.VISIBLE
                     b.ivProfileTestError.visibility = View.GONE
                     val countryPart = p.lastCountry?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
-                    b.tvProfilePingBadge.text = "${p.lastPingMs}ms$countryPart"
+                    val speedPart = row.speedLabel?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
+                    b.tvProfilePingBadge.text = "${p.lastPingMs}ms$countryPart$speedPart"
                     b.tvProfilePingBadge.setTextColor(
                         ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.log_success)
                     )
@@ -898,6 +911,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     }
                     testingIds.remove(p.id)
                     testErrors.remove(p.id)
+                    testSpeeds.remove(p.id)
                     serverPreviewCache.remove(p.id)
                     storeState = updated
                     renderList()

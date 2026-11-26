@@ -496,4 +496,33 @@ class SingBoxConfigParserTest {
         assertTrue(summary.contains("alpn=[h2,http/1.1]"))
         assertTrue(summary.contains("pkt=xudp"))
     }
+
+    @Test
+    fun disablesAutoDetectInterfaceAndKeepsMixedInboundMinimal() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
+        val uriRuntime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, listenPort = 1825).getOrThrow())
+        assertFalse(uriRuntime.getJSONObject("route").optBoolean("auto_detect_interface", false))
+
+        val uriMixed = uriRuntime.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(setOf("type", "tag", "listen", "listen_port"), uriMixed.keys().asSequence().toSet())
+        assertEquals("mixed", uriMixed.getString("type"))
+        assertEquals("mixed-in", uriMixed.getString("tag"))
+        assertEquals("127.0.0.1", uriMixed.getString("listen"))
+        assertEquals(1825, uriMixed.getInt("listen_port"))
+
+        val fullJsonWithAutoDetect = """
+            {
+              "inbounds": [{"type": "socks", "listen": "127.0.0.1", "listen_port": 1080}],
+              "outbounds": [{"type": "direct", "tag": "direct"}],
+              "route": {"auto_detect_interface": true, "final": "direct"}
+            }
+        """.trimIndent()
+        val fullRuntime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(fullJsonWithAutoDetect, listenPort = 1825).getOrThrow())
+        assertFalse(
+            "Imported full JSON must override auto_detect_interface to false on Android",
+            fullRuntime.getJSONObject("route").optBoolean("auto_detect_interface", false)
+        )
+        val fullMixed = fullRuntime.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(setOf("type", "tag", "listen", "listen_port"), fullMixed.keys().asSequence().toSet())
+    }
 }

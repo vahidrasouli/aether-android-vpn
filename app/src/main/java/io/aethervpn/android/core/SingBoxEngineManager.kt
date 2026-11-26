@@ -27,6 +27,11 @@ data class SpeedProbeResult(
     val kbPerSec: Long
 )
 
+data class EphemeralTestWithSpeedResult(
+    val validation: ValidationResult,
+    val speedProbe: Result<SpeedProbeResult>
+)
+
 /**
  * Manages the official SagerNet/sing-box ARM64 core subprocess (`libsing-box.so`).
  *
@@ -269,6 +274,71 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             rawUriOrJson: String,
             timeoutMs: Long = EPHEMERAL_TEST_TIMEOUT_MS
         ): Result<ValidationResult> {
+            return withEphemeralSingBox(
+                context = context,
+                config = config,
+                rawUriOrJson = rawUriOrJson,
+                timeoutMs = timeoutMs
+            ) { ephemeralPort, totalDeadline ->
+                val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, timeoutMs).toInt()
+                TunnelValidator.verifyThroughSocks(
+                    socksPort = ephemeralPort,
+                    timeoutMs = remainingTimeoutMs,
+                    maxAttempts = 1,
+                    requireWarpOverride = false
+                )
+            }
+        }
+
+        /**
+         * Runs an isolated ephemeral sing-box trace test followed by a 256KB direct SOCKS5
+         * throughput probe while VpnService is OFF (A/B isolation vs. VPN ON).
+         */
+        suspend fun runEphemeralTraceAndSpeedTest(
+            context: Context,
+            config: VpnConfig,
+            rawUriOrJson: String,
+            traceTimeoutMs: Long = EPHEMERAL_TEST_TIMEOUT_MS,
+            speedProbeTimeoutMs: Int = 15_000
+        ): Result<EphemeralTestWithSpeedResult> {
+            return withEphemeralSingBox(
+                context = context,
+                config = config,
+                rawUriOrJson = rawUriOrJson,
+                timeoutMs = traceTimeoutMs
+            ) { ephemeralPort, totalDeadline ->
+                val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, traceTimeoutMs).toInt()
+                val validationResult = TunnelValidator.verifyThroughSocks(
+                    socksPort = ephemeralPort,
+                    timeoutMs = remainingTimeoutMs,
+                    maxAttempts = 1,
+                    requireWarpOverride = false
+                )
+                if (validationResult.isFailure) {
+                    return@withEphemeralSingBox Result.failure(
+                        validationResult.exceptionOrNull() ?: IllegalStateException("Trace test failed")
+                    )
+                }
+                val speedResult = runDirectSocks5SpeedProbe(
+                    socksPort = ephemeralPort,
+                    timeoutMs = speedProbeTimeoutMs
+                )
+                Result.success(
+                    EphemeralTestWithSpeedResult(
+                        validation = validationResult.getOrThrow(),
+                        speedProbe = speedResult
+                    )
+                )
+            }
+        }
+
+        private suspend fun <T> withEphemeralSingBox(
+            context: Context,
+            config: VpnConfig,
+            rawUriOrJson: String,
+            timeoutMs: Long,
+            block: suspend (ephemeralPort: Int, totalDeadline: Long) -> Result<T>
+        ): Result<T> {
             val binary = findSingBoxBinary(context)
                 ?: return Result.failure(IllegalStateException("libsing-box.so not found in nativeLibraryDir"))
 
@@ -295,6 +365,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             testConfig.writeText(runtimeJsonResult.getOrThrow(), Charsets.UTF_8)
 
             var proc: Process? = null
+            var drainJob: Job? = null
+            val outputTail = StringBuilder()
             val envMap = resolveEphemeralTestGoEnvironment()
             val cancelHandle = coroutineContext[Job]?.invokeOnCompletion {
                 runCatching { proc?.destroyForcibly() }
@@ -306,15 +378,35 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 pb.environment().putAll(envMap)
                 proc = pb.start()
 
+                // Continuously drain combined stdout/stderr so a full OS pipe buffer can never deadlock libsing-box.so
+                drainJob = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    runCatching {
+                        BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
+                            var line: String? = reader.readLine()
+                            while (isActive && line != null) {
+                                val cleaned = stripAnsiCodes(line).trim()
+                                if (cleaned.isNotEmpty()) {
+                                    synchronized(outputTail) {
+                                        if (outputTail.isNotEmpty()) outputTail.append('\n')
+                                        outputTail.append(cleaned)
+                                        if (outputTail.length > 600) {
+                                            outputTail.delete(0, outputTail.length - 300)
+                                        }
+                                    }
+                                }
+                                line = reader.readLine()
+                            }
+                        }
+                    }
+                }
+
                 val totalDeadline = System.currentTimeMillis() + timeoutMs
                 val startupBudgetMs = minOf(timeoutMs - 1_500L, 3_500L).coerceAtLeast(1_500L)
                 val startupDeadline = System.currentTimeMillis() + startupBudgetMs
                 var ready = false
                 while (System.currentTimeMillis() < startupDeadline) {
                     if (!proc.isAlive) {
-                        val output = runCatching {
-                            stripAnsiCodes(proc.inputStream.bufferedReader().readText()).trim().take(300)
-                        }.getOrDefault("")
+                        val output = synchronized(outputTail) { outputTail.toString().trim().takeLast(300) }
                         return Result.failure(
                             IllegalStateException(
                                 if (output.isNotBlank()) "sing-box exited: $output" else "sing-box exited during test startup"
@@ -332,17 +424,12 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     return Result.failure(IllegalStateException("Timed out waiting for test sing-box listener"))
                 }
 
-                val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, timeoutMs).toInt()
-                TunnelValidator.verifyThroughSocks(
-                    socksPort = ephemeralPort,
-                    timeoutMs = remainingTimeoutMs,
-                    maxAttempts = 1,
-                    requireWarpOverride = false
-                )
+                block(ephemeralPort, totalDeadline)
             } catch (e: Exception) {
                 Result.failure(e)
             } finally {
                 cancelHandle?.dispose()
+                drainJob?.cancel()
                 runCatching {
                     proc?.destroy()
                     if (proc != null && !proc.waitFor(400, TimeUnit.MILLISECONDS)) {
@@ -356,6 +443,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         const val SPEED_PROBE_BYTES = 262_144
         private const val SPEED_PROBE_HOST = "speed.cloudflare.com"
         private const val SPEED_PROBE_PORT = 443
+        private val STALLED_KB_REGEX = Regex("stalled at (\\d+)KB")
+        private val INCOMPLETE_BYTES_REGEX = Regex("Incomplete download: (\\d+)B")
 
         fun formatSpeedProbeLog(
             result: Result<SpeedProbeResult>,
@@ -368,6 +457,27 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 },
                 onFailure = { err ->
                     "Direct SOCKS5 throughput failed (${requestedBytes / 1024}KB): ${err.message ?: err.javaClass.simpleName}"
+                }
+            )
+        }
+
+        fun formatCompactSpeedBadge(result: Result<SpeedProbeResult>): String {
+            return result.fold(
+                onSuccess = { probe -> "${probe.kbPerSec} KB/s" },
+                onFailure = { err ->
+                    val msg = err.message.orEmpty()
+                    val stalledMatch = STALLED_KB_REGEX.find(msg)
+                    if (stalledMatch != null) {
+                        "stalled at ${stalledMatch.groupValues[1]} KB"
+                    } else {
+                        val incompleteMatch = INCOMPLETE_BYTES_REGEX.find(msg)
+                        if (incompleteMatch != null) {
+                            val bytes = incompleteMatch.groupValues[1].toIntOrNull() ?: 0
+                            "stalled at ${bytes / 1024} KB"
+                        } else {
+                            "speed err"
+                        }
+                    }
                 }
             )
         }
