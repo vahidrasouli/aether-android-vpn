@@ -6,7 +6,7 @@ JNILIBS_ARM64="${ROOT_DIR}/app/src/main/jniLibs/arm64-v8a"
 SINGBOX_REPO="${SINGBOX_REPO:-https://github.com/SagerNet/sing-box.git}"
 SINGBOX_VERSION="${SINGBOX_VERSION:-v1.14.4}"
 SINGBOX_SRC_DIR="${SINGBOX_SRC_DIR:-${ROOT_DIR}/native/sing-box}"
-SINGBOX_TAGS="${SINGBOX_TAGS:-with_utls,with_reality_server,with_quic,with_wireguard,with_gvisor,with_clash_api}"
+SINGBOX_TAGS="${SINGBOX_TAGS:-with_utls,with_quic,with_wireguard,with_gvisor,with_clash_api,badlinkname,tfogo_checklinkname0}"
 
 echo "[*] Building official SagerNet/sing-box (${SINGBOX_VERSION}) for ARM64 (android/arm64)..."
 
@@ -34,7 +34,7 @@ fi
 
 pushd "${SINGBOX_SRC_DIR}" >/dev/null
 
-LDFLAGS="-s -w -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION#v}"
+LDFLAGS="-s -w -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION#v} -X runtime.godebugDefault=multipathtcp=0,tlssha1=1"
 if go version | grep -qE "go1\.(2[3-9]|[3-9][0-9])"; then
   LDFLAGS="${LDFLAGS} -checklinkname=0"
 fi
