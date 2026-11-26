@@ -29,9 +29,9 @@ class SingBoxTuningTest {
         assertEquals("1.1.1.1", cfg.sbRemoteDns)
         assertEquals("1.1.1.1", cfg.sbDirectDns)
         assertEquals("ipv4_only", cfg.sbDnsStrategy)
-        assertTrue(cfg.sbSniffEnabled)
+        assertFalse(cfg.sbSniffEnabled)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, cfg.sbBlockQuic)
-        assertTrue(cfg.sbBypassPrivateIp)
+        assertFalse(cfg.sbBypassPrivateIp)
         assertFalse(cfg.sbBypassIrDomains)
         assertEquals(15, cfg.sbConnectTimeoutSec)
         assertFalse(cfg.sbTcpFastOpen)
@@ -94,9 +94,9 @@ class SingBoxTuningTest {
                 sbRemoteDns = "https://8.8.8.8/dns-query",
                 sbDirectDns = "223.5.5.5",
                 sbDnsStrategy = "prefer_ipv6",
-                sbSniffEnabled = false,
+                sbSniffEnabled = true,
                 sbBlockQuic = SingBoxBlockQuicMode.OFF,
-                sbBypassPrivateIp = false,
+                sbBypassPrivateIp = true,
                 sbBypassIrDomains = true,
                 sbCustomBypassDomains = "digikala.com, shaparak.ir",
                 sbMultiplexEnabled = true,
@@ -112,9 +112,9 @@ class SingBoxTuningTest {
         assertEquals("https://8.8.8.8/dns-query", restored.sbRemoteDns)
         assertEquals("223.5.5.5", restored.sbDirectDns)
         assertEquals("prefer_ipv6", restored.sbDnsStrategy)
-        assertFalse(restored.sbSniffEnabled)
+        assertTrue(restored.sbSniffEnabled)
         assertEquals(SingBoxBlockQuicMode.OFF, restored.sbBlockQuic)
-        assertFalse(restored.sbBypassPrivateIp)
+        assertTrue(restored.sbBypassPrivateIp)
         assertTrue(restored.sbBypassIrDomains)
         assertEquals("digikala.com, shaparak.ir", restored.sbCustomBypassDomains)
         assertTrue(restored.sbMultiplexEnabled)
@@ -237,7 +237,7 @@ class SingBoxTuningTest {
                     it.optString("outbound") == "direct"
             }
         )
-        assertTrue(ruleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+        assertTrue(ruleList.any { it.optString("network") == "udp" && it.optInt("port", -1) == 443 && it.optString("action") == "reject" })
 
         // OFF disables QUIC blocking even for TCP outbounds
         val offRuntime = JSONObject(
@@ -248,7 +248,7 @@ class SingBoxTuningTest {
         )
         val offRules = offRuntime.getJSONObject("route").getJSONArray("rules")
         val offRuleList = (0 until offRules.length()).map { offRules.getJSONObject(it) }
-        assertFalse(offRuleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+        assertFalse(offRuleList.any { it.optString("network") == "udp" && it.optInt("port", -1) == 443 && it.optString("action") == "reject" })
     }
 
     @Test

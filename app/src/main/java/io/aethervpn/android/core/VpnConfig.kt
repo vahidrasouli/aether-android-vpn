@@ -271,9 +271,9 @@ data class VpnConfig(
     val sbRemoteDns: String = "1.1.1.1",
     val sbDirectDns: String = "1.1.1.1",
     val sbDnsStrategy: String = "ipv4_only",
-    val sbSniffEnabled: Boolean = true,
+    val sbSniffEnabled: Boolean = false,
     val sbBlockQuic: SingBoxBlockQuicMode = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
-    val sbBypassPrivateIp: Boolean = true,
+    val sbBypassPrivateIp: Boolean = false,
     val sbBypassIrDomains: Boolean = false,
     val sbCustomBypassDomains: String = "",
     val sbMultiplexEnabled: Boolean = false,
@@ -399,8 +399,8 @@ data class VpnConfig(
         val baseRoutingAndDnsDefaults =
             sbRemoteDns == "1.1.1.1" &&
                 sbDirectDns == "1.1.1.1" &&
-                sbSniffEnabled &&
-                sbBypassPrivateIp &&
+                !sbSniffEnabled &&
+                !sbBypassPrivateIp &&
                 !sbBypassIrDomains &&
                 sbCustomBypassDomains.isBlank() &&
                 !sbMultiplexEnabled
@@ -446,9 +446,9 @@ data class VpnConfig(
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "ipv4_only",
-            sbSniffEnabled = true,
+            sbSniffEnabled = false,
             sbBlockQuic = SingBoxBlockQuicMode.ALWAYS,
-            sbBypassPrivateIp = true,
+            sbBypassPrivateIp = false,
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
@@ -464,9 +464,9 @@ data class VpnConfig(
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "ipv4_only",
-            sbSniffEnabled = true,
+            sbSniffEnabled = false,
             sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
-            sbBypassPrivateIp = true,
+            sbBypassPrivateIp = false,
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
@@ -482,9 +482,9 @@ data class VpnConfig(
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "ipv4_only",
-            sbSniffEnabled = true,
+            sbSniffEnabled = false,
             sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
-            sbBypassPrivateIp = true,
+            sbBypassPrivateIp = false,
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
@@ -756,9 +756,9 @@ data class VpnConfig(
                 sbRemoteDns = o.optString("sbRemoteDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDirectDns = o.optString("sbDirectDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDnsStrategy = o.optString("sbDnsStrategy", "ipv4_only").ifBlank { "ipv4_only" },
-                sbSniffEnabled = o.optBoolean("sbSniffEnabled", true),
+                sbSniffEnabled = o.optBoolean("sbSniffEnabled", false),
                 sbBlockQuic = enumOrDefault(o.optString("sbBlockQuic"), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
-                sbBypassPrivateIp = o.optBoolean("sbBypassPrivateIp", true),
+                sbBypassPrivateIp = o.optBoolean("sbBypassPrivateIp", false),
                 sbBypassIrDomains = o.optBoolean("sbBypassIrDomains", false),
                 sbCustomBypassDomains = o.optString("sbCustomBypassDomains", "").trim(),
                 sbMultiplexEnabled = o.optBoolean("sbMultiplexEnabled", false),
@@ -826,9 +826,9 @@ data class VpnConfig(
                 sbRemoteDns = p.getString("sb_remote_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDirectDns = p.getString("sb_direct_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDnsStrategy = p.getString("sb_dns_strategy", "ipv4_only").orEmpty().ifBlank { "ipv4_only" },
-                sbSniffEnabled = p.getBoolean("sb_sniff_enabled", true),
+                sbSniffEnabled = p.getBoolean("sb_sniff_enabled", false),
                 sbBlockQuic = enumOrDefault(p.getString("sb_block_quic", null), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
-                sbBypassPrivateIp = p.getBoolean("sb_bypass_private_ip", true),
+                sbBypassPrivateIp = p.getBoolean("sb_bypass_private_ip", false),
                 sbBypassIrDomains = p.getBoolean("sb_bypass_ir_domains", false),
                 sbCustomBypassDomains = p.getString("sb_custom_bypass_domains", "").orEmpty(),
                 sbMultiplexEnabled = p.getBoolean("sb_multiplex_enabled", false),

@@ -243,16 +243,18 @@ class SingBoxConfigParserTest {
             assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
             assertEquals("15s", proxyOutbound.getString("connect_timeout"))
 
-            // Route rules: sniff, hijack-dns, ip_is_private -> direct, quic -> reject
+            // Lean route rules: hijack-dns (port 53 + protocol dns), udp:443 -> reject; no sniff/ip_is_private/ip_cidr by default
             val route = runtime.getJSONObject("route")
             assertEquals("dns-local", route.getString("default_domain_resolver"))
             val rules = route.getJSONArray("rules")
             val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
 
-            assertTrue(ruleList.any { it.optString("action") == "sniff" })
+            assertFalse(ruleList.any { it.optString("action") == "sniff" })
+            assertTrue(ruleList.any { it.optInt("port", -1) == 53 && it.optString("action") == "hijack-dns" })
             assertTrue(ruleList.any { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" })
-            assertTrue(ruleList.any { it.optBoolean("ip_is_private", false) && it.optString("outbound") == "direct" })
-            assertTrue(ruleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+            assertFalse(ruleList.any { it.optBoolean("ip_is_private", false) })
+            assertFalse(ruleList.any { it.has("ip_cidr") })
+            assertTrue(ruleList.any { it.optString("network") == "udp" && it.optInt("port", -1) == 443 && it.optString("action") == "reject" })
         }
     }
 
@@ -264,7 +266,7 @@ class SingBoxConfigParserTest {
         val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
 
         assertTrue(ruleList.any { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" })
-        assertFalse(ruleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+        assertFalse(ruleList.any { it.optString("network") == "udp" && it.optInt("port", -1) == 443 && it.optString("action") == "reject" })
     }
 
     @Test
@@ -367,9 +369,10 @@ class SingBoxConfigParserTest {
     }
 
     @Test
-    fun port53HijackDnsAppearsImmediatelyAfterSniffAndStrictlyBeforeIpIsPrivate() {
+    fun port53HijackDnsAppearsImmediatelyAfterSniffAndStrictlyBeforeIpIsPrivateWhenEnabled() {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
-        val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri).getOrThrow())
+        val cfg = VpnConfig(sbSniffEnabled = true, sbBypassPrivateIp = true)
+        val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, config = cfg).getOrThrow())
         val rules = runtime.getJSONObject("route").getJSONArray("rules")
         val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
 
@@ -378,7 +381,7 @@ class SingBoxConfigParserTest {
         val protoDnsIdx = ruleList.indexOfFirst { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" }
         val privateIpIdx = ruleList.indexOfFirst { it.optBoolean("ip_is_private", false) }
 
-        assertTrue("sniff rule must exist", sniffIdx >= 0)
+        assertTrue("sniff rule must exist when explicitly enabled", sniffIdx >= 0)
         assertEquals("port:53 hijack-dns must be immediately after sniff", sniffIdx + 1, port53Idx)
         assertEquals("protocol:dns hijack-dns must be immediately after port:53", port53Idx + 1, protoDnsIdx)
         assertTrue("hijack-dns rules must appear strictly before ip_is_private", protoDnsIdx < privateIpIdx)
@@ -531,7 +534,7 @@ class SingBoxConfigParserTest {
     }
 
     @Test
-    fun rejectsIspDnsPoisonedCidrBeforePrivateIpBypassForVlessAndShadowsocks() {
+    fun leanRuntimeRouteOmitsDnsForcingIpRulesOnDefaultConfig() {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
         val ssUser = Base64.getUrlEncoder().withoutPadding()
             .encodeToString("aes-256-gcm:myPass123".toByteArray(Charsets.UTF_8))
@@ -539,18 +542,19 @@ class SingBoxConfigParserTest {
 
         for (uri in listOf(vlessUri, ssUri)) {
             val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(uri).getOrThrow())
-            val rules = runtime.getJSONObject("route").getJSONArray("rules")
+            val route = runtime.getJSONObject("route")
+            assertEquals("proxy", route.getString("final"))
+            val rules = route.getJSONArray("rules")
             val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
 
-            val poisonIdx = ruleList.indexOfFirst { rule ->
-                val cidrs = rule.optJSONArray("ip_cidr")
-                cidrs != null && (0 until cidrs.length()).any { cidrs.getString(it) == "10.10.34.0/24" } &&
-                    rule.optString("action") == "reject"
-            }
-            val privateIpIdx = ruleList.indexOfFirst { it.optBoolean("ip_is_private", false) }
-
-            assertTrue("10.10.34.0/24 reject rule must exist", poisonIdx >= 0)
-            assertTrue("10.10.34.0/24 reject rule must appear strictly before ip_is_private", poisonIdx < privateIpIdx)
+            assertFalse("Default config must not emit sniff rule", ruleList.any { it.optString("action") == "sniff" })
+            assertFalse("Default config must not emit ip_is_private (forces DNS lookup on domain traffic)", ruleList.any { it.optBoolean("ip_is_private", false) })
+            assertFalse("Default config must not emit ip_cidr (forces DNS lookup on domain traffic)", ruleList.any { it.has("ip_cidr") })
+            assertEquals(53, ruleList[0].optInt("port", -1))
+            assertEquals("hijack-dns", ruleList[0].optString("action"))
+            assertEquals("dns", ruleList[1].optString("protocol"))
+            assertEquals("hijack-dns", ruleList[1].optString("action"))
+            assertEquals(3, ruleList.size)
         }
     }
 

@@ -316,16 +316,6 @@ object SingBoxConfigParser {
                             put("protocol", "dns")
                             put("action", "hijack-dns")
                         })
-                        put(JSONObject().apply {
-                            put("ip_cidr", JSONArray().apply { put("10.10.34.0/24") })
-                            put("action", "reject")
-                        })
-                        if (config.sbBypassPrivateIp) {
-                            put(JSONObject().apply {
-                                put("ip_is_private", true)
-                                put("outbound", "direct")
-                            })
-                        }
                         if (config.sbBypassIrDomains) {
                             put(JSONObject().apply {
                                 put("domain_suffix", JSONArray().apply { put(".ir") })
@@ -341,8 +331,15 @@ object SingBoxConfigParser {
                         }
                         if (shouldBlockQuic) {
                             put(JSONObject().apply {
-                                put("protocol", "quic")
+                                put("network", "udp")
+                                put("port", 443)
                                 put("action", "reject")
+                            })
+                        }
+                        if (config.sbBypassPrivateIp) {
+                            put(JSONObject().apply {
+                                put("ip_is_private", true)
+                                put("outbound", "direct")
                             })
                         }
                     })
