@@ -135,13 +135,25 @@ data class DebugBuildVersion(
     }
 }
 
+data class DeltaManifest(
+    val fromVersionCode: Int,
+    val toVersionCode: Int,
+    val patchAssetName: String,
+    val patchSize: Long,
+    val fullAssetName: String,
+    val fullSize: Long,
+    val targetApkSha256: String,
+    val patchDownloadUrl: String? = null
+)
+
 data class ReleaseInfo(
     val tagName: String,
     val versionName: String,
     val releaseNotes: String,
     val apkDownloadUrl: String?,
     val apkFileName: String?,
-    val htmlUrl: String
+    val htmlUrl: String,
+    val deltaManifest: DeltaManifest? = null
 )
 
 data class DownloadProgress(
@@ -182,7 +194,8 @@ object UpdateManager {
     suspend fun checkForUpdates(
         currentVersion: String,
         isDebugBuild: Boolean = BuildConfig.DEBUG,
-        apiUrl: String = apiUrlForChannel(isDebugBuild)
+        apiUrl: String = apiUrlForChannel(isDebugBuild),
+        currentVersionCode: Int = BuildConfig.VERSION_CODE
     ): UpdateCheckResult = withContext(Dispatchers.IO) {
         var conn: HttpURLConnection? = null
         try {
@@ -212,7 +225,20 @@ object UpdateManager {
             }
 
             val bodyText = conn.inputStream.bufferedReader().use { it.readText() }
-            parseReleaseResponse(bodyText, currentVersion, isDebugBuild)
+            val deltaManifestJson = if (isDebugBuild) {
+                extractAssetUrl(bodyText, DELTA_MANIFEST_ASSET_NAME)?.let { manifestUrl ->
+                    fetchTextSafely(manifestUrl, currentVersion)
+                }
+            } else {
+                null
+            }
+            parseReleaseResponse(
+                jsonBody = bodyText,
+                currentVersion = currentVersion,
+                isDebugBuild = isDebugBuild,
+                deltaManifestJson = deltaManifestJson,
+                currentVersionCode = currentVersionCode
+            )
         } catch (e: Exception) {
             UpdateCheckResult.Unavailable(
                 "Unable to check for updates: ${e.message ?: "network error"}"
@@ -222,10 +248,77 @@ object UpdateManager {
         }
     }
 
+    private const val DELTA_MANIFEST_ASSET_NAME = "delta-manifest.json"
+
+    private fun extractAssetUrl(jsonBody: String, targetAssetName: String): String? {
+        val json = runCatching { JSONObject(jsonBody) }.getOrNull() ?: return null
+        val assets = json.optJSONArray("assets") ?: return null
+        for (i in 0 until assets.length()) {
+            val asset = assets.optJSONObject(i) ?: continue
+            if (asset.optString("name", "") == targetAssetName) {
+                val url = asset.optString("browser_download_url", "")
+                if (url.isNotBlank()) return url
+            }
+        }
+        return null
+    }
+
+    private fun fetchTextSafely(url: String, currentVersion: String): String? = runCatching {
+        var conn: HttpURLConnection? = null
+        try {
+            conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("User-Agent", "AetherVpnAndroid/$currentVersion")
+            }
+            if (conn.responseCode in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                null
+            }
+        } finally {
+            conn?.disconnect()
+        }
+    }.getOrNull()
+
+    internal fun parseDeltaManifest(
+        manifestJson: String,
+        currentVersionCode: Int,
+        assetUrls: Map<String, String>
+    ): DeltaManifest? {
+        val obj = runCatching { JSONObject(manifestJson) }.getOrNull() ?: return null
+        val fromCode = obj.optInt("fromVersionCode", -1)
+        val toCode = obj.optInt("toVersionCode", -1)
+        val patchName = obj.optString("patchAssetName", "").trim()
+        val patchSize = obj.optLong("patchSize", -1L)
+        val fullName = obj.optString("fullAssetName", "").trim()
+        val fullSize = obj.optLong("fullSize", -1L)
+        val sha256 = obj.optString("targetApkSha256", "").trim()
+
+        if (fromCode <= 0 || fromCode != currentVersionCode || toCode <= fromCode) return null
+        if (patchName.isEmpty() || patchSize <= 0L || fullName.isEmpty() || sha256.length != 64) return null
+        val patchUrl = assetUrls[patchName]?.takeIf { it.isNotBlank() } ?: return null
+
+        return DeltaManifest(
+            fromVersionCode = fromCode,
+            toVersionCode = toCode,
+            patchAssetName = patchName,
+            patchSize = patchSize,
+            fullAssetName = fullName,
+            fullSize = fullSize,
+            targetApkSha256 = sha256,
+            patchDownloadUrl = patchUrl
+        )
+    }
+
     internal fun parseReleaseResponse(
         jsonBody: String,
         currentVersion: String,
-        isDebugBuild: Boolean = false
+        isDebugBuild: Boolean = false,
+        deltaManifestJson: String? = null,
+        currentVersionCode: Int = 0
     ): UpdateCheckResult {
         val json = runCatching { JSONObject(jsonBody) }.getOrNull()
             ?: return UpdateCheckResult.Unavailable("Invalid release response from GitHub.")
@@ -241,20 +334,35 @@ object UpdateManager {
 
         var apkUrl: String? = null
         var apkName: String? = null
+        val assetUrls = mutableMapOf<String, String>()
         val assets = json.optJSONArray("assets")
         if (assets != null) {
             for (i in 0 until assets.length()) {
                 val asset = assets.optJSONObject(i) ?: continue
                 val name = asset.optString("name", "")
                 val url = asset.optString("browser_download_url", "")
+                if (name.isNotBlank() && url.isNotBlank()) {
+                    assetUrls[name] = url
+                }
                 if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
-                    apkUrl = url
-                    apkName = name
                     val isArm64 = name.contains("arm64", ignoreCase = true)
                     val isDebugAsset = name.contains("debug", ignoreCase = true)
+                    if (apkUrl == null || (isArm64 && isDebugAsset == isDebugBuild)) {
+                        apkUrl = url
+                        apkName = name
+                    }
                     if (isArm64 && isDebugAsset == isDebugBuild) {
                         break
                     }
+                }
+            }
+            // Ensure all remaining assets are indexed for delta manifest lookup
+            for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                val name = asset.optString("name", "")
+                val url = asset.optString("browser_download_url", "")
+                if (name.isNotBlank() && url.isNotBlank()) {
+                    assetUrls[name] = url
                 }
             }
         }
@@ -280,6 +388,12 @@ object UpdateManager {
             parsedRemote.toString()
         }
 
+        val deltaManifest = if (isDebugBuild && deltaManifestJson != null && currentVersionCode > 0) {
+            parseDeltaManifest(deltaManifestJson, currentVersionCode, assetUrls)
+        } else {
+            null
+        }
+
         return UpdateCheckResult.UpdateAvailable(
             ReleaseInfo(
                 tagName = tagName,
@@ -287,7 +401,8 @@ object UpdateManager {
                 releaseNotes = releaseNotes,
                 apkDownloadUrl = apkUrl,
                 apkFileName = apkName,
-                htmlUrl = htmlUrl
+                htmlUrl = htmlUrl,
+                deltaManifest = deltaManifest
             )
         )
     }
@@ -314,7 +429,8 @@ object UpdateManager {
         if (!updatesDir.exists() || !updatesDir.isDirectory) return
         updatesDir.listFiles()?.forEach { file ->
             if (file.isFile && (file.name.endsWith(".apk", ignoreCase = true) ||
-                    file.name.endsWith(".tmp", ignoreCase = true))
+                    file.name.endsWith(".tmp", ignoreCase = true) ||
+                    file.name.endsWith(".patch", ignoreCase = true))
             ) {
                 runCatching { file.delete() }
             }
@@ -330,11 +446,93 @@ object UpdateManager {
             if (isSamePart) return@forEach
             if (file.name.endsWith(".apk", ignoreCase = true) ||
                 file.name.endsWith(".tmp", ignoreCase = true) ||
-                file.name.endsWith(".part", ignoreCase = true)
+                file.name.endsWith(".part", ignoreCase = true) ||
+                file.name.endsWith(".patch", ignoreCase = true)
             ) {
                 runCatching { file.delete() }
             }
         }
+    }
+
+    suspend fun downloadUpdate(
+        release: ReleaseInfo,
+        baseApkPath: String?,
+        currentVersionCode: Int = BuildConfig.VERSION_CODE,
+        cacheDir: File,
+        onStatus: (String) -> Unit = {},
+        onProgress: (DownloadProgress) -> Unit
+    ): Result<File> {
+        val delta = release.deltaManifest
+        val baseApkFile = baseApkPath?.takeIf { it.isNotBlank() }?.let { File(it) }
+        if (delta != null &&
+            delta.fromVersionCode == currentVersionCode &&
+            !delta.patchDownloadUrl.isNullOrBlank() &&
+            baseApkFile != null &&
+            baseApkFile.isFile
+        ) {
+            onStatus("Downloading delta patch (${delta.patchAssetName})...")
+            val patchResult = downloadApk(
+                downloadUrl = delta.patchDownloadUrl,
+                fileName = delta.patchAssetName,
+                cacheDir = cacheDir,
+                onProgress = onProgress
+            )
+            if (patchResult.isSuccess) {
+                val patchFile = patchResult.getOrThrow()
+                val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
+                val safeTargetName = sanitizeFileName(delta.fullAssetName)
+                val targetFile = File(updatesDir, safeTargetName)
+                val tmpTargetFile = File(updatesDir, "$safeTargetName.tmp")
+                try {
+                    val patched = withContext(Dispatchers.IO) {
+                        onStatus("Applying delta patch...")
+                        BsPatch.patch(
+                            oldFile = baseApkFile,
+                            patchFile = patchFile,
+                            newFile = tmpTargetFile
+                        )
+                        val actualSha = BsPatch.sha256Hex(tmpTargetFile)
+                        if (!actualSha.equals(delta.targetApkSha256, ignoreCase = true)) {
+                            throw IllegalStateException(
+                                "Patched APK SHA-256 mismatch (expected ${delta.targetApkSha256}, got $actualSha)"
+                            )
+                        }
+                        if (targetFile.exists()) {
+                            targetFile.delete()
+                        }
+                        if (!tmpTargetFile.renameTo(targetFile)) {
+                            tmpTargetFile.copyTo(targetFile, overwrite = true)
+                            tmpTargetFile.delete()
+                        }
+                        targetFile
+                    }
+                    return Result.success(patched)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    runCatching { tmpTargetFile.delete() }
+                    runCatching { targetFile.delete() }
+                    cancelPartialDownload(delta.patchAssetName, cacheDir)
+                    onStatus("Delta patch failed, downloading full APK...")
+                } finally {
+                    runCatching { patchFile.delete() }
+                }
+            } else {
+                cancelPartialDownload(delta.patchAssetName, cacheDir)
+                onStatus("Delta download failed, falling back to full APK...")
+            }
+        }
+
+        val fullUrl = release.apkDownloadUrl
+            ?: return Result.failure(IllegalStateException("No APK download URL available."))
+        val fullFileName = release.apkFileName ?: "aether-android-arm64-v${release.versionName}.apk"
+        onStatus("Downloading $fullFileName...")
+        return downloadApk(
+            downloadUrl = fullUrl,
+            fileName = fullFileName,
+            cacheDir = cacheDir,
+            onProgress = onProgress
+        )
     }
 
     suspend fun downloadApk(

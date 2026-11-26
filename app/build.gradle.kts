@@ -138,6 +138,9 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
+    // Streaming bzip2 decompression for bsdiff binary delta updates
+    implementation("org.apache.commons:commons-compress:1.27.1")
+
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

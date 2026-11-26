@@ -324,11 +324,58 @@ jobs:
         run: |
           TAG="debug-latest"
           TITLE="v${DEBUG_VERSION}"
-          APK_PATH="release-artifacts/aether-android-arm64-v${DEBUG_VERSION}.apk"
+          CURR_VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          APK_NAME="aether-android-arm64-v${DEBUG_VERSION}.apk"
+          APK_PATH="release-artifacts/${APK_NAME}"
           SUMS_PATH="release-artifacts/SHA256SUMS.txt"
+          MANIFEST_PATH="release-artifacts/delta-manifest.json"
+          PATCH_PATH=""
           NOTES="Rolling automated ARM64 Debug build from \`main\` (${GITHUB_SHA::7})."$'\n\n'"**Version:** \`${TITLE}\`"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            PREV_APK_NAME=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name | endswith(".apk")) | .name' | head -n 1 || true)
+            PREV_VERSION_CODE=$(echo "$PREV_APK_NAME" | sed -nE 's/.*-b([0-9]+).*\.apk$/\1/p')
+            if [ -n "$PREV_APK_NAME" ] && [ -n "$PREV_VERSION_CODE" ] && [ "$PREV_VERSION_CODE" != "$CURR_VERSION_CODE" ]; then
+              echo "Found previous debug-latest APK: $PREV_APK_NAME (versionCode=$PREV_VERSION_CODE)"
+              if gh release download "$TAG" -p "$PREV_APK_NAME" -O /tmp/prev.apk; then
+                sudo apt-get update && sudo apt-get install -y bsdiff
+                PATCH_NAME="delta-b${PREV_VERSION_CODE}-to-b${CURR_VERSION_CODE}.patch"
+                CANDIDATE_PATCH="release-artifacts/${PATCH_NAME}"
+                bsdiff /tmp/prev.apk "$APK_PATH" "$CANDIDATE_PATCH"
+                FULL_SIZE=$(stat -c%s "$APK_PATH")
+                PATCH_SIZE=$(stat -c%s "$CANDIDATE_PATCH")
+                THRESHOLD=$((FULL_SIZE * 60 / 100))
+                echo "Delta patch size: ${PATCH_SIZE} bytes (full APK: ${FULL_SIZE} bytes, 60% threshold: ${THRESHOLD} bytes)"
+                if [ "$PATCH_SIZE" -lt "$THRESHOLD" ]; then
+                  TARGET_SHA256=$(sha256sum "$APK_PATH" | awk '{print $1}')
+                  python3 - "$PREV_VERSION_CODE" "$CURR_VERSION_CODE" "$PATCH_NAME" "$PATCH_SIZE" "$APK_NAME" "$FULL_SIZE" "$TARGET_SHA256" "$MANIFEST_PATH" <<'EOF'
+          import json
+          import sys
+
+          manifest = {
+              "fromVersionCode": int(sys.argv[1]),
+              "toVersionCode": int(sys.argv[2]),
+              "patchAssetName": sys.argv[3],
+              "patchSize": int(sys.argv[4]),
+              "fullAssetName": sys.argv[5],
+              "fullSize": int(sys.argv[6]),
+              "targetApkSha256": sys.argv[7],
+          }
+          with open(sys.argv[8], "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          EOF
+                  PATCH_PATH="$CANDIDATE_PATCH"
+                  echo "Generated delta-manifest.json:"
+                  cat "$MANIFEST_PATH"
+                else
+                  echo "Delta patch >= 60% of full APK; skipping delta upload."
+                  rm -f "$CANDIDATE_PATCH"
+                fi
+                rm -f /tmp/prev.apk
+              fi
+            fi
+
             EXISTING_ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
             for asset in $EXISTING_ASSETS; do
               echo "Deleting stale asset: $asset"
@@ -340,7 +387,12 @@ jobs:
               --prerelease \
               --latest=false \
               --target "$GITHUB_SHA"
-            gh release upload "$TAG" "$APK_PATH" "$SUMS_PATH" --clobber
+
+            UPLOAD_FILES=("$APK_PATH" "$SUMS_PATH")
+            if [ -n "$PATCH_PATH" ] && [ -f "$MANIFEST_PATH" ]; then
+              UPLOAD_FILES+=("$MANIFEST_PATH" "$PATCH_PATH")
+            fi
+            gh release upload "$TAG" "${UPLOAD_FILES[@]}" --clobber
           else
             gh release create "$TAG" "$APK_PATH" "$SUMS_PATH" \
               --title "$TITLE" \

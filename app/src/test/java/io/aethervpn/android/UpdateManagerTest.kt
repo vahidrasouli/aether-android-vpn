@@ -338,4 +338,174 @@ class UpdateManagerTest {
             tempCacheDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun bsPatchRoundTripReproducesExactTargetBytesAndSha256() {
+        val tempDir = java.nio.file.Files.createTempDirectory("aether-bspatch-").toFile()
+        try {
+            val oldBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".toByteArray(Charsets.UTF_8)
+            val newBytes = "ABCDE12345FGHIJ_EXTRA_UVWXY!".toByteArray(Charsets.UTF_8)
+
+            // Build a valid BSDIFF40 patch:
+            // Tuple 1: add 5 ("ABCDE", diff 0), extra 5 ("12345"), seek 0 (oldPos -> 5)
+            // Tuple 2: add 5 ("FGHIJ", diff 0), extra 7 ("_EXTRA_"), seek 10 (oldPos -> 20)
+            // Tuple 3: add 6 ("UVWXYZ" + diff for '!' at index 5: '!' - 'Z'), extra 0, seek 0
+            val ctrlRaw = java.io.ByteArrayOutputStream()
+            fun writeOfft(out: java.io.OutputStream, v: Long) {
+                var x = if (v < 0) -v else v
+                val b = ByteArray(8)
+                for (i in 0..7) {
+                    b[i] = (x and 0xFF).toByte()
+                    x = x ushr 8
+                }
+                if (v < 0) b[7] = (b[7].toInt() or 0x80).toByte()
+                out.write(b)
+            }
+            writeOfft(ctrlRaw, 5); writeOfft(ctrlRaw, 5); writeOfft(ctrlRaw, 0)
+            writeOfft(ctrlRaw, 5); writeOfft(ctrlRaw, 7); writeOfft(ctrlRaw, 10)
+            writeOfft(ctrlRaw, 6); writeOfft(ctrlRaw, 0); writeOfft(ctrlRaw, 0)
+
+            val diffRaw = ByteArray(16)
+            diffRaw[15] = ('!'.code - 'Z'.code).toByte()
+            val extraRaw = "12345_EXTRA_".toByteArray(Charsets.UTF_8)
+
+            fun bzip2(data: ByteArray): ByteArray {
+                val baos = java.io.ByteArrayOutputStream()
+                org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream(baos).use {
+                    it.write(data)
+                }
+                return baos.toByteArray()
+            }
+
+            val ctrlBz2 = bzip2(ctrlRaw.toByteArray())
+            val diffBz2 = bzip2(diffRaw)
+            val extraBz2 = bzip2(extraRaw)
+
+            val patchFile = java.io.File(tempDir, "test.patch")
+            java.io.FileOutputStream(patchFile).use { fos ->
+                fos.write("BSDIFF40".toByteArray(Charsets.US_ASCII))
+                writeOfft(fos, ctrlBz2.size.toLong())
+                writeOfft(fos, diffBz2.size.toLong())
+                writeOfft(fos, newBytes.size.toLong())
+                fos.write(ctrlBz2)
+                fos.write(diffBz2)
+                fos.write(extraBz2)
+            }
+
+            val oldFile = java.io.File(tempDir, "old.apk").apply { writeBytes(oldBytes) }
+            val outFile = java.io.File(tempDir, "new.apk")
+
+            io.aethervpn.android.core.BsPatch.patch(oldFile, patchFile, outFile)
+
+            assertTrue(outFile.exists())
+            assertTrue(outFile.readBytes().contentEquals(newBytes))
+
+            val expectedSha = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(newBytes)
+                .joinToString("") { "%02x".format(it) }
+            assertEquals(expectedSha, io.aethervpn.android.core.BsPatch.sha256Hex(outFile))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun deltaManifestMismatchedFromVersionCodeFallsBackToFullApk(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val releaseJson = """
+            {
+              "tag_name": "debug-latest",
+              "name": "v1.1.0-debug-b57",
+              "prerelease": true,
+              "html_url": "https://github.com/vahidrasouli/aether-android-vpn/releases/tag/debug-latest",
+              "body": "Debug build 57",
+              "assets": [
+                {
+                  "name": "aether-android-arm64-v1.1.0-debug-b57.apk",
+                  "browser_download_url": "https://example.com/aether-android-arm64-v1.1.0-debug-b57.apk"
+                },
+                {
+                  "name": "delta-b55-to-b57.patch",
+                  "browser_download_url": "https://example.com/delta-b55-to-b57.patch"
+                }
+              ]
+            }
+        """.trimIndent()
+        val manifestJson = """
+            {
+              "fromVersionCode": 55,
+              "toVersionCode": 57,
+              "patchAssetName": "delta-b55-to-b57.patch",
+              "patchSize": 600000,
+              "fullAssetName": "aether-android-arm64-v1.1.0-debug-b57.apk",
+              "fullSize": 18000000,
+              "targetApkSha256": "${"a".repeat(64)}"
+            }
+        """.trimIndent()
+
+        val mismatchResult = UpdateManager.parseReleaseResponse(
+            jsonBody = releaseJson,
+            currentVersion = "1.1.0-debug-b56",
+            isDebugBuild = true,
+            deltaManifestJson = manifestJson,
+            currentVersionCode = 56
+        ) as UpdateCheckResult.UpdateAvailable
+        assertNull("Expected deltaManifest to be null when fromVersionCode != currentVersionCode", mismatchResult.release.deltaManifest)
+
+        val matchResult = UpdateManager.parseReleaseResponse(
+            jsonBody = releaseJson,
+            currentVersion = "1.1.0-debug-b55",
+            isDebugBuild = true,
+            deltaManifestJson = manifestJson,
+            currentVersionCode = 55
+        ) as UpdateCheckResult.UpdateAvailable
+        assertNotNull("Expected deltaManifest when fromVersionCode == currentVersionCode", matchResult.release.deltaManifest)
+        assertEquals(600000L, matchResult.release.deltaManifest!!.patchSize)
+
+        // Verify downloadUpdate falls back cleanly to full APK when fromVersionCode mismatches
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-fallback-").toFile()
+        val baseApk = java.io.File(tempCacheDir, "base.apk").apply { writeText("OLD_APK") }
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val fullApkPayload = "FULL_APK_BYTES_B57".toByteArray()
+        val serverThread = Thread {
+            try {
+                server.accept().use { sock ->
+                    val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                    var line = inp.readLine()
+                    while (!line.isNullOrEmpty()) {
+                        line = inp.readLine()
+                    }
+                    val out = sock.getOutputStream()
+                    out.write(
+                        ("HTTP/1.1 200 OK\r\nContent-Length: ${fullApkPayload.size}\r\nConnection: close\r\n\r\n")
+                            .toByteArray()
+                    )
+                    out.write(fullApkPayload)
+                    out.flush()
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        serverThread.isDaemon = true
+        serverThread.start()
+
+        try {
+            val releaseWithMismatchedDelta = mismatchResult.release.copy(
+                apkDownloadUrl = "http://127.0.0.1:${server.localPort}/full.apk"
+            )
+            val res = UpdateManager.downloadUpdate(
+                release = releaseWithMismatchedDelta,
+                baseApkPath = baseApk.absolutePath,
+                currentVersionCode = 56,
+                cacheDir = tempCacheDir
+            ) {}
+            assertTrue(res.isSuccess)
+            val downloaded = res.getOrThrow()
+            assertEquals("FULL_APK_BYTES_B57", downloaded.readText())
+        } finally {
+            runCatching { server.close() }
+            tempCacheDir.deleteRecursively()
+        }
+    }
 }

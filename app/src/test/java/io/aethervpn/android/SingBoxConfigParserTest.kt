@@ -198,8 +198,9 @@ class SingBoxConfigParserTest {
 
             val remoteDns = servers.getJSONObject(0)
             assertEquals("dns-remote", remoteDns.getString("tag"))
-            assertEquals("udp", remoteDns.getString("type"))
+            assertEquals("tcp", remoteDns.getString("type"))
             assertEquals("1.1.1.1", remoteDns.getString("server"))
+            assertEquals(53, remoteDns.getInt("server_port"))
             assertEquals("proxy", remoteDns.getString("detour"))
             assertFalse(remoteDns.has("address"))
 
@@ -403,5 +404,27 @@ class SingBoxConfigParserTest {
         val urlSafeNoPad = Base64.getUrlEncoder().withoutPadding().encodeToString(plainList.toByteArray(Charsets.UTF_8))
         val urlSafeResult = SingBoxConfigParser.parseSubscriptionPayload(urlSafeNoPad)
         assertEquals(3, urlSafeResult.parsedItems.size)
+    }
+
+    @Test
+    fun plainIpRemoteDnsUsesTcpPort53OverProxyWhileLocalRemainsUdp() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=ws&security=tls#VlessWs"
+        for (dnsIp in listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")) {
+            val cfg = VpnConfig(sbRemoteDns = dnsIp, sbDirectDns = "1.1.1.1")
+            val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, cfg).getOrThrow())
+            val servers = runtime.getJSONObject("dns").getJSONArray("servers")
+
+            val remoteDns = servers.getJSONObject(0)
+            assertEquals("dns-remote", remoteDns.getString("tag"))
+            assertEquals("tcp", remoteDns.getString("type"))
+            assertEquals(dnsIp, remoteDns.getString("server"))
+            assertEquals(53, remoteDns.getInt("server_port"))
+            assertEquals("proxy", remoteDns.getString("detour"))
+
+            val localDns = servers.getJSONObject(1)
+            assertEquals("dns-local", localDns.getString("tag"))
+            assertEquals("udp", localDns.getString("type"))
+            assertFalse("dns-local must remain direct without detour", localDns.has("detour"))
+        }
     }
 }

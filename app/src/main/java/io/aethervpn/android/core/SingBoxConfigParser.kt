@@ -379,8 +379,9 @@ object SingBoxConfigParser {
         } else {
             JSONObject().apply {
                 put("tag", "dns-remote")
-                put("type", "udp")
+                put("type", "tcp")
                 put("server", trimmed)
+                put("server_port", 53)
                 put("detour", "proxy")
             }
         }

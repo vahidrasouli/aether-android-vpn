@@ -1125,7 +1125,18 @@ class MainActivity : AppCompatActivity() {
                     is UpdateCheckResult.UpdateAvailable -> {
                         val rel = result.release
                         pendingUpdateRelease = rel
-                        binding.tvUpdateStatus.text = "New version available!"
+                        val delta = rel.deltaManifest
+                        binding.tvUpdateStatus.text = if (delta != null) {
+                            val deltaMb = delta.patchSize / (1024.0 * 1024.0)
+                            String.format(
+                                Locale.US,
+                                "Update available: v%s (Delta ~%.1f MB)",
+                                rel.versionName,
+                                deltaMb
+                            )
+                        } else {
+                            "New version available!"
+                        }
                         binding.tvUpdateVersion.text = "Update ${rel.tagName} (v${rel.versionName})"
                         binding.tvUpdateNotes.text = rel.releaseNotes
                         binding.progressUpdateDownload.visibility = View.GONE
@@ -1163,6 +1174,9 @@ class MainActivity : AppCompatActivity() {
                 if (fileName != null) {
                     uiScope.launch(Dispatchers.IO) {
                         UpdateManager.cancelPartialDownload(fileName, cacheDir)
+                        rel?.deltaManifest?.patchAssetName?.let { patchName ->
+                            UpdateManager.cancelPartialDownload(patchName, cacheDir)
+                        }
                     }
                 }
                 binding.progressUpdateDownload.visibility = View.GONE
@@ -1215,10 +1229,18 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 try {
-                    val downloadResult = UpdateManager.downloadApk(
-                        downloadUrl = apkUrl,
-                        fileName = fileName,
-                        cacheDir = cacheDir
+                    val downloadResult = UpdateManager.downloadUpdate(
+                        release = rel,
+                        baseApkPath = applicationInfo?.sourceDir,
+                        currentVersionCode = BuildConfig.VERSION_CODE,
+                        cacheDir = cacheDir,
+                        onStatus = { statusText ->
+                            lifecycleScope.launch {
+                                if (activeUpdateDownloadJob?.isActive == true) {
+                                    binding.tvUpdateStatus.text = statusText
+                                }
+                            }
+                        }
                     ) { progress ->
                         lifecycleScope.launch {
                             if (activeUpdateDownloadJob?.isActive == true) {
@@ -1251,6 +1273,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (_: CancellationException) {
                     UpdateManager.cancelPartialDownload(fileName, cacheDir)
+                    rel.deltaManifest?.patchAssetName?.let { patchName ->
+                        UpdateManager.cancelPartialDownload(patchName, cacheDir)
+                    }
                     binding.progressUpdateDownload.visibility = View.GONE
                     binding.progressUpdateDownload.progress = 0
                     binding.tvUpdateProgressDetail.visibility = View.GONE
