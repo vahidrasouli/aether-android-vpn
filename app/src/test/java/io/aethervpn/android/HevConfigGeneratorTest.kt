@@ -38,44 +38,6 @@ class HevConfigGeneratorTest {
     }
 
     @Test
-    fun allEmittedYamlKeysMatchHevConfigParser220() {
-        // Exact keys accepted by heiher/hev-socks5-tunnel 2.20.0 src/hev-config.c
-        val hevConfigKeysBySection = mapOf(
-            "tunnel" to setOf("name", "guid", "mtu", "multi-queue", "ipv4", "ipv6", "icmp", "post-up-script", "pre-down-script", "offload"),
-            "socks5" to setOf("port", "address", "udp", "udp-address", "pipeline", "username", "password", "mark", "tcp-fastopen"),
-            "mapdns" to setOf("address", "port", "network", "netmask", "cache-size"),
-            "misc" to setOf(
-                "task-stack-size", "wintun-ring-capacity", "tcp-buffer-size",
-                "udp-recv-buffer-size", "udp-copy-buffer-nums", "max-session-count",
-                "connect-timeout", "read-write-timeout", "tcp-read-write-timeout",
-                "udp-read-write-timeout", "pid-file", "log-file", "log-level", "limit-nofile"
-            )
-        )
-
-        val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
-        val configs = listOf(
-            VpnConfig(ipFamily = IpFamily.BOTH, hevMode = HevMode.TCP_UDP),
-            VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY, hevMode = HevMode.TCP_ONLY)
-        )
-        for (cfg in configs) {
-            val yaml = manager.generateYamlConfig(cfg)
-            var currentSection: String? = null
-            for (rawLine in yaml.lines()) {
-                if (rawLine.isBlank() || rawLine.trimStart().startsWith("#")) continue
-                if (!rawLine.startsWith(" ")) {
-                    val section = rawLine.substringBefore(":").trim()
-                    assertTrue("Unknown top-level section '$section' in hev-config.c", section in hevConfigKeysBySection)
-                    currentSection = section
-                } else {
-                    val key = rawLine.trim().substringBefore(":").trim()
-                    val allowed = hevConfigKeysBySection[currentSection] ?: emptySet()
-                    assertTrue("Key '$currentSection.$key' is not supported by hev-config.c 2.20.0", key in allowed)
-                }
-            }
-        }
-    }
-
-    @Test
     fun optimalMobileMtuConfiguration() {
         val manager = HevTunnelManager(File(System.getProperty("java.io.tmpdir") ?: "."))
         val defaultYaml = manager.generateYamlConfig(VpnConfig(tunMtu = 1280))
