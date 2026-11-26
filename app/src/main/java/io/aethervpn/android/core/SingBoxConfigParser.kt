@@ -13,6 +13,11 @@ data class ParsedSingBoxProfile(
     val outboundOrFullJson: JSONObject
 )
 
+data class BulkSingBoxParseResult(
+    val parsedItems: List<Pair<String, ParsedSingBoxProfile>>,
+    val skippedCount: Int
+)
+
 /**
  * Universal URI & JSON parser for SagerNet/sing-box.
  *
@@ -56,6 +61,10 @@ object SingBoxConfigParser {
     fun detectProtocolBadge(rawInput: String): String {
         val trimmed = rawInput.trim()
         if (trimmed.startsWith("{")) return "JSON"
+        val nonEmptyLines = trimmed.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("//") }
+        if (nonEmptyLines.size > 1) return "${nonEmptyLines.size} LINES"
         return when (trimmed.substringBefore("://", "").lowercase()) {
             "vless" -> "VLESS"
             "vmess" -> "VMess"
@@ -67,6 +76,70 @@ object SingBoxConfigParser {
             "socks", "socks5" -> "SOCKS5"
             "http", "https" -> "HTTP"
             else -> "RAW"
+        }
+    }
+
+    fun parseBulk(rawInput: String, customName: String? = null): BulkSingBoxParseResult {
+        val trimmed = rawInput.trim()
+        if (trimmed.isEmpty()) return BulkSingBoxParseResult(emptyList(), 0)
+        if (trimmed.startsWith("{")) {
+            val single = parse(trimmed, customName).getOrNull()
+            return if (single != null) {
+                BulkSingBoxParseResult(listOf(trimmed to single), 0)
+            } else {
+                BulkSingBoxParseResult(emptyList(), 1)
+            }
+        }
+        val lines = trimmed.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("//") }
+        if (lines.isEmpty()) return BulkSingBoxParseResult(emptyList(), 0)
+
+        val valid = mutableListOf<Pair<String, ParsedSingBoxProfile>>()
+        var skipped = 0
+        val useCustomName = if (lines.size == 1) customName else null
+        for (line in lines) {
+            val parsed = parse(line, useCustomName).getOrNull()
+            if (parsed != null) {
+                valid.add(line to parsed)
+            } else {
+                skipped++
+            }
+        }
+        return BulkSingBoxParseResult(valid, skipped)
+    }
+
+    fun extractServerPreview(rawUriOrJson: String): String {
+        val parsed = parse(rawUriOrJson).getOrNull() ?: return "Invalid config"
+        if (!parsed.isFullConfig) {
+            val host = parsed.outboundOrFullJson.optString("server").trim()
+            val port = parsed.outboundOrFullJson.optInt("server_port", 0)
+            return when {
+                host.isNotBlank() && port > 0 -> "$host:$port"
+                host.isNotBlank() -> host
+                else -> parsed.protocol
+            }
+        }
+        val outbounds = parsed.outboundOrFullJson.optJSONArray("outbounds")
+        if (outbounds != null) {
+            for (i in 0 until outbounds.length()) {
+                val ob = outbounds.optJSONObject(i) ?: continue
+                if (ob.optString("type").lowercase() !in SYSTEM_OUTBOUND_TYPES) {
+                    val host = ob.optString("server").trim()
+                    val port = ob.optInt("server_port", 0)
+                    if (host.isNotBlank() && port > 0) return "$host:$port"
+                    if (host.isNotBlank()) return host
+                }
+            }
+        }
+        return "Full JSON config"
+    }
+
+    internal fun normalizeShadowsocksMethod(rawMethod: String): String {
+        val normalized = rawMethod.trim().lowercase()
+        return when (normalized) {
+            "chacha20-poly1305", "xchacha20-poly1305" -> "chacha20-ietf-poly1305"
+            else -> normalized
         }
     }
 
@@ -134,6 +207,9 @@ object SingBoxConfigParser {
                 if (upstreamSocksPort != null) {
                     put("detour", UPSTREAM_SOCKS_TAG)
                 }
+                if (optString("type").equals("shadowsocks", ignoreCase = true) && has("method")) {
+                    put("method", normalizeShadowsocksMethod(optString("method")))
+                }
             }
             val isTcpOutbound = outbound.optString("type").lowercase() in TCP_BASED_OUTBOUND_TYPES
             val shouldBlockQuic = when (config.sbBlockQuic) {
@@ -150,7 +226,6 @@ object SingBoxConfigParser {
                             put("tag", "dns-local")
                             put("type", "udp")
                             put("server", config.sbDirectDns.ifBlank { "1.1.1.1" })
-                            put("detour", "direct")
                         })
                     })
                     put("final", "dns-remote")
@@ -408,13 +483,14 @@ object SingBoxConfigParser {
             port = hp.second
         }
 
+        val normalizedMethod = normalizeShadowsocksMethod(method)
         val name = resolveName(customName, fragment, "SS $host:$port")
         val outbound = JSONObject().apply {
             put("type", "shadowsocks")
             put("tag", "proxy")
             put("server", host)
             put("server_port", port)
-            put("method", method)
+            put("method", normalizedMethod)
             put("password", password)
         }
         // Optional SIP003 plugin is ignored if empty; basic SS works out of box

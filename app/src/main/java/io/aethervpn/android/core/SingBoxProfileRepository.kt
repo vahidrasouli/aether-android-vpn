@@ -101,6 +101,75 @@ object SingBoxProfileRepository {
         profile
     }
 
+    fun addProfilesBulk(
+        filesDir: File,
+        rawInput: String,
+        customName: String? = null
+    ): Result<Pair<List<SingBoxProfile>, Int>> = runCatching {
+        val bulk = SingBoxConfigParser.parseBulk(rawInput, customName)
+        require(bulk.parsedItems.isNotEmpty()) {
+            "No valid Sing-box profiles found in input"
+        }
+        val newProfiles = bulk.parsedItems.map { (rawLine, parsed) ->
+            SingBoxProfile(
+                id = UUID.randomUUID().toString(),
+                name = parsed.name,
+                protocol = parsed.protocol,
+                rawUriOrJson = rawLine
+            )
+        }
+        val current = load(filesDir)
+        val updated = current.copy(
+            activeProfileId = current.activeProfileId ?: newProfiles.first().id,
+            profiles = current.profiles + newProfiles
+        )
+        save(filesDir, updated)
+        newProfiles to bulk.skippedCount
+    }
+
+    fun updateProfile(
+        filesDir: File,
+        profileId: String,
+        rawUriOrJson: String,
+        customName: String? = null
+    ): Result<SingBoxProfile> = runCatching {
+        val trimmedRaw = rawUriOrJson.trim()
+        val parsed = SingBoxConfigParser.parse(trimmedRaw, customName).getOrThrow()
+        val current = load(filesDir)
+        var updatedProfile: SingBoxProfile? = null
+        val updatedList = current.profiles.map { existing ->
+            if (existing.id == profileId) {
+                val uriChanged = existing.rawUriOrJson.trim() != trimmedRaw
+                val next = existing.copy(
+                    name = parsed.name,
+                    protocol = parsed.protocol,
+                    rawUriOrJson = trimmedRaw,
+                    lastPingMs = if (uriChanged) null else existing.lastPingMs,
+                    lastExitIp = if (uriChanged) null else existing.lastExitIp,
+                    lastCountry = if (uriChanged) null else existing.lastCountry
+                )
+                updatedProfile = next
+                next
+            } else {
+                existing
+            }
+        }
+        val resultProfile = updatedProfile ?: throw IllegalArgumentException("Profile not found")
+        save(filesDir, current.copy(profiles = updatedList))
+        resultProfile
+    }
+
+    fun sortProfilesByPing(filesDir: File): SingBoxProfileStoreState {
+        val current = load(filesDir)
+        val sorted = current.profiles.sortedWith(
+            compareBy<SingBoxProfile> { it.lastPingMs == null }
+                .thenBy { it.lastPingMs ?: Long.MAX_VALUE }
+        )
+        val updated = current.copy(profiles = sorted)
+        save(filesDir, updated)
+        return updated
+    }
+
     fun deleteProfile(filesDir: File, profileId: String): SingBoxProfileStoreState {
         val current = load(filesDir)
         val remaining = current.profiles.filterNot { it.id == profileId }

@@ -161,16 +161,25 @@ class SingBoxTuningTest {
         // Log
         assertEquals("info", runtime.getJSONObject("log").getString("level"))
 
-        // DNS 1.12
+        // DNS 1.12 (runtime & ephemeral test config must omit detour on dns-local)
         val dns = runtime.getJSONObject("dns")
         assertEquals("prefer_ipv6", dns.getString("strategy"))
         val servers = dns.getJSONArray("servers")
         val remote = servers.getJSONObject(0)
         assertEquals("udp", remote.getString("type"))
         assertEquals("9.9.9.9", remote.getString("server"))
+        assertEquals("proxy", remote.getString("detour"))
         val local = servers.getJSONObject(1)
         assertEquals("udp", local.getString("type"))
         assertEquals("223.5.5.5", local.getString("server"))
+        assertFalse("dns-local must NOT have detour in runtime config", local.has("detour"))
+
+        val testRuntime = JSONObject(
+            SingBoxConfigParser.buildRuntimeConfig(sampleHy2Uri, listenPort = 18999, config = tuned).getOrThrow()
+        )
+        val testLocalDns = testRuntime.getJSONObject("dns").getJSONArray("servers").getJSONObject(1)
+        assertEquals("dns-local", testLocalDns.getString("tag"))
+        assertFalse("dns-local must NOT have detour in test config", testLocalDns.has("detour"))
 
         // Outbound dialer
         val proxy = runtime.getJSONArray("outbounds").getJSONObject(0)

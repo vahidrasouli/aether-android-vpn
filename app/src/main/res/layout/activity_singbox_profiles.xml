@@ -32,8 +32,9 @@
             style="@style/Widget.Aether.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginTop="14dp"
+            android:layout_marginHorizontal="14dp"
+            android:layout_marginTop="10dp"
+            app:cardCornerRadius="12dp"
             app:strokeColor="@color/singbox_accent"
             app:strokeWidth="1dp">
 
@@ -41,7 +42,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -174,6 +175,51 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <LinearLayout
+            android:id="@+id/layoutTestAllProgress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="14dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_terminal_card"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="6dp"
+            android:visibility="gone">
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/progressTestAll"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:indeterminate="true"
+                app:indicatorColor="@color/accent_primary"
+                app:indicatorSize="16dp"
+                app:trackThickness="2dp" />
+
+            <TextView
+                android:id="@+id/tvTestAllStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:text="Testing 1 / 5…"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/btnCancelTestAll"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="4dp"
+                android:text="@string/action_cancel"
+                android:textColor="@color/error_text"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/tvProfilesEmpty"
             android:layout_width="match_parent"
@@ -190,11 +236,11 @@
             android:id="@+id/rvSingBoxProfiles"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:layout_weight="1"
             android:clipToPadding="false"
-            android:paddingHorizontal="16dp"
-            android:paddingBottom="88dp" />
+            android:paddingHorizontal="14dp"
+            android:paddingBottom="84dp" />
     </LinearLayout>
 
     <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton

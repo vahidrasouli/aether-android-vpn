@@ -205,7 +205,7 @@ class SingBoxConfigParserTest {
             assertEquals("dns-local", localDns.getString("tag"))
             assertEquals("udp", localDns.getString("type"))
             assertEquals("1.1.1.1", localDns.getString("server"))
-            assertEquals("direct", localDns.getString("detour"))
+            assertFalse("dns-local must NOT have detour in sing-box 1.12", localDns.has("detour"))
             assertFalse(localDns.has("address"))
 
             // Proxy outbound dial timeout field (no invalid tcp_keep_alive fields for sing-box 1.12)
@@ -261,6 +261,56 @@ class SingBoxConfigParserTest {
             assertEquals("proxy", proxyOutbound.getString("tag"))
             assertEquals("10s", proxyOutbound.getString("connect_timeout"))
         }
+    }
+
+    @Test
+    fun shadowsocksNormalizesChacha20AndXchacha20Aliases() {
+        val sipUser1 = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("chacha20-poly1305:pass1".toByteArray(Charsets.UTF_8))
+        val parsed1 = SingBoxConfigParser.parse("ss://$sipUser1@198.51.100.20:8388#SS-Chacha").getOrThrow()
+        assertEquals("chacha20-ietf-poly1305", parsed1.outboundOrFullJson.getString("method"))
+
+        val sipUser2 = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("xchacha20-poly1305:pass2".toByteArray(Charsets.UTF_8))
+        val parsed2 = SingBoxConfigParser.parse("ss://$sipUser2@198.51.100.20:8388#SS-XChacha").getOrThrow()
+        assertEquals("chacha20-ietf-poly1305", parsed2.outboundOrFullJson.getString("method"))
+
+        val sipUser3 = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("  CHACHA20-POLY1305  :pass3".toByteArray(Charsets.UTF_8))
+        val parsed3 = SingBoxConfigParser.parse("ss://$sipUser3@198.51.100.20:8388#SS-Trim").getOrThrow()
+        assertEquals("chacha20-ietf-poly1305", parsed3.outboundOrFullJson.getString("method"))
+
+        val sipUser4 = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("2022-blake3-aes-128-gcm:key123".toByteArray(Charsets.UTF_8))
+        val parsed4 = SingBoxConfigParser.parse("ss://$sipUser4@198.51.100.20:8388#SS-2022").getOrThrow()
+        assertEquals("2022-blake3-aes-128-gcm", parsed4.outboundOrFullJson.getString("method"))
+    }
+
+    @Test
+    fun bulkMultiLineUriParsingImportsMultipleProtocolsCleanly() {
+        val vmessJson = """{"v":"2","ps":"VMess-Bulk","add":"203.0.113.5","port":"443","id":"12345678-1234-1234-1234-1234567890ab","net":"tcp"}"""
+        val vmessUri = "vmess://" + Base64.getEncoder().encodeToString(vmessJson.toByteArray(Charsets.UTF_8))
+        val ssUser = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("chacha20-poly1305:sspass".toByteArray(Charsets.UTF_8))
+
+        val multiLine = """
+            # Comment line should be ignored
+            vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?security=tls#VlessBulk
+
+            $vmessUri
+            ss://$ssUser@198.51.100.20:8388#SSBulk
+            trojan://pass@trojan.example.com:443#TrojanBulk
+            hy2://hy2pass@hy2.example.com:8443#Hy2Bulk
+            wg://privKey@198.51.100.30:51820?publickey=pubKey#WgBulk
+            ftp://invalid-scheme.example.com:21
+        """.trimIndent()
+
+        assertEquals("7 LINES", SingBoxConfigParser.detectProtocolBadge(multiLine))
+        val bulk = SingBoxConfigParser.parseBulk(multiLine)
+        assertEquals(6, bulk.parsedItems.size)
+        assertEquals(1, bulk.skippedCount)
+        assertEquals(listOf("VLESS", "VMess", "SS", "Trojan", "HY2", "WG"), bulk.parsedItems.map { it.second.protocol })
+        assertEquals("chacha20-ietf-poly1305", bulk.parsedItems[2].second.outboundOrFullJson.getString("method"))
     }
 
     @Test

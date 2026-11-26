@@ -1,5 +1,6 @@
 package io.aethervpn.android.ui
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Bundle
@@ -29,8 +30,10 @@ import io.aethervpn.android.databinding.DialogAddSingboxProfileBinding
 import io.aethervpn.android.databinding.ItemSingboxProfileBinding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -42,6 +45,8 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     private var storeState = SingBoxProfileStoreState()
     private val testingIds = mutableSetOf<String>()
     private val testErrors = mutableMapOf<String, String>()
+    private val serverPreviewCache = mutableMapOf<String, String>()
+    private var testAllJob: Job? = null
     private var isBindingSwitches = false
 
     private val adapter = ProfilesAdapter()
@@ -53,21 +58,33 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
         binding.toolbarSingBox.setNavigationOnClickListener { finish() }
         binding.toolbarSingBox.setOnMenuItemClickListener { item ->
-            if (item.itemId == R.id.action_singbox_tuning) {
-                startActivity(Intent(this, SingBoxTuningActivity::class.java))
-                true
-            } else {
-                false
+            when (item.itemId) {
+                R.id.action_test_all -> {
+                    runTestAll()
+                    true
+                }
+                R.id.action_sort_ping -> {
+                    sortByPing()
+                    true
+                }
+                R.id.action_singbox_tuning -> {
+                    startActivity(Intent(this, SingBoxTuningActivity::class.java))
+                    true
+                }
+                else -> false
             }
         }
         binding.layoutOpenSingBoxLab.setOnClickListener {
             startActivity(Intent(this, SingBoxTuningActivity::class.java))
         }
+        binding.btnCancelTestAll.setOnClickListener {
+            cancelTestAll()
+        }
 
         binding.rvSingBoxProfiles.layoutManager = LinearLayoutManager(this)
         binding.rvSingBoxProfiles.adapter = adapter
 
-        binding.fabAddSingBoxProfile.setOnClickListener { showAddProfileSheet() }
+        binding.fabAddSingBoxProfile.setOnClickListener { showProfileSheet() }
 
         bindSwitches()
         refreshAll()
@@ -148,10 +165,24 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         adapter.notifyDataSetChanged()
     }
 
-    private fun showAddProfileSheet() {
+    private fun showProfileSheet(editingProfile: SingBoxProfile? = null) {
+        val isEditing = editingProfile != null
         val dialog = BottomSheetDialog(this, com.google.android.material.R.style.Theme_Design_BottomSheetDialog)
         val sheetBinding = DialogAddSingboxProfileBinding.inflate(layoutInflater)
         dialog.setContentView(sheetBinding.root)
+
+        sheetBinding.tvSheetTitle.text = if (isEditing) {
+            getString(R.string.action_edit_profile)
+        } else {
+            getString(R.string.action_add_profile)
+        }
+        sheetBinding.btnCopyShareUri.visibility = if (isEditing) View.VISIBLE else View.GONE
+
+        if (editingProfile != null) {
+            sheetBinding.etSingBoxUriOrJson.setText(editingProfile.rawUriOrJson)
+            sheetBinding.etSingBoxCustomName.setText(editingProfile.name)
+            sheetBinding.tvDetectedProtocol.text = SingBoxConfigParser.detectProtocolBadge(editingProfile.rawUriOrJson)
+        }
 
         sheetBinding.etSingBoxUriOrJson.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -177,25 +208,150 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             }
         }
 
+        sheetBinding.btnCopyShareUri.setOnClickListener {
+            val textToCopy = sheetBinding.etSingBoxUriOrJson.text?.toString()?.trim().orEmpty()
+                .ifEmpty { editingProfile?.rawUriOrJson.orEmpty() }
+            if (textToCopy.isNotEmpty()) {
+                val cm = getSystemService(ClipboardManager::class.java)
+                cm?.setPrimaryClip(ClipData.newPlainText("Sing-box Profile", textToCopy))
+                showSnack("Copied share URI to clipboard")
+            }
+        }
+
         sheetBinding.btnSaveSingBoxProfile.setOnClickListener {
             val raw = sheetBinding.etSingBoxUriOrJson.text?.toString().orEmpty().trim()
             val customName = sheetBinding.etSingBoxCustomName.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
             uiScope.launch {
-                val res = withContext(Dispatchers.IO) {
-                    SingBoxProfileRepository.addProfile(filesDir, raw, customName)
-                }
-                if (res.isSuccess) {
-                    dialog.dismiss()
-                    refreshAll()
-                    showSnack("Saved ${res.getOrThrow().name}")
+                if (editingProfile != null) {
+                    val res = withContext(Dispatchers.IO) {
+                        SingBoxProfileRepository.updateProfile(filesDir, editingProfile.id, raw, customName)
+                    }
+                    if (res.isSuccess) {
+                        serverPreviewCache.remove(editingProfile.id)
+                        dialog.dismiss()
+                        refreshAll()
+                        showSnack("Updated ${res.getOrThrow().name}")
+                    } else {
+                        sheetBinding.tvAddProfileError.text = res.exceptionOrNull()?.message ?: "Invalid profile"
+                        sheetBinding.tvAddProfileError.visibility = View.VISIBLE
+                    }
                 } else {
-                    sheetBinding.tvAddProfileError.text = res.exceptionOrNull()?.message ?: "Invalid profile"
-                    sheetBinding.tvAddProfileError.visibility = View.VISIBLE
+                    val isSingleJson = raw.startsWith("{")
+                    val nonEmptyLines = raw.lines()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("//") }
+                    if (!isSingleJson && nonEmptyLines.size > 1) {
+                        val bulkRes = withContext(Dispatchers.IO) {
+                            SingBoxProfileRepository.addProfilesBulk(filesDir, raw, customName)
+                        }
+                        if (bulkRes.isSuccess) {
+                            val (imported, skipped) = bulkRes.getOrThrow()
+                            dialog.dismiss()
+                            refreshAll()
+                            val msg = if (skipped > 0) {
+                                "Imported ${imported.size} profiles ($skipped skipped)"
+                            } else {
+                                "Imported ${imported.size} profiles"
+                            }
+                            showSnack(msg)
+                        } else {
+                            sheetBinding.tvAddProfileError.text =
+                                bulkRes.exceptionOrNull()?.message ?: "No valid profiles found"
+                            sheetBinding.tvAddProfileError.visibility = View.VISIBLE
+                        }
+                    } else {
+                        val res = withContext(Dispatchers.IO) {
+                            SingBoxProfileRepository.addProfile(filesDir, raw, customName)
+                        }
+                        if (res.isSuccess) {
+                            dialog.dismiss()
+                            refreshAll()
+                            showSnack("Saved ${res.getOrThrow().name}")
+                        } else {
+                            sheetBinding.tvAddProfileError.text = res.exceptionOrNull()?.message ?: "Invalid profile"
+                            sheetBinding.tvAddProfileError.visibility = View.VISIBLE
+                        }
+                    }
                 }
             }
         }
 
         dialog.show()
+    }
+
+    private fun runTestAll() {
+        if (testAllJob?.isActive == true) {
+            showSnack("Test All is already running")
+            return
+        }
+        val snapshot = storeState.profiles.toList()
+        if (snapshot.isEmpty()) {
+            showSnack("No profiles to test")
+            return
+        }
+
+        testAllJob = uiScope.launch {
+            binding.layoutTestAllProgress.visibility = View.VISIBLE
+            val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
+            var passed = 0
+            for ((index, profile) in snapshot.withIndex()) {
+                if (!isActive) break
+                binding.tvTestAllStatus.text = "Testing ${index + 1} / ${snapshot.size}: ${profile.name}"
+                testingIds.add(profile.id)
+                testErrors.remove(profile.id)
+                adapter.notifyDataSetChanged()
+
+                val result = withContext(Dispatchers.IO) {
+                    SingBoxEngineManager.runEphemeralTraceTest(
+                        context = this@SingBoxProfilesActivity,
+                        config = cfg,
+                        rawUriOrJson = profile.rawUriOrJson
+                    )
+                }
+                testingIds.remove(profile.id)
+                if (result.isSuccess) {
+                    passed++
+                    val v = result.getOrThrow()
+                    storeState = withContext(Dispatchers.IO) {
+                        SingBoxProfileRepository.updateTestResult(
+                            filesDir = filesDir,
+                            profileId = profile.id,
+                            pingMs = v.latencyMs,
+                            exitIp = v.publicIp,
+                            country = v.colo
+                        )
+                    }
+                } else {
+                    testErrors[profile.id] = result.exceptionOrNull()?.message ?: "Trace test failed"
+                }
+                adapter.notifyDataSetChanged()
+            }
+            binding.layoutTestAllProgress.visibility = View.GONE
+            if (isActive) {
+                showSnack("Tested ${snapshot.size} profiles ($passed passed)")
+            }
+        }
+    }
+
+    private fun cancelTestAll() {
+        testAllJob?.cancel()
+        testAllJob = null
+        testingIds.clear()
+        binding.layoutTestAllProgress.visibility = View.GONE
+        adapter.notifyDataSetChanged()
+        showSnack("Test All cancelled")
+    }
+
+    private fun sortByPing() {
+        if (storeState.profiles.size < 2) return
+        uiScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                SingBoxProfileRepository.sortProfilesByPing(filesDir)
+            }
+            storeState = updated
+            renderList()
+            showSnack("Sorted by fastest ping")
+        }
     }
 
     private fun runProfileTest(profile: SingBoxProfile) {
@@ -269,28 +425,46 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 if (isActive) R.color.accent_primary else R.color.card_border
             )
 
+            val preview = serverPreviewCache.getOrPut(p.id) {
+                SingBoxConfigParser.extractServerPreview(p.rawUriOrJson)
+            }
+            b.tvServerPreview.text = preview
+
             when {
                 isTesting -> {
-                    b.tvProfileStatusPill.text = "Testing via cloudflare.com/cdn-cgi/trace…"
-                    b.tvProfileStatusPill.setTextColor(ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.accent_secondary))
+                    b.tvProfilePingBadge.visibility = View.VISIBLE
+                    b.ivProfileTestError.visibility = View.GONE
+                    b.tvProfilePingBadge.text = "Testing…"
+                    b.tvProfilePingBadge.setTextColor(
+                        ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.accent_secondary)
+                    )
                 }
                 !err.isNullOrBlank() -> {
-                    b.tvProfileStatusPill.text = "Error: $err"
-                    b.tvProfileStatusPill.setTextColor(ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.error_text))
+                    b.tvProfilePingBadge.visibility = View.GONE
+                    b.ivProfileTestError.visibility = View.VISIBLE
+                    b.ivProfileTestError.setOnClickListener { showSnack("Error: $err") }
                 }
-                p.lastPingMs != null && !p.lastExitIp.isNullOrBlank() -> {
+                p.lastPingMs != null -> {
+                    b.tvProfilePingBadge.visibility = View.VISIBLE
+                    b.ivProfileTestError.visibility = View.GONE
                     val countryPart = p.lastCountry?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
-                    b.tvProfileStatusPill.text = "OK • ${p.lastExitIp}$countryPart • ${p.lastPingMs} ms"
-                    b.tvProfileStatusPill.setTextColor(ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.log_success))
+                    b.tvProfilePingBadge.text = "${p.lastPingMs}ms$countryPart"
+                    b.tvProfilePingBadge.setTextColor(
+                        ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.log_success)
+                    )
                 }
                 else -> {
-                    b.tvProfileStatusPill.text = "Not tested"
-                    b.tvProfileStatusPill.setTextColor(ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.text_secondary))
+                    b.tvProfilePingBadge.visibility = View.VISIBLE
+                    b.ivProfileTestError.visibility = View.GONE
+                    b.tvProfilePingBadge.text = "--"
+                    b.tvProfilePingBadge.setTextColor(
+                        ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.text_secondary)
+                    )
                 }
             }
 
             b.btnTestProfile.isEnabled = !isTesting
-            b.btnTestProfile.text = if (isTesting) "Testing…" else getString(R.string.action_test)
+            b.btnTestProfile.alpha = if (isTesting) 0.4f else 1.0f
 
             val selectAction = View.OnClickListener {
                 uiScope.launch {
@@ -305,6 +479,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             b.radioActiveProfile.setOnClickListener(selectAction)
 
             b.btnTestProfile.setOnClickListener { runProfileTest(p) }
+            b.btnEditProfile.setOnClickListener { showProfileSheet(p) }
 
             b.btnDeleteProfile.setOnClickListener {
                 uiScope.launch {
@@ -313,6 +488,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     }
                     testingIds.remove(p.id)
                     testErrors.remove(p.id)
+                    serverPreviewCache.remove(p.id)
                     storeState = updated
                     renderList()
                 }
