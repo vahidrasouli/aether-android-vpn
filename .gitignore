@@ -10,6 +10,7 @@ Captures/
 # Keystores and private signing credentials
 *.jks
 *.keystore
+!app/debug.keystore
 keystore.properties
 
 # Rust build outputs

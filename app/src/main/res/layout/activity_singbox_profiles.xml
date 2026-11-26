@@ -27,7 +27,7 @@
             android:layout_height="1dp"
             android:background="@color/divider_line" />
 
-        <!-- Engine Master & Connection Mode Card -->
+        <!-- Engine Master & Connection Mode Collapsible Accordion Card -->
         <com.google.android.material.card.MaterialCardView
             style="@style/Widget.Aether.Card"
             android:layout_width="match_parent"
@@ -42,17 +42,34 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="10dp">
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp">
 
+                <!-- Compact Always-Visible Summary Bar -->
                 <LinearLayout
+                    android:id="@+id/layoutSingBoxHeader"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:paddingVertical="2dp">
+
+                    <ImageView
+                        android:id="@+id/ivSingBoxChevron"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:contentDescription="@null"
+                        android:rotation="90"
+                        android:src="@drawable/ic_chevron_right_24"
+                        app:tint="@color/text_secondary" />
 
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
                         android:layout_weight="1"
                         android:orientation="vertical">
 
@@ -61,30 +78,79 @@
                             android:layout_height="wrap_content"
                             android:text="Sing-box Core"
                             android:textColor="@color/text_primary"
-                            android:textSize="15sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
                         <TextView
+                            android:id="@+id/tvSingBoxControlsSummary"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="When OFF, zero subprocesses &amp; zero RAM/CPU overhead"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="OFF • Zero RAM/CPU overhead"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11.5sp" />
                     </LinearLayout>
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/switchSingBoxMaster"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="wrap_content"
+                        android:minHeight="0dp" />
                 </LinearLayout>
 
+                <!-- Collapsible Body (Collapsed by Default) -->
                 <LinearLayout
-                    android:id="@+id/layoutRoutingChain"
+                    android:id="@+id/layoutSingBoxControlsBody"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="When OFF, zero subprocesses &amp; zero RAM/CPU overhead"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp" />
+
+                    <LinearLayout
+                        android:id="@+id/layoutRoutingChain"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginVertical="8dp"
+                            android:background="@color/divider_line" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Routing Chain"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <Spinner
+                            android:id="@+id/spinnerRoutingChain"
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="2dp" />
+
+                        <TextView
+                            android:id="@+id/tvRoutingChainDetail"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:fontFamily="monospace"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="10.5sp" />
+                    </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
@@ -92,85 +158,56 @@
                         android:layout_marginVertical="8dp"
                         android:background="@color/divider_line" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Routing Chain"
-                        android:textColor="@color/text_primary"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <Spinner
-                        android:id="@+id/spinnerRoutingChain"
-                        android:layout_width="match_parent"
-                        android:layout_height="40dp"
-                        android:layout_marginTop="2dp" />
-
-                    <TextView
-                        android:id="@+id/tvRoutingChainDetail"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:fontFamily="monospace"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="10.5sp" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="8dp"
-                    android:background="@color/divider_line" />
-
-                <LinearLayout
-                    android:id="@+id/layoutOpenSingBoxLab"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="?attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingVertical="4dp">
-
-                    <ImageView
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
-                        android:background="@drawable/bg_icon_badge"
-                        android:contentDescription="@null"
-                        android:padding="4dp"
-                        android:src="@drawable/ic_tune_24"
-                        app:tint="@color/accent_primary" />
-
                     <LinearLayout
-                        android:layout_width="0dp"
+                        android:id="@+id/layoutOpenSingBoxLab"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingVertical="4dp">
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/singbox_tuning_entry_title"
-                            android:textColor="@color/text_primary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
+                        <ImageView
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:background="@drawable/bg_icon_badge"
+                            android:contentDescription="@null"
+                            android:padding="4dp"
+                            android:src="@drawable/ic_tune_24"
+                            app:tint="@color/accent_primary" />
 
-                        <TextView
-                            android:layout_width="wrap_content"
+                        <LinearLayout
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:text="@string/singbox_tuning_entry_subtitle"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="11sp" />
+                            android:layout_marginStart="10dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/singbox_tuning_entry_title"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/singbox_tuning_entry_subtitle"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:contentDescription="@null"
+                            android:src="@drawable/ic_chevron_right_24"
+                            app:tint="@color/text_secondary" />
                     </LinearLayout>
-
-                    <ImageView
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_chevron_right_24"
-                        app:tint="@color/text_secondary" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

@@ -720,7 +720,7 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Per-session HEV stack size. 16KB minimizes RAM; 24KB–32KB adds headroom for heavy media."
+                            android:text="Per-session HEV stack size. 80KB (default) prevents bulk TLS/media stalls; 32KB–64KB lowers RAM."
                             android:textColor="@color/text_secondary"
                             android:textSize="12sp" />
 
@@ -734,25 +734,25 @@
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
-                                android:id="@+id/chipStack16k"
-                                style="@style/Widget.Aether.Chip.Choice"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="16KB" />
-
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipStack24k"
-                                style="@style/Widget.Aether.Chip.Choice"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="24KB" />
-
-                            <com.google.android.material.chip.Chip
                                 android:id="@+id/chipStack32k"
                                 style="@style/Widget.Aether.Chip.Choice"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="32KB" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipStack64k"
+                                style="@style/Widget.Aether.Chip.Choice"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="64KB" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipStack80k"
+                                style="@style/Widget.Aether.Chip.Choice"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="80KB" />
                         </com.google.android.material.chip.ChipGroup>
 
                         <TextView

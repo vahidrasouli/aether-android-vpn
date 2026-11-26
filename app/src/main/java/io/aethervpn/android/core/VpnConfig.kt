@@ -257,7 +257,7 @@ data class VpnConfig(
     val goMemLimit: String = "48MiB",
     val goMaxProcs: String = "2",
     val goGc: String = "50",
-    val taskStackSize: Int = 16384,
+    val taskStackSize: Int = 81920,
     val udpTimeoutMs: Int = 5000,
     val mapDnsEnabled: Boolean = true,
     // Sing-box integration (Phase 1 & Phase 2 multi-hop chaining)
@@ -270,7 +270,7 @@ data class VpnConfig(
     val sbGoGc: String = "50",
     val sbRemoteDns: String = "1.1.1.1",
     val sbDirectDns: String = "1.1.1.1",
-    val sbDnsStrategy: String = "prefer_ipv4",
+    val sbDnsStrategy: String = "ipv4_only",
     val sbSniffEnabled: Boolean = true,
     val sbBlockQuic: SingBoxBlockQuicMode = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
     val sbBypassPrivateIp: Boolean = true,
@@ -316,7 +316,7 @@ data class VpnConfig(
             aetherMasqueH2KeepaliveSecs == 60 &&
             aetherTcpKeepaliveSecs == 90 &&
             aetherHalfCloseSecs == 15 &&
-            taskStackSize == 16384 &&
+            taskStackSize == 32768 &&
             udpTimeoutMs == 5000 -> EngineLabPreset.ECO
 
         perfProfile == PerfProfile.LOW &&
@@ -327,7 +327,7 @@ data class VpnConfig(
             aetherMasqueH2KeepaliveSecs == 45 &&
             aetherTcpKeepaliveSecs == 60 &&
             aetherHalfCloseSecs == 30 &&
-            taskStackSize == 16384 &&
+            taskStackSize == 81920 &&
             udpTimeoutMs == 5000 -> EngineLabPreset.BALANCED
 
         perfProfile == PerfProfile.MEDIUM &&
@@ -338,7 +338,7 @@ data class VpnConfig(
             aetherMasqueH2KeepaliveSecs == 30 &&
             aetherTcpKeepaliveSecs == 45 &&
             aetherHalfCloseSecs == 30 &&
-            taskStackSize == 24576 &&
+            taskStackSize == 81920 &&
             udpTimeoutMs == 5000 -> EngineLabPreset.TURBO
 
         else -> EngineLabPreset.CUSTOM
@@ -354,7 +354,7 @@ data class VpnConfig(
             aetherMasqueH2KeepaliveSecs = 60,
             aetherTcpKeepaliveSecs = 90,
             aetherHalfCloseSecs = 15,
-            taskStackSize = 16384,
+            taskStackSize = 32768,
             udpTimeoutMs = 5000
         )
 
@@ -367,7 +367,7 @@ data class VpnConfig(
             aetherMasqueH2KeepaliveSecs = 45,
             aetherTcpKeepaliveSecs = 60,
             aetherHalfCloseSecs = 30,
-            taskStackSize = 16384,
+            taskStackSize = 81920,
             udpTimeoutMs = 5000
         )
 
@@ -380,7 +380,7 @@ data class VpnConfig(
             aetherMasqueH2KeepaliveSecs = 30,
             aetherTcpKeepaliveSecs = 45,
             aetherHalfCloseSecs = 30,
-            taskStackSize = 24576,
+            taskStackSize = 81920,
             udpTimeoutMs = 5000
         )
 
@@ -418,7 +418,7 @@ data class VpnConfig(
                 sbGoGc == "50" &&
                 sbLogLevel == "warn" &&
                 sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
-                sbDnsStrategy == "prefer_ipv4" &&
+                sbDnsStrategy == "ipv4_only" &&
                 sbConnectTimeoutSec == 10 &&
                 !sbTcpFastOpen -> SingBoxTuningPreset.BALANCED
 
@@ -427,7 +427,7 @@ data class VpnConfig(
                 sbGoGc == "100" &&
                 sbLogLevel == "warn" &&
                 sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
-                sbDnsStrategy == "prefer_ipv4" &&
+                sbDnsStrategy == "ipv4_only" &&
                 sbConnectTimeoutSec == 5 &&
                 sbTcpFastOpen -> SingBoxTuningPreset.TURBO
 
@@ -460,7 +460,7 @@ data class VpnConfig(
             sbGoGc = "50",
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
-            sbDnsStrategy = "prefer_ipv4",
+            sbDnsStrategy = "ipv4_only",
             sbSniffEnabled = true,
             sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
             sbBypassPrivateIp = true,
@@ -478,7 +478,7 @@ data class VpnConfig(
             sbGoGc = "100",
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
-            sbDnsStrategy = "prefer_ipv4",
+            sbDnsStrategy = "ipv4_only",
             sbSniffEnabled = true,
             sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
             sbBypassPrivateIp = true,
@@ -740,7 +740,7 @@ data class VpnConfig(
                 goMemLimit = o.optString("goMemLimit", "48MiB").ifBlank { "48MiB" },
                 goMaxProcs = o.optString("goMaxProcs", "2").ifBlank { "2" },
                 goGc = o.optString("goGc", "50").ifBlank { "50" },
-                taskStackSize = o.optInt("taskStackSize", 16384).coerceIn(8192, 65536),
+                taskStackSize = o.optInt("taskStackSize", 81920).coerceIn(8192, 131072),
                 udpTimeoutMs = o.optInt("udpTimeoutMs", 5000).coerceIn(1000, 120_000),
                 mapDnsEnabled = o.optBoolean("mapDnsEnabled", true),
                 singBoxEnabled = o.optBoolean("singBoxEnabled", false),
@@ -751,7 +751,7 @@ data class VpnConfig(
                 sbGoGc = o.optString("sbGoGc", "50").ifBlank { "50" },
                 sbRemoteDns = o.optString("sbRemoteDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDirectDns = o.optString("sbDirectDns", "1.1.1.1").ifBlank { "1.1.1.1" },
-                sbDnsStrategy = o.optString("sbDnsStrategy", "prefer_ipv4").ifBlank { "prefer_ipv4" },
+                sbDnsStrategy = o.optString("sbDnsStrategy", "ipv4_only").ifBlank { "ipv4_only" },
                 sbSniffEnabled = o.optBoolean("sbSniffEnabled", true),
                 sbBlockQuic = enumOrDefault(o.optString("sbBlockQuic"), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
                 sbBypassPrivateIp = o.optBoolean("sbBypassPrivateIp", true),
@@ -810,7 +810,7 @@ data class VpnConfig(
                 goMemLimit = p.getString("go_mem_limit", "48MiB").orEmpty().ifBlank { "48MiB" },
                 goMaxProcs = p.getString("go_max_procs", "2").orEmpty().ifBlank { "2" },
                 goGc = p.getString("go_gc", "50").orEmpty().ifBlank { "50" },
-                taskStackSize = p.getInt("task_stack_size", 16384),
+                taskStackSize = p.getInt("task_stack_size", 81920),
                 udpTimeoutMs = p.getInt("udp_timeout_ms", 5000),
                 mapDnsEnabled = p.getBoolean("map_dns_enabled", true),
                 singBoxEnabled = p.getBoolean("sing_box_enabled", false),
@@ -821,7 +821,7 @@ data class VpnConfig(
                 sbGoGc = p.getString("sb_go_gc", "50").orEmpty().ifBlank { "50" },
                 sbRemoteDns = p.getString("sb_remote_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDirectDns = p.getString("sb_direct_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
-                sbDnsStrategy = p.getString("sb_dns_strategy", "prefer_ipv4").orEmpty().ifBlank { "prefer_ipv4" },
+                sbDnsStrategy = p.getString("sb_dns_strategy", "ipv4_only").orEmpty().ifBlank { "ipv4_only" },
                 sbSniffEnabled = p.getBoolean("sb_sniff_enabled", true),
                 sbBlockQuic = enumOrDefault(p.getString("sb_block_quic", null), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
                 sbBypassPrivateIp = p.getBoolean("sb_bypass_private_ip", true),

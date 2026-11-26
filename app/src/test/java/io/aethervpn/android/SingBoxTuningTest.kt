@@ -28,7 +28,7 @@ class SingBoxTuningTest {
         assertEquals("50", cfg.sbGoGc)
         assertEquals("1.1.1.1", cfg.sbRemoteDns)
         assertEquals("1.1.1.1", cfg.sbDirectDns)
-        assertEquals("prefer_ipv4", cfg.sbDnsStrategy)
+        assertEquals("ipv4_only", cfg.sbDnsStrategy)
         assertTrue(cfg.sbSniffEnabled)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, cfg.sbBlockQuic)
         assertTrue(cfg.sbBypassPrivateIp)
@@ -58,7 +58,7 @@ class SingBoxTuningTest {
         assertEquals("50", balanced.sbGoGc)
         assertEquals("warn", balanced.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, balanced.sbBlockQuic)
-        assertEquals("prefer_ipv4", balanced.sbDnsStrategy)
+        assertEquals("ipv4_only", balanced.sbDnsStrategy)
 
         val turbo = balanced.applySingBoxTuningPreset(SingBoxTuningPreset.TURBO)
         assertEquals(SingBoxTuningPreset.TURBO, turbo.detectSingBoxTuningPreset())

@@ -191,6 +191,8 @@ class SingBoxConfigParserTest {
             // Sing-box 1.12 typed DNS servers
             val dns = runtime.getJSONObject("dns")
             assertEquals("dns-remote", dns.getString("final"))
+            assertEquals("ipv4_only", dns.getString("strategy"))
+            assertTrue(dns.getBoolean("independent_cache"))
             val servers = dns.getJSONArray("servers")
             assertEquals(2, servers.length())
 
@@ -202,13 +204,22 @@ class SingBoxConfigParserTest {
             assertFalse(remoteDns.has("address"))
 
             val dnsRules = dns.getJSONArray("rules")
-            val httpsRule = (0 until dnsRules.length())
-                .map { dnsRules.getJSONObject(it) }
-                .firstOrNull { it.optString("action") == "predefined" }
+            val dnsRuleObjects = (0 until dnsRules.length()).map { dnsRules.getJSONObject(it) }
+            val httpsRule = dnsRuleObjects.firstOrNull {
+                it.optString("action") == "predefined" &&
+                    it.optJSONArray("query_type")?.optString(0) == "HTTPS"
+            }
             assertTrue("HTTPS/SVCB predefined NOERROR rule must exist in dns.rules", httpsRule != null)
             assertEquals("NOERROR", httpsRule!!.getString("rcode"))
             val queryTypes = httpsRule.getJSONArray("query_type")
             assertEquals(listOf("HTTPS", "SVCB"), (0 until queryTypes.length()).map { queryTypes.getString(it) })
+
+            val aaaaRule = dnsRuleObjects.firstOrNull {
+                it.optString("action") == "predefined" &&
+                    it.optJSONArray("query_type")?.optString(0) == "AAAA"
+            }
+            assertTrue("AAAA predefined NOERROR rule must exist when ipv4_only is active", aaaaRule != null)
+            assertEquals("NOERROR", aaaaRule!!.getString("rcode"))
 
             val localDns = servers.getJSONObject(1)
             assertEquals("dns-local", localDns.getString("tag"))

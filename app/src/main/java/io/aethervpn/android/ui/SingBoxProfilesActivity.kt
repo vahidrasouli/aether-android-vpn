@@ -61,6 +61,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     private val serverPreviewCache = mutableMapOf<String, String>()
     private var testAllJob: Job? = null
     private var isBindingSwitches = false
+    private var controlsExpanded = false
 
     private val adapter = ProfilesAdapter()
 
@@ -89,6 +90,11 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         }
         binding.layoutOpenSingBoxLab.setOnClickListener {
             startActivity(Intent(this, SingBoxTuningActivity::class.java))
+        }
+        binding.layoutSingBoxHeader.setOnClickListener {
+            controlsExpanded = !controlsExpanded
+            binding.layoutSingBoxControlsBody.visibility = if (controlsExpanded) View.VISIBLE else View.GONE
+            binding.ivSingBoxChevron.rotation = if (controlsExpanded) 270f else 90f
         }
         binding.btnCancelTestAll.setOnClickListener {
             cancelTestAll()
@@ -155,6 +161,11 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             binding.layoutRoutingChain.visibility = if (cfg.singBoxEnabled) View.VISIBLE else View.GONE
             binding.spinnerRoutingChain.setSelection(cfg.chainMode.ordinal, false)
             binding.tvRoutingChainDetail.text = cfg.chainMode.description
+            binding.tvSingBoxControlsSummary.text = if (cfg.singBoxEnabled) {
+                "ON • ${cfg.chainMode.label} • Tap for chain & tuning"
+            } else {
+                "OFF • Zero RAM/CPU overhead • Tap to expand"
+            }
         } finally {
             isBindingSwitches = false
         }

@@ -192,9 +192,9 @@ class EngineLabActivity : AppCompatActivity() {
         binding.chipGroupTaskStack.setOnCheckedStateChangeListener { _, checkedIds ->
             if (isBindingUi) return@setOnCheckedStateChangeListener
             val stack = when (checkedIds.firstOrNull()) {
-                R.id.chipStack24k -> 24576
                 R.id.chipStack32k -> 32768
-                else -> 16384
+                R.id.chipStack64k -> 65536
+                else -> 81920
             }
             updateConfig { it.copy(taskStackSize = stack) }
         }
@@ -325,9 +325,9 @@ class EngineLabActivity : AppCompatActivity() {
             )
             binding.chipGroupTaskStack.check(
                 when (cfg.taskStackSize) {
-                    24576 -> R.id.chipStack24k
                     32768 -> R.id.chipStack32k
-                    else -> R.id.chipStack16k
+                    65536 -> R.id.chipStack64k
+                    else -> R.id.chipStack80k
                 }
             )
             binding.chipGroupUdpTimeout.check(
@@ -362,9 +362,9 @@ class EngineLabActivity : AppCompatActivity() {
             )
             binding.chipTcpKa45.visibility = if (cfg.aetherTcpKeepaliveSecs == 45) View.VISIBLE else View.GONE
             binding.tvPresetSummary.text = when (preset) {
-                EngineLabPreset.ECO -> "Eco: 32MiB Go cap, 1 core, 256 clients, longer keepalives for max battery."
-                EngineLabPreset.BALANCED -> "Balanced: 48MiB Go cap, 2 cores, 512 clients, 16KB HEV stack (safe default)."
-                EngineLabPreset.TURBO -> "Turbo: 64MiB Go cap, 4 cores, 1024 clients, 24KB HEV stack for media."
+                EngineLabPreset.ECO -> "Eco: 32MiB Go cap, 1 core, 256 clients, 32KB HEV stack for max battery."
+                EngineLabPreset.BALANCED -> "Balanced: 48MiB Go cap, 2 cores, 512 clients, 80KB HEV stack (safe default)."
+                EngineLabPreset.TURBO -> "Turbo: 64MiB Go cap, 4 cores, 1024 clients, 80KB HEV stack for bulk media."
                 EngineLabPreset.CUSTOM -> "Custom: ${cfg.goMemLimit} Go • ${cfg.aetherMaxClients} clients • ${cfg.tunMtu} MTU • ${cfg.taskStackSize / 1024}KB stack"
             }
         } finally {

@@ -140,6 +140,11 @@ class MainActivity : AppCompatActivity() {
         setupAboutAndUpdater()
         bindActions()
 
+        // Clean up any leftover update installer APKs from previous updates
+        uiScope.launch(Dispatchers.IO) {
+            UpdateManager.cleanupInstalledApks(cacheDir)
+        }
+
         // Load configuration asynchronously off the main thread
         uiScope.launch {
             val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@MainActivity) }
@@ -1096,10 +1101,13 @@ class MainActivity : AppCompatActivity() {
                         binding.progressUpdateDownload.visibility = View.GONE
                         binding.tvUpdateProgressDetail.visibility = View.GONE
                         binding.btnDownloadInstallUpdate.isEnabled = true
-                        binding.btnDownloadInstallUpdate.text = if (rel.apkDownloadUrl != null) {
-                            getString(R.string.action_download_install)
-                        } else {
-                            "Open Release Page"
+                        val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
+                        val hasPartial = rel.apkDownloadUrl != null &&
+                            UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                        binding.btnDownloadInstallUpdate.text = when {
+                            rel.apkDownloadUrl == null -> "Open Release Page"
+                            hasPartial -> getString(R.string.action_resume_download)
+                            else -> getString(R.string.action_download_install)
                         }
                         binding.layoutUpdateAvailable.visibility = View.VISIBLE
                     }
@@ -1119,6 +1127,13 @@ class MainActivity : AppCompatActivity() {
             if (activeUpdateDownloadJob?.isActive == true) {
                 activeUpdateDownloadJob?.cancel()
                 activeUpdateDownloadJob = null
+                val rel = pendingUpdateRelease
+                val fileName = rel?.apkFileName ?: rel?.let { "aether-android-arm64-v${it.versionName}.apk" }
+                if (fileName != null) {
+                    uiScope.launch(Dispatchers.IO) {
+                        UpdateManager.cancelPartialDownload(fileName, cacheDir)
+                    }
+                }
                 binding.progressUpdateDownload.visibility = View.GONE
                 binding.progressUpdateDownload.progress = 0
                 binding.tvUpdateProgressDetail.visibility = View.GONE
@@ -1144,16 +1159,28 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
+            val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
+            val resumingBytes = UpdateManager.getPartialDownloadSize(fileName, cacheDir)
+
             applyUpdateDownloadButtonStyle(isCancelMode = true)
             binding.progressUpdateDownload.visibility = View.VISIBLE
             binding.progressUpdateDownload.isIndeterminate = false
-            binding.progressUpdateDownload.progress = 0
+            if (resumingBytes == 0L) {
+                binding.progressUpdateDownload.progress = 0
+            }
             binding.tvUpdateProgressDetail.visibility = View.VISIBLE
-            binding.tvUpdateProgressDetail.text = "0% • Starting download…"
-            binding.tvUpdateStatus.text = "Downloading ${rel.apkFileName ?: "update"}..."
+            binding.tvUpdateProgressDetail.text = if (resumingBytes > 0L) {
+                String.format(Locale.US, "Resuming from %.1f MB…", resumingBytes / (1024.0 * 1024.0))
+            } else {
+                "0% • Starting download…"
+            }
+            binding.tvUpdateStatus.text = if (resumingBytes > 0L) {
+                "Resuming ${rel.apkFileName ?: "update"}..."
+            } else {
+                "Downloading ${rel.apkFileName ?: "update"}..."
+            }
 
             activeUpdateDownloadJob = uiScope.launch {
-                val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
                 try {
                     val downloadResult = UpdateManager.downloadApk(
                         downloadUrl = apkUrl,
@@ -1169,18 +1196,26 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     applyUpdateDownloadButtonStyle(isCancelMode = false)
-                    binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
                     downloadResult.onSuccess { file ->
+                        binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
                         pendingInstallApkFile = file
                         binding.progressUpdateDownload.progress = 100
                         binding.tvUpdateStatus.text = "Download complete. Launching installer..."
                         installDownloadedApk(file)
                     }.onFailure { err ->
-                        binding.progressUpdateDownload.visibility = View.GONE
-                        binding.tvUpdateProgressDetail.visibility = View.GONE
-                        binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
+                        val hasPart = UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                        if (hasPart) {
+                            binding.btnDownloadInstallUpdate.text = getString(R.string.action_resume_download)
+                            binding.tvUpdateStatus.text = "Download paused (${err.message ?: "network error"})"
+                        } else {
+                            binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
+                            binding.progressUpdateDownload.visibility = View.GONE
+                            binding.tvUpdateProgressDetail.visibility = View.GONE
+                            binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
+                        }
                     }
                 } catch (_: CancellationException) {
+                    UpdateManager.cancelPartialDownload(fileName, cacheDir)
                     binding.progressUpdateDownload.visibility = View.GONE
                     binding.progressUpdateDownload.progress = 0
                     binding.tvUpdateProgressDetail.visibility = View.GONE

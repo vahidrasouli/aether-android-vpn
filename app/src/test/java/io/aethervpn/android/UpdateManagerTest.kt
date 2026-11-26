@@ -260,4 +260,82 @@ class UpdateManagerTest {
         )
         assertTrue(fromLocal is UpdateCheckResult.UpdateAvailable)
     }
+
+    @Test
+    fun downloadApkResumesPartialDownloadWithHttp206() = kotlinx.coroutines.runBlocking<Unit> {
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-resume-").toFile()
+        val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
+        val fileName = "aether-android-arm64-v1.1.0-debug-b42.apk"
+        val partFile = java.io.File(updatesDir, "$fileName.part")
+        val firstHalf = "HELLO_".toByteArray()
+        val secondHalf = "WORLD_APK".toByteArray()
+        partFile.writeBytes(firstHalf)
+
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        var receivedRangeHeader: String? = null
+        val serverThread = Thread {
+            try {
+                server.accept().use { sock ->
+                    val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                    var line = inp.readLine()
+                    while (!line.isNullOrEmpty()) {
+                        if (line.startsWith("Range:", ignoreCase = true)) {
+                            receivedRangeHeader = line.substringAfter(":").trim()
+                        }
+                        line = inp.readLine()
+                    }
+                    val total = firstHalf.size + secondHalf.size
+                    val out = sock.getOutputStream()
+                    out.write(
+                        ("HTTP/1.1 206 Partial Content\r\n" +
+                            "Content-Range: bytes ${firstHalf.size}-${total - 1}/$total\r\n" +
+                            "Content-Length: ${secondHalf.size}\r\n" +
+                            "Connection: close\r\n\r\n").toByteArray()
+                    )
+                    out.write(secondHalf)
+                    out.flush()
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        serverThread.isDaemon = true
+        serverThread.start()
+
+        try {
+            val res = UpdateManager.downloadApk(
+                downloadUrl = "http://127.0.0.1:${server.localPort}/update.apk",
+                fileName = fileName,
+                cacheDir = tempCacheDir
+            ) {}
+            assertTrue(res.isSuccess)
+            assertEquals("bytes=${firstHalf.size}-", receivedRangeHeader)
+            val downloaded = res.getOrThrow()
+            assertEquals(fileName, downloaded.name)
+            assertEquals("HELLO_WORLD_APK", downloaded.readText())
+            assertFalse(partFile.exists())
+        } finally {
+            runCatching { server.close() }
+            tempCacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupInstalledApksDeletesLeftoverApksOnStartup() {
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-clean-").toFile()
+        val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
+        val oldApk = java.io.File(updatesDir, "old.apk").apply { writeText("apk") }
+        val oldTmp = java.io.File(updatesDir, "old.apk.tmp").apply { writeText("tmp") }
+        val activePart = java.io.File(updatesDir, "next.apk.part").apply { writeText("part") }
+
+        try {
+            UpdateManager.cleanupInstalledApks(tempCacheDir)
+            assertFalse(oldApk.exists())
+            assertFalse(oldTmp.exists())
+            assertTrue(activePart.exists())
+        } finally {
+            tempCacheDir.deleteRecursively()
+        }
+    }
 }

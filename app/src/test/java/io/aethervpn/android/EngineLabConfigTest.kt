@@ -27,7 +27,7 @@ class EngineLabConfigTest {
         assertEquals(45, cfg.aetherMasqueH2KeepaliveSecs)
         assertEquals(60, cfg.aetherTcpKeepaliveSecs)
         assertEquals(30, cfg.aetherHalfCloseSecs)
-        assertEquals(16384, cfg.taskStackSize)
+        assertEquals(81920, cfg.taskStackSize)
         assertEquals(5000, cfg.udpTimeoutMs)
         assertEquals(1280, cfg.tunMtu)
         assertTrue(cfg.mapDnsEnabled)
@@ -45,7 +45,7 @@ class EngineLabConfigTest {
         assertEquals(60, eco.aetherMasqueH2KeepaliveSecs)
         assertEquals(90, eco.aetherTcpKeepaliveSecs)
         assertEquals(15, eco.aetherHalfCloseSecs)
-        assertEquals(16384, eco.taskStackSize)
+        assertEquals(32768, eco.taskStackSize)
         assertEquals(5000, eco.udpTimeoutMs)
 
         val balanced = eco.applyEngineLabPreset(EngineLabPreset.BALANCED)
@@ -65,7 +65,7 @@ class EngineLabConfigTest {
         assertEquals(30, turbo.aetherMasqueH2KeepaliveSecs)
         assertEquals(45, turbo.aetherTcpKeepaliveSecs)
         assertEquals(30, turbo.aetherHalfCloseSecs)
-        assertEquals(24576, turbo.taskStackSize)
+        assertEquals(81920, turbo.taskStackSize)
         assertEquals(5000, turbo.udpTimeoutMs)
 
         val custom = turbo.copy(aetherMaxClients = 128)

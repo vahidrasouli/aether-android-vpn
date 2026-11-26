@@ -3,9 +3,11 @@ package io.aethervpn.android.ui
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.tabs.TabLayout
 import io.aethervpn.android.R
 import io.aethervpn.android.core.SingBoxBlockQuicMode
 import io.aethervpn.android.core.SingBoxTuningPreset
@@ -56,6 +58,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
             }
         }
 
+        setupTabs()
         setupListeners()
 
         uiScope.launch {
@@ -68,6 +71,20 @@ class SingBoxTuningActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiScope.cancel()
         super.onDestroy()
+    }
+
+    private fun setupTabs() {
+        binding.tabLayoutSingBoxTuning.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                val isCoreTab = (tab?.position ?: 0) == 0
+                binding.layoutSectionCoreEngine.visibility = if (isCoreTab) View.VISIBLE else View.GONE
+                binding.cardSbEngineDialerLogging.visibility = if (isCoreTab) View.VISIBLE else View.GONE
+                binding.layoutSectionConfigRouting.visibility = if (isCoreTab) View.GONE else View.VISIBLE
+            }
+
+            override fun onTabUnselected(tab: TabLayout.Tab?) = Unit
+            override fun onTabReselected(tab: TabLayout.Tab?) = Unit
+        })
     }
 
     private fun setupListeners() {
@@ -350,8 +367,8 @@ class SingBoxTuningActivity : AppCompatActivity() {
             )
             binding.tvSbPresetSummary.text = when (preset) {
                 SingBoxTuningPreset.ECO -> "Eco: 32MiB, 1 core, GOGC=25, Error log, QUIC=Always, IPv4 Only, 10s timeout."
-                SingBoxTuningPreset.BALANCED -> "Balanced: 48MiB, 2 cores, GOGC=50, Warn log, QUIC=Auto, Prefer IPv4, 10s timeout."
-                SingBoxTuningPreset.TURBO -> "Turbo: 64MiB, 4 cores, GOGC=100, Warn log, QUIC=Auto, TFO=On, 5s timeout."
+                SingBoxTuningPreset.BALANCED -> "Balanced: 48MiB, 2 cores, GOGC=50, Warn log, QUIC=Auto, IPv4 Only, 10s timeout."
+                SingBoxTuningPreset.TURBO -> "Turbo: 64MiB, 4 cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, TFO=On, 5s timeout."
                 SingBoxTuningPreset.CUSTOM -> "Custom: ${cfg.sbGoMemLimit} • ${cfg.sbGoMaxProcs} cores • ${cfg.sbDnsStrategy} • ${cfg.sbConnectTimeoutSec}s dial"
             }
         } finally {

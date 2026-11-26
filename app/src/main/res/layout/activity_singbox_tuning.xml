@@ -39,6 +39,31 @@
             android:layout_height="1dp"
             android:background="@color/divider_line" />
 
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tabLayoutSingBoxTuning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/card_bg"
+            app:tabIndicatorColor="@color/accent_primary"
+            app:tabSelectedTextColor="@color/accent_primary"
+            app:tabTextColor="@color/text_secondary">
+
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Core &amp; Engine" />
+
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Config &amp; Routing" />
+        </com.google.android.material.tabs.TabLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/divider_line" />
+
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -51,6 +76,14 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:paddingBottom="16dp">
+
+                <!-- Section 1: Core & Engine -->
+                <LinearLayout
+                    android:id="@+id/layoutSectionCoreEngine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="visible">
 
                 <!-- Top Hero Card: One-Tap Preset Chips -->
                 <com.google.android.material.card.MaterialCardView
@@ -362,6 +395,15 @@
                         </com.google.android.material.chip.ChipGroup>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- Section 2: Config & Routing -->
+                <LinearLayout
+                    android:id="@+id/layoutSectionConfigRouting"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
                 <!-- Card 2: DNS & Resolution (sing-box 1.12) -->
                 <com.google.android.material.card.MaterialCardView
@@ -808,8 +850,57 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Card 4: Dialer, Multiplex & Logging -->
+                <!-- Card: Multiplex (h2mux) in Config & Routing -->
                 <com.google.android.material.card.MaterialCardView
+                    style="@style/Widget.Aether.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="7dp"
+                    app:cardCornerRadius="14dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="10dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Multiplex (h2mux)"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:ellipsize="end"
+                                android:maxLines="1"
+                                android:text="Pools TCP proxy streams (max 4) on VMess/VLESS/Trojan/SS"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchSbMultiplex"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="0dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- Card 4: Engine Dialer & Logging (in Core & Engine) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardSbEngineDialerLogging"
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -841,7 +932,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginStart="8dp"
-                                android:text="DIALER, MUX &amp; LOGGING"
+                                android:text="DIALER &amp; LOGGING"
                                 android:textColor="@color/accent_primary"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
@@ -929,44 +1020,6 @@
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/switchSbTcpFastOpen"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:minHeight="0dp" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="Multiplex (h2mux)"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:ellipsize="end"
-                                    android:maxLines="1"
-                                    android:text="Pools TCP proxy streams (max 4) on VMess/VLESS/Trojan/SS"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="11sp" />
-                            </LinearLayout>
-
-                            <com.google.android.material.materialswitch.MaterialSwitch
-                                android:id="@+id/switchSbMultiplex"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:minHeight="0dp" />

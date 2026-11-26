@@ -292,10 +292,45 @@ object UpdateManager {
         )
     }
 
-    internal fun cleanupUpdatesDir(updatesDir: File) {
+    internal fun sanitizeFileName(fileName: String): String =
+        fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+    fun getPartialDownloadSize(fileName: String, cacheDir: File): Long {
+        val updatesDir = File(cacheDir, "updates")
+        val partFile = File(updatesDir, "${sanitizeFileName(fileName)}.part")
+        return if (partFile.exists() && partFile.isFile) partFile.length() else 0L
+    }
+
+    fun cancelPartialDownload(fileName: String, cacheDir: File) {
+        val updatesDir = File(cacheDir, "updates")
+        val partFile = File(updatesDir, "${sanitizeFileName(fileName)}.part")
+        if (partFile.exists()) {
+            runCatching { partFile.delete() }
+        }
+    }
+
+    fun cleanupInstalledApks(cacheDir: File) {
+        val updatesDir = File(cacheDir, "updates")
+        if (!updatesDir.exists() || !updatesDir.isDirectory) return
         updatesDir.listFiles()?.forEach { file ->
             if (file.isFile && (file.name.endsWith(".apk", ignoreCase = true) ||
                     file.name.endsWith(".tmp", ignoreCase = true))
+            ) {
+                runCatching { file.delete() }
+            }
+        }
+    }
+
+    internal fun cleanupUpdatesDir(updatesDir: File, keepPartFileName: String? = null) {
+        updatesDir.listFiles()?.forEach { file ->
+            if (!file.isFile) return@forEach
+            val isSamePart = keepPartFileName != null &&
+                file.name == keepPartFileName &&
+                file.length() > 0L
+            if (isSamePart) return@forEach
+            if (file.name.endsWith(".apk", ignoreCase = true) ||
+                file.name.endsWith(".tmp", ignoreCase = true) ||
+                file.name.endsWith(".part", ignoreCase = true)
             ) {
                 runCatching { file.delete() }
             }
@@ -309,15 +344,16 @@ object UpdateManager {
         onProgress: (DownloadProgress) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
-        cleanupUpdatesDir(updatesDir)
-
-        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val safeName = sanitizeFileName(fileName)
         val targetFile = File(updatesDir, safeName)
-        val tempFile = File(updatesDir, "$safeName.tmp")
+        val partFile = File(updatesDir, "$safeName.part")
+        cleanupUpdatesDir(updatesDir, keepPartFileName = partFile.name)
 
+        val existingBytes = if (partFile.exists() && partFile.isFile) partFile.length() else 0L
         var conn: HttpURLConnection? = null
         var cancelHandle: kotlinx.coroutines.DisposableHandle? = null
         var completed = false
+        var cancelled = false
         try {
             conn = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -325,6 +361,9 @@ object UpdateManager {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = 30_000
                 setRequestProperty("User-Agent", "AetherVpnAndroid")
+                if (existingBytes > 0L) {
+                    setRequestProperty("Range", "bytes=$existingBytes-")
+                }
             }
 
             cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
@@ -335,19 +374,33 @@ object UpdateManager {
 
             coroutineContext.ensureActive()
             val code = conn.responseCode
-            if (code !in 200..299) {
+            val isPartial = code == HttpURLConnection.HTTP_PARTIAL
+            if (!isPartial && code !in 200..299) {
                 return@withContext Result.failure(
                     IllegalStateException("Download failed (HTTP $code)")
                 )
             }
 
-            val totalBytes = conn.contentLengthLong
-            var downloadedBytes = 0L
+            val appendMode = isPartial && existingBytes > 0L
+            val contentLength = conn.contentLengthLong
+            val totalBytes = if (appendMode) {
+                parseTotalBytesFromContentRange(conn.getHeaderField("Content-Range"))
+                    ?: if (contentLength > 0L) existingBytes + contentLength else -1L
+            } else {
+                contentLength
+            }
+            var downloadedBytes = if (appendMode) existingBytes else 0L
             var lastReportedPct = -1
-            var lastReportedBytes = 0L
+            var lastReportedBytes = downloadedBytes
+
+            if (appendMode && totalBytes > 0L) {
+                val initPct = ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                lastReportedPct = initPct
+                onProgress(DownloadProgress(downloadedBytes, totalBytes, initPct))
+            }
 
             conn.inputStream.use { input ->
-                FileOutputStream(tempFile).use { output ->
+                FileOutputStream(partFile, appendMode).use { output ->
                     val buffer = ByteArray(16 * 1024)
                     while (true) {
                         coroutineContext.ensureActive()
@@ -374,14 +427,15 @@ object UpdateManager {
             if (targetFile.exists()) {
                 targetFile.delete()
             }
-            if (!tempFile.renameTo(targetFile)) {
-                tempFile.copyTo(targetFile, overwrite = true)
-                tempFile.delete()
+            if (!partFile.renameTo(targetFile)) {
+                partFile.copyTo(targetFile, overwrite = true)
+                partFile.delete()
             }
             completed = true
             onProgress(DownloadProgress(downloadedBytes, totalBytes.coerceAtLeast(downloadedBytes), 100))
             Result.success(targetFile)
         } catch (e: CancellationException) {
+            cancelled = true
             throw e
         } catch (e: Exception) {
             Result.failure(e)
@@ -389,8 +443,20 @@ object UpdateManager {
             cancelHandle?.dispose()
             runCatching { conn?.disconnect() }
             if (!completed) {
-                cleanupUpdatesDir(updatesDir)
+                val keepName = if (!cancelled && partFile.exists() && partFile.length() > 0L) {
+                    partFile.name
+                } else {
+                    null
+                }
+                cleanupUpdatesDir(updatesDir, keepPartFileName = keepName)
             }
         }
+    }
+
+    private fun parseTotalBytesFromContentRange(header: String?): Long? {
+        if (header.isNullOrBlank()) return null
+        val slashIdx = header.lastIndexOf('/')
+        if (slashIdx < 0 || slashIdx + 1 >= header.length) return null
+        return header.substring(slashIdx + 1).trim().toLongOrNull()?.takeIf { it > 0L }
     }
 }

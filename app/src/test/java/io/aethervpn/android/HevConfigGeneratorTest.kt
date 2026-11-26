@@ -23,9 +23,11 @@ class HevConfigGeneratorTest {
         assertTrue(yaml.contains("mtu: 1280"))
         assertTrue(yaml.contains("ipv4: '198.18.0.1'"))
         assertTrue(yaml.contains("ipv6: 'fd00:ae7::1'"))
-        assertTrue(yaml.contains("task-stack-size: 16384"))
+        assertTrue(yaml.contains("task-stack-size: 81920"))
         assertTrue(yaml.contains("tcp-buffer-size: 65536"))
         assertTrue(yaml.contains("max-session-count: 512"))
+        assertTrue(yaml.contains("cache-size: 10000"))
+        assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
     }
 
     @Test

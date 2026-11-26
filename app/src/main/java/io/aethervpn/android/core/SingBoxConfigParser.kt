@@ -254,6 +254,7 @@ object SingBoxConfigParser {
             }
             JSONObject().apply {
                 put("log", buildLogObject(config))
+                val effectiveStrategy = config.sbDnsStrategy.ifBlank { "ipv4_only" }
                 put("dns", JSONObject().apply {
                     put("servers", JSONArray().apply {
                         put(buildRemoteDnsServer(config.sbRemoteDns))
@@ -272,9 +273,19 @@ object SingBoxConfigParser {
                             put("action", "predefined")
                             put("rcode", "NOERROR")
                         })
+                        if (effectiveStrategy == "ipv4_only") {
+                            put(JSONObject().apply {
+                                put("query_type", JSONArray().apply {
+                                    put("AAAA")
+                                })
+                                put("action", "predefined")
+                                put("rcode", "NOERROR")
+                            })
+                        }
                     })
                     put("final", "dns-remote")
-                    put("strategy", config.sbDnsStrategy.ifBlank { "prefer_ipv4" })
+                    put("strategy", effectiveStrategy)
+                    put("independent_cache", true)
                 })
                 put("inbounds", JSONArray().apply {
                     put(buildMixedInbound(listenPort))
