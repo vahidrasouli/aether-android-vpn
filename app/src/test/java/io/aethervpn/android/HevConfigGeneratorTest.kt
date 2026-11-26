@@ -42,15 +42,20 @@ class HevConfigGeneratorTest {
         assertTrue(customMtuYaml.contains("mtu: 1400"))
 
         val singBoxOnlyYaml = manager.generateYamlConfig(
-            VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY)
+            VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY, hevMode = HevMode.TCP_ONLY)
         )
-        assertTrue(singBoxOnlyYaml.contains("mtu: 8500"))
+        assertTrue(singBoxOnlyYaml.contains("mtu: 1500"))
         assertTrue(singBoxOnlyYaml.contains("tcp-buffer-size: 524288"))
+        assertTrue(singBoxOnlyYaml.contains("task-stack-size: 81920"))
+        assertTrue(singBoxOnlyYaml.contains("tcp-read-write-timeout: 300000"))
+        assertTrue(singBoxOnlyYaml.contains("udp: 'udp'"))
+        assertFalse("Sing-box Only must omit mapdns to prevent 240.0.0.x Fake-IP leaks", singBoxOnlyYaml.contains("mapdns:"))
 
         val singBoxToWarpYaml = manager.generateYamlConfig(
             VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_WARP)
         )
         assertTrue(singBoxToWarpYaml.contains("mtu: 1280"))
+        assertTrue(singBoxToWarpYaml.contains("mapdns:"))
     }
 
     @Test

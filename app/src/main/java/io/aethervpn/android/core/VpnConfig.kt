@@ -308,7 +308,7 @@ data class VpnConfig(
         get() = hevMode == HevMode.TCP_UDP
 
     val useMapDns: Boolean
-        get() = mapDnsEnabled && !bypassIran && customDns.isBlank()
+        get() = mapDnsEnabled && !bypassIran && customDns.isBlank() && !isSingBoxOnlyActive
 
     fun detectEngineLabPreset(): EngineLabPreset = when {
         perfProfile == PerfProfile.LOW &&
@@ -636,7 +636,7 @@ data class VpnConfig(
         const val PSIPHON_SOCKS_PORT = 1821
         const val SING_BOX_SOCKS_PORT = 1825
         const val DEFAULT_TUN_MTU = 1280
-        const val SING_BOX_ONLY_TUN_MTU = 8500
+        const val SING_BOX_ONLY_TUN_MTU = 1500
         const val TUN_IPV4_ADDRESS = "198.18.0.1"
         const val TUN_IPV4_PREFIX = 30
         const val TUN_IPV6_ADDRESS = "fd00:ae7::1"

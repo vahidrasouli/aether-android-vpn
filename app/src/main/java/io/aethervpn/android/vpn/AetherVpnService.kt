@@ -92,6 +92,28 @@ class AetherVpnService : VpnService() {
             return instanceRef?.get()?.hevManager?.readStats() ?: TrafficStats()
         }
 
+        internal fun resolveIpv4DnsServers(config: VpnConfig): List<String> {
+            if (config.useMapDns) {
+                return listOf(VpnConfig.DNS_IPV4_MAPDNS)
+            }
+            val rawDns = config.customDns.trim()
+            val parsedDns = when {
+                rawDns.startsWith("[") -> rawDns.substringAfter("[").substringBefore("]")
+                rawDns.count { it == ':' } == 1 -> rawDns.substringBefore(':')
+                else -> rawDns
+            }
+            val isCustomV4 = parsedDns.count { it == '.' } == 3
+            val isCustomV6 = parsedDns.contains(':') && !isCustomV4
+            if (isCustomV4 || (isCustomV6 && config.ipv6Enabled)) {
+                return listOf(parsedDns)
+            }
+            return if (config.isSingBoxOnlyActive) {
+                listOf(VpnConfig.DNS_IPV4_PRIMARY, "8.8.8.8")
+            } else {
+                listOf(VpnConfig.DNS_IPV4_PRIMARY, VpnConfig.DNS_IPV4_SECONDARY)
+            }
+        }
+
         fun startVpn(context: android.content.Context) {
             val intent = Intent(context, AetherVpnService::class.java).apply { action = ACTION_CONNECT }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1063,26 +1085,21 @@ class AetherVpnService : VpnService() {
             builder.addDnsServer(VpnConfig.DNS_IPV4_MAPDNS)
             DiagnosticsLog.record("Tunnel", "HEV mapdns active (${VpnConfig.DNS_IPV4_MAPDNS}:53)")
         } else {
-            val rawDns = config.customDns.trim()
-            val parsedDns = when {
-                rawDns.startsWith("[") -> rawDns.substringAfter("[").substringBefore("]")
-                rawDns.count { it == ':' } == 1 -> rawDns.substringBefore(':')
-                else -> rawDns
-            }
-            val isCustomV4 = parsedDns.count { it == '.' } == 3
-            val isCustomV6 = parsedDns.contains(':') && !isCustomV4
+            val resolvedDns = resolveIpv4DnsServers(config)
             var dnsAdded = false
-            if (isCustomV4 || (isCustomV6 && config.ipv6Enabled)) {
-                val res = runCatching { builder.addDnsServer(parsedDns) }
+            for (dns in resolvedDns) {
+                val res = runCatching { builder.addDnsServer(dns) }
                 if (res.isSuccess) {
                     dnsAdded = true
                 } else {
-                    DiagnosticsLog.record("System", "Custom DNS ($parsedDns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
+                    DiagnosticsLog.record("System", "DNS ($dns) rejected: ${res.exceptionOrNull()?.message}; using fallback")
                 }
             }
             if (!dnsAdded) {
                 builder.addDnsServer(VpnConfig.DNS_IPV4_PRIMARY)
-                builder.addDnsServer(VpnConfig.DNS_IPV4_SECONDARY)
+                builder.addDnsServer(
+                    if (config.isSingBoxOnlyActive) "8.8.8.8" else VpnConfig.DNS_IPV4_SECONDARY
+                )
             }
         }
 

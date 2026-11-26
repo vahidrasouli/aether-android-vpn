@@ -166,10 +166,13 @@ class SingBoxTuningTest {
                 chainMode = io.aethervpn.android.core.ChainMode.SINGBOX_ONLY
             )
         )
-        assertTrue(yaml.contains("mtu: 8500"))
+        assertTrue(yaml.contains("mtu: 1500"))
         assertTrue(yaml.contains("tcp-buffer-size: 524288"))
+        assertTrue(yaml.contains("task-stack-size: 81920"))
         assertTrue(yaml.contains("connect-timeout: 15000"))
         assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
+        assertTrue(yaml.contains("udp: 'udp'"))
+        assertFalse(yaml.contains("mapdns:"))
     }
 
     @Test

@@ -1,12 +1,14 @@
 package io.aethervpn.android
 
 import io.aethervpn.android.core.AetherEngineManager
+import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.CidrBlock
 import io.aethervpn.android.core.CidrRoutePlanner
 import io.aethervpn.android.core.PerAppRoutingPlan
 import io.aethervpn.android.core.SplitTunnelMode
 import io.aethervpn.android.core.SplitTunnelPlanner
 import io.aethervpn.android.core.VpnConfig
+import io.aethervpn.android.vpn.AetherVpnService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -201,5 +203,21 @@ class RoutingAndSplitTunnelTest {
         val cfg = VpnConfig(proxyBypassApps = setOf(customClonePkg, "org.hiddify.app"))
         val restored = VpnConfig.fromBackupJson(cfg.toSafeBackupJson()).getOrThrow()
         assertEquals(setOf(customClonePkg, "org.hiddify.app"), restored.proxyBypassApps)
+    }
+
+    @Test
+    fun singBoxOnlyDisablesMapDnsUsesRealDnsAndStandard1500Mtu() {
+        val singBoxOnly = VpnConfig(
+            singBoxEnabled = true,
+            chainMode = ChainMode.SINGBOX_ONLY
+        )
+        assertFalse(singBoxOnly.useMapDns)
+        assertEquals(1500, singBoxOnly.effectiveTunMtu)
+        assertEquals(listOf("1.1.1.1", "8.8.8.8"), AetherVpnService.resolveIpv4DnsServers(singBoxOnly))
+
+        val defaultWarp = VpnConfig()
+        assertTrue(defaultWarp.useMapDns)
+        assertEquals(1280, defaultWarp.effectiveTunMtu)
+        assertEquals(listOf(VpnConfig.DNS_IPV4_MAPDNS), AetherVpnService.resolveIpv4DnsServers(defaultWarp))
     }
 }
