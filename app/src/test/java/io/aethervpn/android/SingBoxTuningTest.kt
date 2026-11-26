@@ -167,7 +167,7 @@ class SingBoxTuningTest {
             )
         )
         assertTrue(yaml.contains("mtu: 1500"))
-        assertTrue(yaml.contains("tcp-buffer-size: 524288"))
+        assertTrue(yaml.contains("tcp-buffer-size: 65536"))
         assertTrue(yaml.contains("task-stack-size: 81920"))
         assertTrue(yaml.contains("connect-timeout: 15000"))
         assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))

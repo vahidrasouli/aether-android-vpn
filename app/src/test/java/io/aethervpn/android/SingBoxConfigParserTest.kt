@@ -427,4 +427,73 @@ class SingBoxConfigParserTest {
             assertFalse("dns-local must remain direct without detour", localDns.has("detour"))
         }
     }
+
+    @Test
+    fun splitsWsEarlyDataFromPathIntoSingBoxFields() {
+        val vlessWsEd = "vless://11111111-2222-3333-4444-555555555555@cdn.example.com:443" +
+            "?type=ws&security=tls&sni=cdn.example.com&host=app.example.com&path=%2Fws%3Fed%3D2048#WS-ED"
+        val out = SingBoxConfigParser.parse(vlessWsEd).getOrThrow().outboundOrFullJson
+        val transport = out.getJSONObject("transport")
+        assertEquals("ws", transport.getString("type"))
+        assertEquals("/ws", transport.getString("path"))
+        assertEquals(2048, transport.getInt("max_early_data"))
+        assertEquals("Sec-WebSocket-Protocol", transport.getString("early_data_header_name"))
+        assertEquals("app.example.com", transport.getJSONObject("headers").getString("Host"))
+
+        // Root path with ?ed=2048 and extra query param preservation
+        val vmessJson = """
+            {"v":"2","ps":"VMess-ED","add":"203.0.113.5","port":"443","id":"12345678-1234-1234-1234-1234567890ab","aid":"0","net":"ws","host":"ws.example.com","path":"/?foo=1&ed=2048","tls":"tls"}
+        """.trimIndent()
+        val vmessUri = "vmess://" + Base64.getEncoder().encodeToString(vmessJson.toByteArray(Charsets.UTF_8))
+        val vmessTransport = SingBoxConfigParser.parse(vmessUri).getOrThrow().outboundOrFullJson.getJSONObject("transport")
+        assertEquals("/?foo=1", vmessTransport.getString("path"))
+        assertEquals(2048, vmessTransport.getInt("max_early_data"))
+        assertEquals("Sec-WebSocket-Protocol", vmessTransport.getString("early_data_header_name"))
+    }
+
+    @Test
+    fun emitsUtlsDefaultChromeAndPreservesCustomFpAndVlessXudp() {
+        // VLESS TLS without explicit fp -> defaults to utls.fingerprint = "chrome" and packet_encoding = "xudp"
+        val vlessDefault = "vless://11111111-2222-3333-4444-555555555555@vless.example.com:443?type=ws&security=tls&alpn=h2,http/1.1#VlessDefault"
+        val vlessOut = SingBoxConfigParser.parse(vlessDefault).getOrThrow().outboundOrFullJson
+        assertEquals("xudp", vlessOut.getString("packet_encoding"))
+        val vlessUtls = vlessOut.getJSONObject("tls").getJSONObject("utls")
+        assertTrue(vlessUtls.getBoolean("enabled"))
+        assertEquals("chrome", vlessUtls.getString("fingerprint"))
+        val alpn = vlessOut.getJSONObject("tls").getJSONArray("alpn")
+        assertEquals(listOf("h2", "http/1.1"), (0 until alpn.length()).map { alpn.getString(it) })
+
+        // VMess TLS with explicit fp=firefox -> utls.fingerprint = "firefox"
+        val vmessJson = """
+            {"v":"2","ps":"VMess-FF","add":"203.0.113.5","port":"443","id":"12345678-1234-1234-1234-1234567890ab","aid":"0","net":"ws","host":"cdn.example.com","path":"/ws","tls":"tls","fp":"firefox"}
+        """.trimIndent()
+        val vmessUri = "vmess://" + Base64.getEncoder().encodeToString(vmessJson.toByteArray(Charsets.UTF_8))
+        val vmessOut = SingBoxConfigParser.parse(vmessUri).getOrThrow().outboundOrFullJson
+        val vmessTls = vmessOut.getJSONObject("tls")
+        assertEquals("cdn.example.com", vmessTls.getString("server_name"))
+        assertTrue(vmessTls.getJSONObject("utls").getBoolean("enabled"))
+        assertEquals("firefox", vmessTls.getJSONObject("utls").getString("fingerprint"))
+
+        // Trojan TLS without explicit fp -> defaults to utls.fingerprint = "chrome"
+        val trojanUri = "trojan://secret@trojan.example.com:443?sni=trojan.example.com#TrojanDefault"
+        val trojanOut = SingBoxConfigParser.parse(trojanUri).getOrThrow().outboundOrFullJson
+        assertTrue(trojanOut.getJSONObject("tls").getJSONObject("utls").getBoolean("enabled"))
+        assertEquals("chrome", trojanOut.getJSONObject("tls").getJSONObject("utls").getString("fingerprint"))
+    }
+
+    @Test
+    fun summarizeRuntimeConfigRedactsSecretsAndReportsOutboundShape() {
+        val secretUuid = "99999999-8888-7777-6666-555555555555"
+        val vlessUri = "vless://$secretUuid@198.51.100.10:443?type=ws&security=tls&sni=example.com&host=cdn.example.com&path=%2Fws%3Fed%3D2048&alpn=h2,http/1.1&fp=randomized#Test"
+        val runtimeJson = SingBoxConfigParser.buildRuntimeConfig(vlessUri).getOrThrow()
+        val summary = SingBoxConfigParser.summarizeRuntimeConfig(runtimeJson)
+
+        assertFalse("Summary must never leak UUID", summary.contains(secretUuid))
+        assertTrue(summary.contains("proto=vless"))
+        assertTrue(summary.contains("transport=ws(ed=2048,host=true)"))
+        assertTrue(summary.contains("tls=tls"))
+        assertTrue(summary.contains("utls=randomized"))
+        assertTrue(summary.contains("alpn=[h2,http/1.1]"))
+        assertTrue(summary.contains("pkt=xudp"))
+    }
 }

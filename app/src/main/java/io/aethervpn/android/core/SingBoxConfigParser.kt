@@ -350,6 +350,68 @@ object SingBoxConfigParser {
         root.toString(2)
     }
 
+    fun summarizeRuntimeConfig(runtimeJson: String): String {
+        return runCatching {
+            val root = JSONObject(runtimeJson)
+            val outbounds = root.optJSONArray("outbounds") ?: return@runCatching "Outbound shape: none"
+            var target: JSONObject? = null
+            for (i in 0 until outbounds.length()) {
+                val ob = outbounds.optJSONObject(i) ?: continue
+                val type = ob.optString("type").lowercase()
+                if (ob.optString("tag") == "proxy" || (type.isNotBlank() && type !in SYSTEM_OUTBOUND_TYPES && ob.optString("tag") != UPSTREAM_SOCKS_TAG)) {
+                    target = ob
+                    break
+                }
+            }
+            if (target == null) return@runCatching "Outbound shape: none"
+
+            val proto = target.optString("type", "unknown")
+            val transportObj = target.optJSONObject("transport")
+            val transportStr = if (transportObj == null) {
+                "tcp"
+            } else {
+                val tType = transportObj.optString("type", "unknown")
+                if (tType == "ws") {
+                    val ed = transportObj.optInt("max_early_data", 0)
+                    val hasHost = transportObj.optJSONObject("headers")?.optString("Host")?.isNotBlank() == true
+                    "ws(ed=$ed,host=$hasHost)"
+                } else {
+                    tType
+                }
+            }
+            val tlsObj = target.optJSONObject("tls")
+            val tlsStr = if (tlsObj?.optBoolean("enabled", false) == true) {
+                val isReality = tlsObj.optJSONObject("reality")?.optBoolean("enabled", false) == true
+                if (isReality) "reality" else "tls"
+            } else {
+                "none"
+            }
+            val utlsStr = tlsObj?.optJSONObject("utls")
+                ?.takeIf { it.optBoolean("enabled", false) }
+                ?.optString("fingerprint")
+                ?.takeIf { it.isNotBlank() }
+                ?: "none"
+            val alpnArr = tlsObj?.optJSONArray("alpn")
+            val alpnStr = if (alpnArr != null && alpnArr.length() > 0) {
+                (0 until alpnArr.length()).map { alpnArr.getString(it) }.joinToString(",")
+            } else {
+                "none"
+            }
+            val flow = target.optString("flow").takeIf { it.isNotBlank() }
+            val pkt = target.optString("packet_encoding").takeIf { it.isNotBlank() }
+
+            buildString {
+                append("Outbound shape: proto=").append(proto)
+                append(", transport=").append(transportStr)
+                append(", tls=").append(tlsStr)
+                append(", utls=").append(utlsStr)
+                append(", alpn=[").append(alpnStr).append(']')
+                if (flow != null) append(", flow=").append(flow)
+                if (pkt != null) append(", pkt=").append(pkt)
+            }
+        }.getOrElse { "Outbound shape: unavailable" }
+    }
+
     private const val UPSTREAM_SOCKS_TAG = "upstream-socks"
     private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
     private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
@@ -757,6 +819,7 @@ object SingBoxConfigParser {
             put("enabled", true)
             val sni = params["sni"]?.takeIf { it.isNotBlank() }
                 ?: params["peer"]?.takeIf { it.isNotBlank() }
+                ?: params["host"]?.substringBefore(",")?.trim()?.takeIf { it.isNotBlank() }
                 ?: defaultSni
             if (sni.isNotBlank()) put("server_name", sni)
             if (isTruthy(params["allowInsecure"]) || isTruthy(params["insecure"])) {
@@ -765,13 +828,11 @@ object SingBoxConfigParser {
             params["alpn"]?.takeIf { it.isNotBlank() }?.let { alpn ->
                 put("alpn", JSONArray(alpn.split(",").map { it.trim() }.filter { it.isNotEmpty() }))
             }
-            val fp = params["fp"]?.takeIf { it.isNotBlank() } ?: if (isReality) "chrome" else null
-            if (fp != null) {
-                put("utls", JSONObject().apply {
-                    put("enabled", true)
-                    put("fingerprint", fp)
-                })
-            }
+            val fp = params["fp"]?.takeIf { it.isNotBlank() } ?: "chrome"
+            put("utls", JSONObject().apply {
+                put("enabled", true)
+                put("fingerprint", fp)
+            })
             if (isReality) {
                 val pbk = params["pbk"]?.takeIf { it.isNotBlank() }
                     ?: throw IllegalArgumentException("Reality profile missing public key (pbk)")
@@ -788,7 +849,35 @@ object SingBoxConfigParser {
         return when (params["type"]?.lowercase()) {
             "ws" -> JSONObject().apply {
                 put("type", "ws")
-                put("path", params["path"]?.takeIf { it.isNotBlank() } ?: "/")
+                val rawPath = params["path"]?.takeIf { it.isNotBlank() } ?: "/"
+                var cleanPath = rawPath
+                var maxEarlyData: Int? = null
+                val qIdx = rawPath.indexOf('?')
+                if (qIdx >= 0) {
+                    val basePath = rawPath.substring(0, qIdx).ifEmpty { "/" }
+                    val query = rawPath.substring(qIdx + 1)
+                    val remainingParams = mutableListOf<String>()
+                    query.split("&").forEach { part ->
+                        if (part.startsWith("ed=", ignoreCase = true)) {
+                            val edVal = part.substringAfter("=").toIntOrNull()
+                            if (edVal != null && edVal > 0) {
+                                maxEarlyData = edVal
+                            }
+                        } else if (part.isNotEmpty()) {
+                            remainingParams.add(part)
+                        }
+                    }
+                    cleanPath = if (remainingParams.isEmpty()) {
+                        basePath
+                    } else {
+                        "$basePath?${remainingParams.joinToString("&")}"
+                    }
+                }
+                put("path", cleanPath)
+                if (maxEarlyData != null) {
+                    put("max_early_data", maxEarlyData)
+                    put("early_data_header_name", "Sec-WebSocket-Protocol")
+                }
                 params["host"]?.takeIf { it.isNotBlank() }?.let { h ->
                     put("headers", JSONObject().apply { put("Host", h) })
                 }

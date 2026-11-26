@@ -119,7 +119,7 @@ class HevTunnelManager(private val cacheDir: File) {
     }
 
     companion object {
-        const val TCP_BUFFER_SIZE_BYTES = 524288
+        const val TCP_BUFFER_SIZE_BYTES = 65536
         const val CONNECT_TIMEOUT_MS = 15000
     }
 }

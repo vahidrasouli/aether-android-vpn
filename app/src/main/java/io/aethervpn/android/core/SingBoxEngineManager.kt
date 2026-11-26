@@ -70,7 +70,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
         val stateDir = File(privateDataDir, "singbox").apply { mkdirs() }
         val configFile = File(stateDir, "singbox-config.json")
-        configFile.writeText(runtimeJsonResult.getOrThrow(), Charsets.UTF_8)
+        val runtimeJson = runtimeJsonResult.getOrThrow()
+        configFile.writeText(runtimeJson, Charsets.UTF_8)
         activeConfigFile = configFile
 
         val envMap = resolveGoEnvironment(config)
@@ -78,6 +79,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             "SingBox",
             "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "auto"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "100"}, log=${config.sbLogLevel}, dns=${config.sbRemoteDns}, tfo=${config.sbTcpFastOpen}]"
         )
+        DiagnosticsLog.record("SingBox", SingBoxConfigParser.summarizeRuntimeConfig(runtimeJson))
 
         val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
             .directory(stateDir)
