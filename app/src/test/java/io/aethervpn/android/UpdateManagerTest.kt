@@ -587,7 +587,7 @@ class UpdateManagerTest {
         var foundInstallReceiver = false
         val androidNs = "http://schemas.android.com/apk/res/android"
 
-        for (i in 0 until receivers.length()) {
+        for (i in 0 until receivers.length) {
             val node = receivers.item(i) as? org.w3c.dom.Element ?: continue
             val name = node.getAttributeNS(androidNs, "name")
             val exported = node.getAttributeNS(androidNs, "exported")
@@ -597,7 +597,7 @@ class UpdateManagerTest {
                 assertEquals("PackageReplacedReceiver must be exported=false", "false", exported)
                 val actions = node.getElementsByTagName("action")
                 var hasMyPackageReplaced = false
-                for (j in 0 until actions.length()) {
+                for (j in 0 until actions.length) {
                     val actionEl = actions.item(j) as? org.w3c.dom.Element ?: continue
                     if (actionEl.getAttributeNS(androidNs, "name") == "android.intent.action.MY_PACKAGE_REPLACED") {
                         hasMyPackageReplaced = true
