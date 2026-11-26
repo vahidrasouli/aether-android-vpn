@@ -65,7 +65,6 @@ import io.aethervpn.android.databinding.ActivityMainBinding
 import io.aethervpn.android.vpn.AetherVpnService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob

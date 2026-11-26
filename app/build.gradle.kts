@@ -107,11 +107,16 @@ android {
         variant.outputs
             .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
             .forEach { output ->
-                if (variant.buildType.name == "debug") {
-                    output.versionCodeOverride = debugVersionCode
-                }
                 output.outputFileName = "aether-android-arm64-v${variant.versionName}.apk"
             }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.outputs.forEach { output ->
+            output.versionCode.set(debugVersionCode)
+        }
     }
 }
 
