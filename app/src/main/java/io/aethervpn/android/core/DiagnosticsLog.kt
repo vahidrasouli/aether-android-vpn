@@ -50,7 +50,7 @@ object DiagnosticsLog {
     private val durationRegex =
         Regex("\\b\\d+(?:\\.\\d+)?(?:µs|us|ms|ns|s)\\b")
     private val upstreamOpenFailureRegex =
-        Regex("(?i)(open connection to )\\S+( using outbound/[^\\s:]+:\\s*dial (?:tcp|udp)\\s+[^:]+:(?:\\d+|<port>):\\s*(?:connect:\\s*connection refused|i/o timeout|connection reset by peer))")
+        Regex("(?i)(open connection to )\\S+(.*?:\\s*dial (?:tcp|udp)\\s+[^:]+:(?:\\d+|<port>):\\s*(?:connect:\\s*connection refused|i/o timeout|connection reset by peer))")
     private val hexTokenRegex = Regex("\\b0x[0-9a-fA-F]+\\b")
     private val multiSpaceRegex = Regex("\\s+")
 
@@ -73,10 +73,10 @@ object DiagnosticsLog {
         norm = singBoxLevelPrefixRegex.replace(norm) { "[${it.groupValues[1].lowercase(Locale.US)}]" }
         norm = singBoxConnDurationRegex.replace(norm, "<conn>")
         norm = durationRegex.replace(norm, "<dur>")
+        norm = upstreamOpenFailureRegex.replace(norm) { "${it.groupValues[1]}<dst>${it.groupValues[2]}" }
         norm = dynamicIdRegex.replace(norm) { "${it.groupValues[1].lowercase(Locale.US)}=<id>" }
         norm = portSuffixRegex.replace(norm, ":<port>")
         norm = portFieldRegex.replace(norm, "port=<port>")
-        norm = upstreamOpenFailureRegex.replace(norm) { "${it.groupValues[1]}<dst>${it.groupValues[2]}" }
         norm = hexTokenRegex.replace(norm, "<hex>")
         norm = multiSpaceRegex.replace(norm, " ").trim()
         return "$tag|$norm"
