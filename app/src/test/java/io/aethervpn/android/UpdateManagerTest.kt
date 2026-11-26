@@ -410,99 +410,160 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun deltaManifestMismatchedFromVersionCodeFallsBackToFullApk(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+    fun multiVersionDeltaManifestMatchesUpTo10BuildsBehindAndFallsBackCleanly(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val targetBytes = "FULL_APK_BYTES_B66_TARGET".toByteArray()
+        val targetSha = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(targetBytes)
+            .joinToString("") { "%02x".format(it) }
+        val wrongPatchSha = "f".repeat(64)
+
         val releaseJson = """
             {
               "tag_name": "debug-latest",
-              "name": "v1.1.0-debug-b57",
+              "name": "v1.1.0-debug-b66",
               "prerelease": true,
               "html_url": "https://github.com/vahidrasouli/aether-android-vpn/releases/tag/debug-latest",
-              "body": "Debug build 57",
+              "body": "Debug build 66",
               "assets": [
                 {
-                  "name": "aether-android-arm64-v1.1.0-debug-b57.apk",
-                  "browser_download_url": "https://example.com/aether-android-arm64-v1.1.0-debug-b57.apk"
+                  "name": "aether-android-arm64-v1.1.0-debug-b66.apk",
+                  "browser_download_url": "https://example.com/aether-android-arm64-v1.1.0-debug-b66.apk"
                 },
                 {
-                  "name": "delta-b55-to-b57.patch",
-                  "browser_download_url": "https://example.com/delta-b55-to-b57.patch"
+                  "name": "delta-b65-to-b66.patch",
+                  "browser_download_url": "https://example.com/delta-b65-to-b66.patch"
+                },
+                {
+                  "name": "delta-b61-to-b66.patch",
+                  "browser_download_url": "https://example.com/delta-b61-to-b66.patch"
+                },
+                {
+                  "name": "delta-b56-to-b66.patch",
+                  "browser_download_url": "https://example.com/delta-b56-to-b66.patch"
                 }
               ]
             }
         """.trimIndent()
+
         val manifestJson = """
             {
-              "fromVersionCode": 55,
-              "toVersionCode": 57,
-              "patchAssetName": "delta-b55-to-b57.patch",
-              "patchSize": 600000,
-              "fullAssetName": "aether-android-arm64-v1.1.0-debug-b57.apk",
-              "fullSize": 18000000,
-              "targetApkSha256": "${"a".repeat(64)}"
+              "toVersionCode": 66,
+              "toVersionName": "1.1.0-debug-b66",
+              "fullAssetName": "aether-android-arm64-v1.1.0-debug-b66.apk",
+              "fullSize": ${targetBytes.size},
+              "targetApkSha256": "$targetSha",
+              "patches": [
+                {
+                  "fromVersionCode": 65,
+                  "patchAssetName": "delta-b65-to-b66.patch",
+                  "patchSize": 500000,
+                  "patchSha256": "$wrongPatchSha"
+                },
+                {
+                  "fromVersionCode": 61,
+                  "patchAssetName": "delta-b61-to-b66.patch",
+                  "patchSize": 650000,
+                  "patchSha256": "$wrongPatchSha"
+                },
+                {
+                  "fromVersionCode": 56,
+                  "patchAssetName": "delta-b56-to-b66.patch",
+                  "patchSize": 800000,
+                  "patchSha256": "$wrongPatchSha"
+                }
+              ]
             }
         """.trimIndent()
 
-        val mismatchResult = UpdateManager.parseReleaseResponse(
+        // 1, 5, and 10 builds behind should each match their respective patch
+        for ((fromVc, expectedPatchName) in listOf(65 to "delta-b65-to-b66.patch", 61 to "delta-b61-to-b66.patch", 56 to "delta-b56-to-b66.patch")) {
+            val res = UpdateManager.parseReleaseResponse(
+                jsonBody = releaseJson,
+                currentVersion = "1.1.0-debug-b$fromVc",
+                isDebugBuild = true,
+                deltaManifestJson = manifestJson,
+                currentVersionCode = fromVc
+            ) as UpdateCheckResult.UpdateAvailable
+            assertNotNull("Expected deltaManifest for b$fromVc", res.release.deltaManifest)
+            assertNotNull("Expected matchedPatch for b$fromVc", res.release.deltaManifest!!.matchedPatch)
+            assertEquals(expectedPatchName, res.release.deltaManifest!!.matchedPatch!!.patchAssetName)
+        }
+
+        // >10 builds behind (b40) should have deltaManifest with matchedPatch == null
+        val farBehind = UpdateManager.parseReleaseResponse(
             jsonBody = releaseJson,
-            currentVersion = "1.1.0-debug-b56",
+            currentVersion = "1.1.0-debug-b40",
             isDebugBuild = true,
             deltaManifestJson = manifestJson,
-            currentVersionCode = 56
+            currentVersionCode = 40
         ) as UpdateCheckResult.UpdateAvailable
-        assertNull("Expected deltaManifest to be null when fromVersionCode != currentVersionCode", mismatchResult.release.deltaManifest)
+        assertNotNull(farBehind.release.deltaManifest)
+        assertNull("Expected matchedPatch to be null when >10 builds behind", farBehind.release.deltaManifest!!.matchedPatch)
 
-        val matchResult = UpdateManager.parseReleaseResponse(
-            jsonBody = releaseJson,
-            currentVersion = "1.1.0-debug-b55",
-            isDebugBuild = true,
-            deltaManifestJson = manifestJson,
-            currentVersionCode = 55
-        ) as UpdateCheckResult.UpdateAvailable
-        assertNotNull("Expected deltaManifest when fromVersionCode == currentVersionCode", matchResult.release.deltaManifest)
-        assertEquals(600000L, matchResult.release.deltaManifest!!.patchSize)
-
-        // Verify downloadUpdate falls back cleanly to full APK when fromVersionCode mismatches
-        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-fallback-").toFile()
+        // Verify version-scoped .part cleanup and automatic full-APK fallback when patch SHA-256 mismatches
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-multi-").toFile()
+        val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
+        val staleOldPart = java.io.File(updatesDir, "b64.patch.part").apply { writeText("stale_b64") }
         val baseApk = java.io.File(tempCacheDir, "base.apk").apply { writeText("OLD_APK") }
-        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
-        val fullApkPayload = "FULL_APK_BYTES_B57".toByteArray()
+
+        val server = java.net.ServerSocket(0, 4, java.net.InetAddress.getByName("127.0.0.1"))
         val serverThread = Thread {
             try {
-                server.accept().use { sock ->
-                    val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
-                    var line = inp.readLine()
-                    while (!line.isNullOrEmpty()) {
-                        line = inp.readLine()
+                while (!server.isClosed) {
+                    server.accept().use { sock ->
+                        val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                        val requestLine = inp.readLine() ?: ""
+                        var line = inp.readLine()
+                        while (!line.isNullOrEmpty()) {
+                            line = inp.readLine()
+                        }
+                        val out = sock.getOutputStream()
+                        val payload = if (requestLine.contains("/delta-")) {
+                            "CORRUPT_PATCH_BYTES".toByteArray()
+                        } else {
+                            targetBytes
+                        }
+                        out.write(
+                            ("HTTP/1.1 200 OK\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n")
+                                .toByteArray()
+                        )
+                        out.write(payload)
+                        out.flush()
                     }
-                    val out = sock.getOutputStream()
-                    out.write(
-                        ("HTTP/1.1 200 OK\r\nContent-Length: ${fullApkPayload.size}\r\nConnection: close\r\n\r\n")
-                            .toByteArray()
-                    )
-                    out.write(fullApkPayload)
-                    out.flush()
                 }
             } catch (_: Exception) {
-            } finally {
-                runCatching { server.close() }
             }
         }
         serverThread.isDaemon = true
         serverThread.start()
 
         try {
-            val releaseWithMismatchedDelta = mismatchResult.release.copy(
-                apkDownloadUrl = "http://127.0.0.1:${server.localPort}/full.apk"
+            val matchB65 = UpdateManager.parseReleaseResponse(
+                jsonBody = releaseJson,
+                currentVersion = "1.1.0-debug-b65",
+                isDebugBuild = true,
+                deltaManifestJson = manifestJson,
+                currentVersionCode = 65
+            ) as UpdateCheckResult.UpdateAvailable
+
+            val patchWithLocalUrl = matchB65.release.deltaManifest!!.matchedPatch!!.copy(
+                patchDownloadUrl = "http://127.0.0.1:${server.localPort}/delta-b65-to-b66.patch"
             )
+            val releaseWithLocalUrls = matchB65.release.copy(
+                apkDownloadUrl = "http://127.0.0.1:${server.localPort}/aether-android-arm64-v1.1.0-debug-b66.apk",
+                deltaManifest = matchB65.release.deltaManifest!!.copy(matchedPatch = patchWithLocalUrl)
+            )
+
             val res = UpdateManager.downloadUpdate(
-                release = releaseWithMismatchedDelta,
+                release = releaseWithLocalUrls,
                 baseApkPath = baseApk.absolutePath,
-                currentVersionCode = 56,
+                currentVersionCode = 65,
                 cacheDir = tempCacheDir
             ) {}
-            assertTrue(res.isSuccess)
+            assertTrue("Expected fallback to full APK to succeed", res.isSuccess)
             val downloaded = res.getOrThrow()
-            assertEquals("FULL_APK_BYTES_B57", downloaded.readText())
+            assertTrue(downloaded.readBytes().contentEquals(targetBytes))
+            assertFalse("Expected older b64.patch.part to be cleaned up", staleOldPart.exists())
         } finally {
             runCatching { server.close() }
             tempCacheDir.deleteRecursively()

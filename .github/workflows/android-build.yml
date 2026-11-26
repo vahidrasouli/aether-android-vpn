@@ -24,7 +24,7 @@ jobs:
       ANDROID_NDK_VERSION: "26.3.11579264"
       GRADLE_VERSION: "8.9"
       HEV_VERSION: "2.20.0"
-      SINGBOX_VERSION: "v1.14.4"
+      SINGBOX_VERSION: "v1.12.25"
       BUILD_JOBS: "2"
 
     steps:
@@ -121,7 +121,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/jniLibs/arm64-v8a/libsing-box.so
-          key: sing-box-${{ env.SINGBOX_VERSION }}-go-1.26.3-arm64-v3
+          key: sing-box-${{ env.SINGBOX_VERSION }}-go-1.26.3-arm64-v4
 
       - name: Build ARM64 sing-box core (Go layer)
         if: steps.cache-singbox.outputs.cache-hit != 'true'
@@ -317,6 +317,15 @@ jobs:
           name: aether-android-arm64-v${{ env.DEBUG_VERSION }}
           path: release-artifacts/*
 
+      - name: Restore rolling APK history cache (last 10 builds)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache@v4
+        with:
+          path: .apk-history
+          key: apk-history-b${{ github.run_number }}
+          restore-keys: |
+            apk-history-
+
       - name: Publish rolling debug-latest pre-release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
@@ -329,53 +338,119 @@ jobs:
           APK_PATH="release-artifacts/${APK_NAME}"
           SUMS_PATH="release-artifacts/SHA256SUMS.txt"
           MANIFEST_PATH="release-artifacts/delta-manifest.json"
-          PATCH_PATH=""
           NOTES="Rolling automated ARM64 Debug build from \`main\` (${GITHUB_SHA::7})."$'\n\n'"**Version:** \`${TITLE}\`"
 
+          mkdir -p .apk-history
+          RELEASE_EXISTS=false
           if gh release view "$TAG" >/dev/null 2>&1; then
+            RELEASE_EXISTS=true
+          fi
+
+          # Seed .apk-history on first run if empty and a previous debug-latest APK exists
+          if [ "$RELEASE_EXISTS" = true ] && ! ls .apk-history/b*.apk >/dev/null 2>&1; then
             PREV_APK_NAME=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name | endswith(".apk")) | .name' | head -n 1 || true)
             PREV_VERSION_CODE=$(echo "$PREV_APK_NAME" | sed -nE 's/.*-b([0-9]+).*\.apk$/\1/p')
             if [ -n "$PREV_APK_NAME" ] && [ -n "$PREV_VERSION_CODE" ] && [ "$PREV_VERSION_CODE" != "$CURR_VERSION_CODE" ]; then
-              echo "Found previous debug-latest APK: $PREV_APK_NAME (versionCode=$PREV_VERSION_CODE)"
-              if gh release download "$TAG" -p "$PREV_APK_NAME" -O /tmp/prev.apk; then
-                sudo apt-get update && sudo apt-get install -y bsdiff
-                PATCH_NAME="delta-b${PREV_VERSION_CODE}-to-b${CURR_VERSION_CODE}.patch"
-                CANDIDATE_PATCH="release-artifacts/${PATCH_NAME}"
-                bsdiff /tmp/prev.apk "$APK_PATH" "$CANDIDATE_PATCH"
-                FULL_SIZE=$(stat -c%s "$APK_PATH")
-                PATCH_SIZE=$(stat -c%s "$CANDIDATE_PATCH")
-                THRESHOLD=$((FULL_SIZE * 60 / 100))
-                echo "Delta patch size: ${PATCH_SIZE} bytes (full APK: ${FULL_SIZE} bytes, 60% threshold: ${THRESHOLD} bytes)"
-                if [ "$PATCH_SIZE" -lt "$THRESHOLD" ]; then
-                  TARGET_SHA256=$(sha256sum "$APK_PATH" | awk '{print $1}')
-                  python3 - "$PREV_VERSION_CODE" "$CURR_VERSION_CODE" "$PATCH_NAME" "$PATCH_SIZE" "$APK_NAME" "$FULL_SIZE" "$TARGET_SHA256" "$MANIFEST_PATH" <<'EOF'
+              echo "Seeding .apk-history with previous release APK: $PREV_APK_NAME (b$PREV_VERSION_CODE)"
+              gh release download "$TAG" -p "$PREV_APK_NAME" -O ".apk-history/b${PREV_VERSION_CODE}.apk" || rm -f ".apk-history/b${PREV_VERSION_CODE}.apk"
+            fi
+          fi
+
+          FULL_SIZE=$(stat -c%s "$APK_PATH")
+          TARGET_SHA256=$(sha256sum "$APK_PATH" | awk '{print $1}')
+          THRESHOLD=$((FULL_SIZE * 65 / 100))
+          PATCH_FILES=()
+          PATCH_RECORDS_FILE=$(mktemp)
+
+          if ls .apk-history/b*.apk >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y bsdiff
+            # Sort cached APKs newest-first and generate deltas for up to 10 prior builds
+            COUNT=0
+            for PREV_APK in $(ls -1 .apk-history/b*.apk | sort -t'b' -k2 -nr); do
+              PREV_VC=$(basename "$PREV_APK" .apk | sed 's/^b//')
+              if [ -z "$PREV_VC" ] || [ "$PREV_VC" = "$CURR_VERSION_CODE" ]; then
+                continue
+              fi
+              if [ "$COUNT" -ge 10 ]; then
+                break
+              fi
+              COUNT=$((COUNT + 1))
+              PATCH_NAME="delta-b${PREV_VC}-to-b${CURR_VERSION_CODE}.patch"
+              CANDIDATE_PATCH="release-artifacts/${PATCH_NAME}"
+              echo "Generating bsdiff patch: b${PREV_VC} -> b${CURR_VERSION_CODE}..."
+              bsdiff "$PREV_APK" "$APK_PATH" "$CANDIDATE_PATCH"
+              PATCH_SIZE=$(stat -c%s "$CANDIDATE_PATCH")
+              echo "  Patch ${PATCH_NAME}: ${PATCH_SIZE} bytes (full: ${FULL_SIZE} bytes, 65% threshold: ${THRESHOLD} bytes)"
+              if [ "$PATCH_SIZE" -lt "$THRESHOLD" ]; then
+                PATCH_SHA256=$(sha256sum "$CANDIDATE_PATCH" | awk '{print $1}')
+                echo "${PREV_VC}|${PATCH_NAME}|${PATCH_SIZE}|${PATCH_SHA256}" >> "$PATCH_RECORDS_FILE"
+                PATCH_FILES+=("$CANDIDATE_PATCH")
+              else
+                echo "  Skipping ${PATCH_NAME} (>= 65% of full APK)"
+                rm -f "$CANDIDATE_PATCH"
+              fi
+            done
+          fi
+
+          python3 - "$CURR_VERSION_CODE" "$DEBUG_VERSION" "$APK_NAME" "$FULL_SIZE" "$TARGET_SHA256" "$PATCH_RECORDS_FILE" "$MANIFEST_PATH" <<'EOF'
           import json
           import sys
 
-          manifest = {
-              "fromVersionCode": int(sys.argv[1]),
-              "toVersionCode": int(sys.argv[2]),
-              "patchAssetName": sys.argv[3],
-              "patchSize": int(sys.argv[4]),
-              "fullAssetName": sys.argv[5],
-              "fullSize": int(sys.argv[6]),
-              "targetApkSha256": sys.argv[7],
-          }
-          with open(sys.argv[8], "w", encoding="utf-8") as f:
-              json.dump(manifest, f, indent=2)
-              f.write("\n")
-          EOF
-                  PATCH_PATH="$CANDIDATE_PATCH"
-                  echo "Generated delta-manifest.json:"
-                  cat "$MANIFEST_PATH"
-                else
-                  echo "Delta patch >= 60% of full APK; skipping delta upload."
-                  rm -f "$CANDIDATE_PATCH"
-                fi
-                rm -f /tmp/prev.apk
-              fi
-            fi
+          to_vc = int(sys.argv[1])
+          to_ver = sys.argv[2]
+          full_name = sys.argv[3]
+          full_size = int(sys.argv[4])
+          target_sha = sys.argv[5]
+          records_path = sys.argv[6]
+          manifest_path = sys.argv[7]
 
+          patches = []
+          with open(records_path, "r", encoding="utf-8") as rf:
+              for line in rf:
+                  line = line.strip()
+                  if not line:
+                      continue
+                  from_vc, patch_name, patch_size, patch_sha = line.split("|")
+                  patches.append({
+                      "fromVersionCode": int(from_vc),
+                      "patchAssetName": patch_name,
+                      "patchSize": int(patch_size),
+                      "patchSha256": patch_sha,
+                  })
+
+          manifest = {
+              "toVersionCode": to_vc,
+              "toVersionName": to_ver,
+              "fullAssetName": full_name,
+              "fullSize": full_size,
+              "targetApkSha256": target_sha,
+              "patches": patches,
+          }
+          with open(manifest_path, "w", encoding="utf-8") as mf:
+              json.dump(manifest, mf, indent=2)
+              mf.write("\n")
+          EOF
+          rm -f "$PATCH_RECORDS_FILE"
+          echo "Generated delta-manifest.json:"
+          cat "$MANIFEST_PATH"
+
+          # Store current APK in .apk-history and prune to last 10 builds
+          cp "$APK_PATH" ".apk-history/b${CURR_VERSION_CODE}.apk"
+          KEEP=0
+          for HIST_APK in $(ls -1 .apk-history/b*.apk | sort -t'b' -k2 -nr); do
+            KEEP=$((KEEP + 1))
+            if [ "$KEEP" -gt 10 ]; then
+              echo "Pruning old cached APK: $HIST_APK"
+              rm -f "$HIST_APK"
+            fi
+          done
+
+          UPLOAD_FILES=("$APK_PATH" "$SUMS_PATH" "$MANIFEST_PATH")
+          if [ "${#PATCH_FILES[@]}" -gt 0 ]; then
+            UPLOAD_FILES+=("${PATCH_FILES[@]}")
+          fi
+
+          if [ "$RELEASE_EXISTS" = true ]; then
             EXISTING_ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
             for asset in $EXISTING_ASSETS; do
               echo "Deleting stale asset: $asset"
@@ -387,14 +462,9 @@ jobs:
               --prerelease \
               --latest=false \
               --target "$GITHUB_SHA"
-
-            UPLOAD_FILES=("$APK_PATH" "$SUMS_PATH")
-            if [ -n "$PATCH_PATH" ] && [ -f "$MANIFEST_PATH" ]; then
-              UPLOAD_FILES+=("$MANIFEST_PATH" "$PATCH_PATH")
-            fi
             gh release upload "$TAG" "${UPLOAD_FILES[@]}" --clobber
           else
-            gh release create "$TAG" "$APK_PATH" "$SUMS_PATH" \
+            gh release create "$TAG" "${UPLOAD_FILES[@]}" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --prerelease \

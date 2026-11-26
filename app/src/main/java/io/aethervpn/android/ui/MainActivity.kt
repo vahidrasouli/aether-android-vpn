@@ -1069,17 +1069,16 @@ class MainActivity : AppCompatActivity() {
     private var pendingInstallApkFile: java.io.File? = null
     private var activeUpdateDownloadJob: Job? = null
 
-    private fun applyUpdateDownloadButtonStyle(isCancelMode: Boolean) {
-        if (isCancelMode) {
-            binding.btnDownloadInstallUpdate.isEnabled = true
-            binding.btnDownloadInstallUpdate.text = getString(R.string.action_cancel_download)
-            binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
-            binding.btnDownloadInstallUpdate.strokeColor = ColorStateList.valueOf(
-                ContextCompat.getColor(this, R.color.error_text)
+    private fun applyUpdateDownloadButtonStyle(isDownloading: Boolean) {
+        if (isDownloading) {
+            binding.btnDownloadInstallUpdate.isEnabled = false
+            binding.btnDownloadInstallUpdate.text = "Updating…"
+            binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.accent_primary_container)
             )
-            binding.btnDownloadInstallUpdate.strokeWidth =
-                (1 * resources.displayMetrics.density).toInt().coerceAtLeast(1)
-            binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.error_text))
+            binding.btnDownloadInstallUpdate.strokeWidth = 0
+            binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.accent_primary))
+            binding.btnCancelUpdate.visibility = View.VISIBLE
         } else {
             binding.btnDownloadInstallUpdate.isEnabled = true
             binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(
@@ -1087,6 +1086,7 @@ class MainActivity : AppCompatActivity() {
             )
             binding.btnDownloadInstallUpdate.strokeWidth = 0
             binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.surface_bg))
+            binding.btnCancelUpdate.visibility = View.GONE
         }
     }
 
@@ -1113,7 +1113,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnCheckUpdates.setOnClickListener {
             activeUpdateDownloadJob?.cancel()
             activeUpdateDownloadJob = null
-            applyUpdateDownloadButtonStyle(isCancelMode = false)
+            applyUpdateDownloadButtonStyle(isDownloading = false)
             binding.btnCheckUpdates.isEnabled = false
             binding.tvUpdateStatus.text = "Checking GitHub Releases..."
             binding.layoutUpdateAvailable.visibility = View.GONE
@@ -1126,25 +1126,62 @@ class MainActivity : AppCompatActivity() {
                         val rel = result.release
                         pendingUpdateRelease = rel
                         val delta = rel.deltaManifest
-                        binding.tvUpdateStatus.text = if (delta != null) {
-                            val deltaMb = delta.patchSize / (1024.0 * 1024.0)
-                            String.format(
-                                Locale.US,
-                                "Update available: v%s (Delta ~%.1f MB)",
-                                rel.versionName,
-                                deltaMb
-                            )
+                        val matchedPatch = delta?.matchedPatch
+                        binding.tvUpdateVersion.text = if (delta != null && delta.toVersionCode > 0) {
+                            "v${BuildConfig.VERSION_NAME} → b${delta.toVersionCode}"
                         } else {
-                            "New version available!"
+                            "v${BuildConfig.VERSION_NAME} → v${rel.versionName}"
                         }
-                        binding.tvUpdateVersion.text = "Update ${rel.tagName} (v${rel.versionName})"
+
+                        if (delta != null && matchedPatch != null) {
+                            val patchMb = matchedPatch.patchSize / (1024.0 * 1024.0)
+                            val fullMb = if (delta.fullSize > 0L) delta.fullSize / (1024.0 * 1024.0) else 0.0
+                            val savedPct = if (delta.fullSize > 0L) {
+                                (((delta.fullSize - matchedPatch.patchSize) * 100L) / delta.fullSize).toInt().coerceIn(0, 99)
+                            } else {
+                                0
+                            }
+                            binding.tvUpdateDeltaPill.text = String.format(
+                                Locale.US,
+                                "⚡ Delta Update • %.1f MB (%d%% saved)",
+                                patchMb,
+                                savedPct
+                            )
+                            binding.tvUpdateDeltaPill.visibility = View.VISIBLE
+                            if (fullMb > 0.0) {
+                                binding.tvUpdateSizeComparison.text = String.format(
+                                    Locale.US,
+                                    "vs full ~%.1f MB • SHA-256 verified bsdiff patch",
+                                    fullMb
+                                )
+                                binding.tvUpdateSizeComparison.visibility = View.VISIBLE
+                            } else {
+                                binding.tvUpdateSizeComparison.visibility = View.GONE
+                            }
+                            binding.tvUpdateStatus.text = "Delta update ready (${rel.tagName})"
+                        } else {
+                            binding.tvUpdateDeltaPill.visibility = View.GONE
+                            if (delta != null && delta.fullSize > 0L) {
+                                val fullMb = delta.fullSize / (1024.0 * 1024.0)
+                                binding.tvUpdateSizeComparison.text = String.format(
+                                    Locale.US,
+                                    "Full APK • ~%.1f MB • SHA-256 verified",
+                                    fullMb
+                                )
+                                binding.tvUpdateSizeComparison.visibility = View.VISIBLE
+                            } else {
+                                binding.tvUpdateSizeComparison.visibility = View.GONE
+                            }
+                            binding.tvUpdateStatus.text = "New version available!"
+                        }
+
                         binding.tvUpdateNotes.text = rel.releaseNotes
+                        binding.tvUpdateStageLabel.visibility = View.GONE
                         binding.progressUpdateDownload.visibility = View.GONE
                         binding.tvUpdateProgressDetail.visibility = View.GONE
-                        binding.btnDownloadInstallUpdate.isEnabled = true
-                        val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
+                        applyUpdateDownloadButtonStyle(isDownloading = false)
                         val hasPartial = rel.apkDownloadUrl != null && withContext(Dispatchers.IO) {
-                            UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                            UpdateManager.getPartialDownloadSize(rel, cacheDir) > 0L
                         }
                         binding.btnDownloadInstallUpdate.text = when {
                             rel.apkDownloadUrl == null -> "Open Release Page"
@@ -1165,27 +1202,27 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnCancelUpdate.setOnClickListener {
+            activeUpdateDownloadJob?.cancel()
+            activeUpdateDownloadJob = null
+            val rel = pendingUpdateRelease
+            if (rel != null) {
+                uiScope.launch(Dispatchers.IO) {
+                    UpdateManager.cancelPartialDownloads(rel, cacheDir)
+                }
+            }
+            binding.tvUpdateStageLabel.visibility = View.GONE
+            binding.progressUpdateDownload.visibility = View.GONE
+            binding.progressUpdateDownload.progress = 0
+            binding.tvUpdateProgressDetail.visibility = View.GONE
+            binding.tvUpdateProgressDetail.text = ""
+            binding.tvUpdateStatus.text = "Download cancelled"
+            applyUpdateDownloadButtonStyle(isDownloading = false)
+            binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
+        }
+
         binding.btnDownloadInstallUpdate.setOnClickListener {
             if (activeUpdateDownloadJob?.isActive == true) {
-                activeUpdateDownloadJob?.cancel()
-                activeUpdateDownloadJob = null
-                val rel = pendingUpdateRelease
-                val fileName = rel?.apkFileName ?: rel?.let { "aether-android-arm64-v${it.versionName}.apk" }
-                if (fileName != null) {
-                    uiScope.launch(Dispatchers.IO) {
-                        UpdateManager.cancelPartialDownload(fileName, cacheDir)
-                        rel?.deltaManifest?.patchAssetName?.let { patchName ->
-                            UpdateManager.cancelPartialDownload(patchName, cacheDir)
-                        }
-                    }
-                }
-                binding.progressUpdateDownload.visibility = View.GONE
-                binding.progressUpdateDownload.progress = 0
-                binding.tvUpdateProgressDetail.visibility = View.GONE
-                binding.tvUpdateProgressDetail.text = ""
-                binding.tvUpdateStatus.text = "Download cancelled"
-                applyUpdateDownloadButtonStyle(isCancelMode = false)
-                binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
                 return@setOnClickListener
             }
 
@@ -1204,13 +1241,20 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
             activeUpdateDownloadJob = lifecycleScope.launch {
                 val resumingBytes = withContext(Dispatchers.IO) {
-                    UpdateManager.getPartialDownloadSize(fileName, cacheDir)
+                    UpdateManager.getPartialDownloadSize(rel, cacheDir)
                 }
 
-                applyUpdateDownloadButtonStyle(isCancelMode = true)
+                applyUpdateDownloadButtonStyle(isDownloading = true)
+                binding.tvUpdateStageLabel.visibility = View.VISIBLE
+                binding.tvUpdateStageLabel.text = if (resumingBytes > 0L) {
+                    "Resuming download..."
+                } else if (rel.deltaManifest?.matchedPatch != null) {
+                    "Downloading patch..."
+                } else {
+                    "Downloading full APK..."
+                }
                 binding.progressUpdateDownload.visibility = View.VISIBLE
                 binding.progressUpdateDownload.isIndeterminate = false
                 if (resumingBytes == 0L) {
@@ -1222,11 +1266,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     "0% • Starting download…"
                 }
-                binding.tvUpdateStatus.text = if (resumingBytes > 0L) {
-                    "Resuming ${rel.apkFileName ?: "update"}..."
-                } else {
-                    "Downloading ${rel.apkFileName ?: "update"}..."
-                }
+                binding.tvUpdateStatus.text = binding.tvUpdateStageLabel.text
 
                 try {
                     val downloadResult = UpdateManager.downloadUpdate(
@@ -1237,51 +1277,59 @@ class MainActivity : AppCompatActivity() {
                         onStatus = { statusText ->
                             lifecycleScope.launch {
                                 if (activeUpdateDownloadJob?.isActive == true) {
+                                    binding.tvUpdateStageLabel.text = statusText
                                     binding.tvUpdateStatus.text = statusText
+                                    binding.progressUpdateDownload.isIndeterminate =
+                                        statusText.contains("Applying", ignoreCase = true) ||
+                                            statusText.contains("Verifying", ignoreCase = true)
                                 }
                             }
                         }
                     ) { progress ->
                         lifecycleScope.launch {
                             if (activeUpdateDownloadJob?.isActive == true) {
+                                binding.progressUpdateDownload.isIndeterminate = false
                                 binding.progressUpdateDownload.progress = progress.percent
                                 binding.tvUpdateProgressDetail.text = progress.formatLabel()
                             }
                         }
                     }
 
-                    applyUpdateDownloadButtonStyle(isCancelMode = false)
+                    applyUpdateDownloadButtonStyle(isDownloading = false)
                     downloadResult.onSuccess { file ->
                         binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
                         pendingInstallApkFile = file
+                        binding.progressUpdateDownload.isIndeterminate = false
                         binding.progressUpdateDownload.progress = 100
-                        binding.tvUpdateStatus.text = "Download complete. Launching installer..."
+                        binding.tvUpdateStageLabel.text = "Ready to install"
+                        binding.tvUpdateStatus.text = "Ready to install. Launching installer..."
                         installDownloadedApk(file)
                     }.onFailure { err ->
+                        binding.progressUpdateDownload.isIndeterminate = false
                         val hasPart = withContext(Dispatchers.IO) {
-                            UpdateManager.getPartialDownloadSize(fileName, cacheDir) > 0L
+                            UpdateManager.getPartialDownloadSize(rel, cacheDir) > 0L
                         }
                         if (hasPart) {
                             binding.btnDownloadInstallUpdate.text = getString(R.string.action_resume_download)
+                            binding.tvUpdateStageLabel.text = "Download paused"
                             binding.tvUpdateStatus.text = "Download paused (${err.message ?: "network error"})"
                         } else {
                             binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
+                            binding.tvUpdateStageLabel.visibility = View.GONE
                             binding.progressUpdateDownload.visibility = View.GONE
                             binding.tvUpdateProgressDetail.visibility = View.GONE
                             binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
                         }
                     }
                 } catch (_: CancellationException) {
-                    UpdateManager.cancelPartialDownload(fileName, cacheDir)
-                    rel.deltaManifest?.patchAssetName?.let { patchName ->
-                        UpdateManager.cancelPartialDownload(patchName, cacheDir)
-                    }
+                    UpdateManager.cancelPartialDownloads(rel, cacheDir)
+                    binding.tvUpdateStageLabel.visibility = View.GONE
                     binding.progressUpdateDownload.visibility = View.GONE
                     binding.progressUpdateDownload.progress = 0
                     binding.tvUpdateProgressDetail.visibility = View.GONE
                     binding.tvUpdateProgressDetail.text = ""
                     binding.tvUpdateStatus.text = "Download cancelled"
-                    applyUpdateDownloadButtonStyle(isCancelMode = false)
+                    applyUpdateDownloadButtonStyle(isDownloading = false)
                     binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
                 } finally {
                     activeUpdateDownloadJob = null

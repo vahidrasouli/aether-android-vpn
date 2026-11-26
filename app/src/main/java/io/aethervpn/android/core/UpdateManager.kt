@@ -135,15 +135,21 @@ data class DebugBuildVersion(
     }
 }
 
-data class DeltaManifest(
+data class DeltaPatchEntry(
     val fromVersionCode: Int,
-    val toVersionCode: Int,
     val patchAssetName: String,
     val patchSize: Long,
+    val patchSha256: String,
+    val patchDownloadUrl: String? = null
+)
+
+data class DeltaManifest(
+    val toVersionCode: Int,
+    val toVersionName: String,
     val fullAssetName: String,
     val fullSize: Long,
     val targetApkSha256: String,
-    val patchDownloadUrl: String? = null
+    val matchedPatch: DeltaPatchEntry? = null
 )
 
 data class ReleaseInfo(
@@ -289,27 +295,45 @@ object UpdateManager {
         assetUrls: Map<String, String>
     ): DeltaManifest? {
         val obj = runCatching { JSONObject(manifestJson) }.getOrNull() ?: return null
-        val fromCode = obj.optInt("fromVersionCode", -1)
         val toCode = obj.optInt("toVersionCode", -1)
-        val patchName = obj.optString("patchAssetName", "").trim()
-        val patchSize = obj.optLong("patchSize", -1L)
+        val toVersionName = obj.optString("toVersionName", "").trim()
         val fullName = obj.optString("fullAssetName", "").trim()
         val fullSize = obj.optLong("fullSize", -1L)
         val sha256 = obj.optString("targetApkSha256", "").trim()
 
-        if (fromCode <= 0 || fromCode != currentVersionCode || toCode <= fromCode) return null
-        if (patchName.isEmpty() || patchSize <= 0L || fullName.isEmpty() || sha256.length != 64) return null
-        val patchUrl = assetUrls[patchName]?.takeIf { it.isNotBlank() } ?: return null
+        if (toCode <= 0 || fullName.isEmpty() || sha256.length != 64) return null
+
+        var matchedPatch: DeltaPatchEntry? = null
+        val patchesArray = obj.optJSONArray("patches")
+        if (patchesArray != null && currentVersionCode in 1 until toCode) {
+            for (i in 0 until patchesArray.length()) {
+                val entry = patchesArray.optJSONObject(i) ?: continue
+                val fromCode = entry.optInt("fromVersionCode", -1)
+                if (fromCode != currentVersionCode) continue
+                val patchName = entry.optString("patchAssetName", "").trim()
+                val patchSize = entry.optLong("patchSize", -1L)
+                val patchSha256 = entry.optString("patchSha256", "").trim()
+                val patchUrl = assetUrls[patchName]?.takeIf { it.isNotBlank() }
+                if (patchName.isNotEmpty() && patchSize > 0L && patchSha256.length == 64 && patchUrl != null) {
+                    matchedPatch = DeltaPatchEntry(
+                        fromVersionCode = fromCode,
+                        patchAssetName = patchName,
+                        patchSize = patchSize,
+                        patchSha256 = patchSha256,
+                        patchDownloadUrl = patchUrl
+                    )
+                    break
+                }
+            }
+        }
 
         return DeltaManifest(
-            fromVersionCode = fromCode,
             toVersionCode = toCode,
-            patchAssetName = patchName,
-            patchSize = patchSize,
+            toVersionName = toVersionName,
             fullAssetName = fullName,
             fullSize = fullSize,
             targetApkSha256 = sha256,
-            patchDownloadUrl = patchUrl
+            matchedPatch = matchedPatch
         )
     }
 
@@ -410,17 +434,59 @@ object UpdateManager {
     internal fun sanitizeFileName(fileName: String): String =
         fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
 
-    fun getPartialDownloadSize(fileName: String, cacheDir: File): Long {
+    internal fun partFileNameFor(
+        fileName: String,
+        targetVersionCode: Int = -1,
+        isPatch: Boolean = false
+    ): String = if (targetVersionCode > 0) {
+        if (isPatch) "b$targetVersionCode.patch.part" else "b$targetVersionCode.apk.part"
+    } else {
+        "${sanitizeFileName(fileName)}.part"
+    }
+
+    fun getPartialDownloadSize(
+        fileName: String,
+        cacheDir: File,
+        targetVersionCode: Int = -1,
+        isPatch: Boolean = false
+    ): Long {
         val updatesDir = File(cacheDir, "updates")
-        val partFile = File(updatesDir, "${sanitizeFileName(fileName)}.part")
+        val partFile = File(updatesDir, partFileNameFor(fileName, targetVersionCode, isPatch))
         return if (partFile.exists() && partFile.isFile) partFile.length() else 0L
     }
 
-    fun cancelPartialDownload(fileName: String, cacheDir: File) {
+    fun getPartialDownloadSize(release: ReleaseInfo, cacheDir: File): Long {
+        val delta = release.deltaManifest
+        val targetVc = delta?.toVersionCode ?: -1
+        val patch = delta?.matchedPatch
+        if (patch != null && targetVc > 0) {
+            val patchPart = getPartialDownloadSize(patch.patchAssetName, cacheDir, targetVc, isPatch = true)
+            if (patchPart > 0L) return patchPart
+        }
+        val fullName = release.apkFileName ?: "aether-android-arm64-v${release.versionName}.apk"
+        return getPartialDownloadSize(fullName, cacheDir, targetVc, isPatch = false)
+    }
+
+    fun cancelPartialDownload(
+        fileName: String,
+        cacheDir: File,
+        targetVersionCode: Int = -1,
+        isPatch: Boolean = false
+    ) {
         val updatesDir = File(cacheDir, "updates")
-        val partFile = File(updatesDir, "${sanitizeFileName(fileName)}.part")
+        val partFile = File(updatesDir, partFileNameFor(fileName, targetVersionCode, isPatch))
         if (partFile.exists()) {
             runCatching { partFile.delete() }
+        }
+    }
+
+    fun cancelPartialDownloads(release: ReleaseInfo, cacheDir: File) {
+        val delta = release.deltaManifest
+        val targetVc = delta?.toVersionCode ?: -1
+        val fullName = release.apkFileName ?: "aether-android-arm64-v${release.versionName}.apk"
+        cancelPartialDownload(fullName, cacheDir, targetVc, isPatch = false)
+        delta?.matchedPatch?.let { patch ->
+            cancelPartialDownload(patch.patchAssetName, cacheDir, targetVc, isPatch = true)
         }
     }
 
@@ -463,18 +529,29 @@ object UpdateManager {
         onProgress: (DownloadProgress) -> Unit
     ): Result<File> {
         val delta = release.deltaManifest
+        val targetVersionCode = delta?.toVersionCode ?: -1
+        val matchedPatch = delta?.matchedPatch
         val baseApkFile = baseApkPath?.takeIf { it.isNotBlank() }?.let { File(it) }
+
         if (delta != null &&
-            delta.fromVersionCode == currentVersionCode &&
-            !delta.patchDownloadUrl.isNullOrBlank() &&
+            matchedPatch != null &&
+            matchedPatch.fromVersionCode == currentVersionCode &&
+            delta.toVersionCode > currentVersionCode &&
+            !matchedPatch.patchDownloadUrl.isNullOrBlank() &&
             baseApkFile != null &&
             baseApkFile.isFile
         ) {
-            onStatus("Downloading delta patch (${delta.patchAssetName})...")
+            onStatus("Downloading patch...")
+            val patchPartName = partFileNameFor(
+                fileName = matchedPatch.patchAssetName,
+                targetVersionCode = targetVersionCode,
+                isPatch = true
+            )
             val patchResult = downloadApk(
-                downloadUrl = delta.patchDownloadUrl,
-                fileName = delta.patchAssetName,
+                downloadUrl = matchedPatch.patchDownloadUrl,
+                fileName = matchedPatch.patchAssetName,
                 cacheDir = cacheDir,
+                partFileNameOverride = patchPartName,
                 onProgress = onProgress
             )
             if (patchResult.isSuccess) {
@@ -485,12 +562,20 @@ object UpdateManager {
                 val tmpTargetFile = File(updatesDir, "$safeTargetName.tmp")
                 try {
                     val patched = withContext(Dispatchers.IO) {
-                        onStatus("Applying delta patch...")
+                        onStatus("Verifying patch SHA-256...")
+                        val actualPatchSha = BsPatch.sha256Hex(patchFile)
+                        if (!actualPatchSha.equals(matchedPatch.patchSha256, ignoreCase = true)) {
+                            throw IllegalStateException(
+                                "Delta patch SHA-256 mismatch (expected ${matchedPatch.patchSha256}, got $actualPatchSha)"
+                            )
+                        }
+                        onStatus("Applying delta...")
                         BsPatch.patch(
                             oldFile = baseApkFile,
                             patchFile = patchFile,
                             newFile = tmpTargetFile
                         )
+                        onStatus("Verifying SHA-256...")
                         val actualSha = BsPatch.sha256Hex(tmpTargetFile)
                         if (!actualSha.equals(delta.targetApkSha256, ignoreCase = true)) {
                             throw IllegalStateException(
@@ -506,32 +591,75 @@ object UpdateManager {
                         }
                         targetFile
                     }
+                    onStatus("Ready to install")
                     return Result.success(patched)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
                     runCatching { tmpTargetFile.delete() }
                     runCatching { targetFile.delete() }
-                    cancelPartialDownload(delta.patchAssetName, cacheDir)
-                    onStatus("Delta patch failed, downloading full APK...")
+                    cancelPartialDownload(
+                        fileName = matchedPatch.patchAssetName,
+                        cacheDir = cacheDir,
+                        targetVersionCode = targetVersionCode,
+                        isPatch = true
+                    )
+                    onStatus("Delta failed, downloading full APK...")
                 } finally {
                     runCatching { patchFile.delete() }
                 }
             } else {
-                cancelPartialDownload(delta.patchAssetName, cacheDir)
-                onStatus("Delta download failed, falling back to full APK...")
+                cancelPartialDownload(
+                    fileName = matchedPatch.patchAssetName,
+                    cacheDir = cacheDir,
+                    targetVersionCode = targetVersionCode,
+                    isPatch = true
+                )
+                onStatus("Delta download failed, downloading full APK...")
             }
         }
 
         val fullUrl = release.apkDownloadUrl
             ?: return Result.failure(IllegalStateException("No APK download URL available."))
         val fullFileName = release.apkFileName ?: "aether-android-arm64-v${release.versionName}.apk"
-        onStatus("Downloading $fullFileName...")
-        return downloadApk(
+        val fullPartName = partFileNameFor(
+            fileName = fullFileName,
+            targetVersionCode = targetVersionCode,
+            isPatch = false
+        )
+        onStatus("Downloading full APK...")
+        val fullResult = downloadApk(
             downloadUrl = fullUrl,
             fileName = fullFileName,
             cacheDir = cacheDir,
+            partFileNameOverride = fullPartName,
             onProgress = onProgress
+        )
+        return fullResult.fold(
+            onSuccess = { apkFile ->
+                val expectedSha = delta?.targetApkSha256
+                if (!expectedSha.isNullOrBlank()) {
+                    onStatus("Verifying SHA-256...")
+                    val actualSha = withContext(Dispatchers.IO) { BsPatch.sha256Hex(apkFile) }
+                    if (!actualSha.equals(expectedSha, ignoreCase = true)) {
+                        runCatching { apkFile.delete() }
+                        cancelPartialDownload(
+                            fileName = fullFileName,
+                            cacheDir = cacheDir,
+                            targetVersionCode = targetVersionCode,
+                            isPatch = false
+                        )
+                        return Result.failure(
+                            IllegalStateException(
+                                "Full APK SHA-256 mismatch (expected $expectedSha, got $actualSha)"
+                            )
+                        )
+                    }
+                }
+                onStatus("Ready to install")
+                Result.success(apkFile)
+            },
+            onFailure = { Result.failure(it) }
         )
     }
 
@@ -539,12 +667,13 @@ object UpdateManager {
         downloadUrl: String,
         fileName: String,
         cacheDir: File,
+        partFileNameOverride: String? = null,
         onProgress: (DownloadProgress) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
         val safeName = sanitizeFileName(fileName)
         val targetFile = File(updatesDir, safeName)
-        val partFile = File(updatesDir, "$safeName.part")
+        val partFile = File(updatesDir, partFileNameOverride ?: "$safeName.part")
         cleanupUpdatesDir(updatesDir, keepPartFileName = partFile.name)
 
         val existingBytes = if (partFile.exists() && partFile.isFile) partFile.length() else 0L
