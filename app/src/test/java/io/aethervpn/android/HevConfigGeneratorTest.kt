@@ -22,7 +22,7 @@ class HevConfigGeneratorTest {
         assertTrue(yaml.contains("port: 1819"))
         assertTrue(yaml.contains("udp: 'udp'"))
         assertTrue(yaml.contains("mtu: 1280"))
-        assertTrue(yaml.contains("ipv4: '198.18.0.1'"))
+        assertTrue(yaml.contains("ipv4: '172.19.0.1'"))
         assertTrue(yaml.contains("ipv6: 'fd00:ae7::1'"))
         assertTrue(yaml.contains("task-stack-size: 81920"))
         assertTrue(yaml.contains("tcp-buffer-size: 65536"))
@@ -102,7 +102,7 @@ class HevConfigGeneratorTest {
 
         val defaultYaml = manager.generateYamlConfig(VpnConfig())
         assertTrue(defaultYaml.contains("mapdns:"))
-        assertTrue(defaultYaml.contains("address: 198.18.0.2"))
+        assertTrue(defaultYaml.contains("address: 172.19.0.2"))
         assertTrue(defaultYaml.contains("udp-read-write-timeout: 5000"))
 
         val customTimeoutYaml = manager.generateYamlConfig(VpnConfig(udpTimeoutMs = 30000))

@@ -637,11 +637,11 @@ data class VpnConfig(
         const val SING_BOX_SOCKS_PORT = 1825
         const val DEFAULT_TUN_MTU = 1280
         const val SING_BOX_ONLY_TUN_MTU = 1500
-        const val TUN_IPV4_ADDRESS = "198.18.0.1"
+        const val TUN_IPV4_ADDRESS = "172.19.0.1"
         const val TUN_IPV4_PREFIX = 30
         const val TUN_IPV6_ADDRESS = "fd00:ae7::1"
         const val TUN_IPV6_PREFIX = 126
-        const val DNS_IPV4_MAPDNS = "198.18.0.2"
+        const val DNS_IPV4_MAPDNS = "172.19.0.2"
         const val MAPDNS_NETWORK = "240.0.0.0"
         const val MAPDNS_NETMASK = "240.0.0.0"
         const val DNS_IPV4_PRIMARY = "1.1.1.1"
