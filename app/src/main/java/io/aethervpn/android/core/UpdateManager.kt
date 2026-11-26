@@ -1,13 +1,17 @@
 package io.aethervpn.android.core
 
 import io.aethervpn.android.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.coroutines.coroutineContext
 
 data class SemVer(
     val major: Int,
@@ -106,7 +110,7 @@ data class DebugBuildVersion(
 
     companion object {
         private val DEBUG_VERSION_REGEX =
-            Regex("""(?:^|aether-android-arm64-)[vV]?(\d+)\.(\d+)\.(\d+)-debug\.(?:b(\d+)(?:-[0-9A-Za-z]+)?|(local))(?:\.apk)?$""")
+            Regex("""(?:^|aether-android-arm64-)[vV]?(\d+)\.(\d+)\.(\d+)-debug[.-](?:b?(\d+)(?:-[0-9A-Za-z]+)?|(local))(?:\.apk)?$""")
 
         fun parse(raw: String): DebugBuildVersion? {
             val trimmed = raw.trim()
@@ -288,24 +292,33 @@ object UpdateManager {
         )
     }
 
+    internal fun cleanupUpdatesDir(updatesDir: File) {
+        updatesDir.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.endsWith(".apk", ignoreCase = true) ||
+                    file.name.endsWith(".tmp", ignoreCase = true))
+            ) {
+                runCatching { file.delete() }
+            }
+        }
+    }
+
     suspend fun downloadApk(
         downloadUrl: String,
         fileName: String,
         cacheDir: File,
         onProgress: (DownloadProgress) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
+        val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
+        cleanupUpdatesDir(updatesDir)
+
+        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val targetFile = File(updatesDir, safeName)
+        val tempFile = File(updatesDir, "$safeName.tmp")
+
         var conn: HttpURLConnection? = null
+        var cancelHandle: kotlinx.coroutines.DisposableHandle? = null
+        var completed = false
         try {
-            val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
-            updatesDir.listFiles()?.forEach { old ->
-                if (old.isFile && old.name.endsWith(".apk", ignoreCase = true)) {
-                    runCatching { old.delete() }
-                }
-            }
-
-            val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val targetFile = File(updatesDir, safeName)
-
             conn = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 instanceFollowRedirects = true
@@ -314,6 +327,13 @@ object UpdateManager {
                 setRequestProperty("User-Agent", "AetherVpnAndroid")
             }
 
+            cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
+                if (cause != null) {
+                    runCatching { conn.disconnect() }
+                }
+            }
+
+            coroutineContext.ensureActive()
             val code = conn.responseCode
             if (code !in 200..299) {
                 return@withContext Result.failure(
@@ -327,11 +347,13 @@ object UpdateManager {
             var lastReportedBytes = 0L
 
             conn.inputStream.use { input ->
-                FileOutputStream(targetFile).use { output ->
+                FileOutputStream(tempFile).use { output ->
                     val buffer = ByteArray(16 * 1024)
                     while (true) {
+                        coroutineContext.ensureActive()
                         val read = input.read(buffer)
                         if (read <= 0) break
+                        coroutineContext.ensureActive()
                         output.write(buffer, 0, read)
                         downloadedBytes += read
                         val pct = if (totalBytes > 0L) {
@@ -348,12 +370,27 @@ object UpdateManager {
                     output.flush()
                 }
             }
+            coroutineContext.ensureActive()
+            if (targetFile.exists()) {
+                targetFile.delete()
+            }
+            if (!tempFile.renameTo(targetFile)) {
+                tempFile.copyTo(targetFile, overwrite = true)
+                tempFile.delete()
+            }
+            completed = true
             onProgress(DownloadProgress(downloadedBytes, totalBytes.coerceAtLeast(downloadedBytes), 100))
             Result.success(targetFile)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         } finally {
-            conn?.disconnect()
+            cancelHandle?.dispose()
+            runCatching { conn?.disconnect() }
+            if (!completed) {
+                cleanupUpdatesDir(updatesDir)
+            }
         }
     }
 }

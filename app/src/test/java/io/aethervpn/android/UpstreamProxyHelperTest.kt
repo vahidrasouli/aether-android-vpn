@@ -161,7 +161,7 @@ class UpstreamProxyHelperTest {
                     out.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
                     out.flush()
                 }
-                // Connection 4: Stage 4 Psiphon Bootstrap (AWS S3) reachability (s3.amazonaws.com:443)
+                // Connection 4: Stage 4 Psiphon Bootstrap (AWS S3 server_list_compressed) reachability
                 server.accept().use { s ->
                     val inp = s.getInputStream()
                     val out = s.getOutputStream()
@@ -175,11 +175,19 @@ class UpstreamProxyHelperTest {
                     out.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 1, 0xBB.toByte()))
                     out.flush()
                     val reader = BufferedReader(InputStreamReader(inp, Charsets.US_ASCII))
+                    val requestLines = mutableListOf<String>()
                     var line = reader.readLine()
                     while (!line.isNullOrEmpty()) {
+                        requestLines.add(line)
                         line = reader.readLine()
                     }
-                    out.write("HTTP/1.1 307 Temporary Redirect\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+                    val reqLine = requestLines.firstOrNull().orEmpty()
+                    val hasRange = requestLines.any { it.equals("Range: bytes=0-1023", ignoreCase = true) }
+                    if (reqLine.startsWith("GET /psiphon/web/mjr4-p23r-puwl/server_list_compressed ") && hasRange) {
+                        out.write("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-1023/102400\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+                    } else {
+                        out.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+                    }
                     out.flush()
                 }
             } catch (_: Exception) {

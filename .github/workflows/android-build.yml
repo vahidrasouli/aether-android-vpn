@@ -33,8 +33,7 @@ jobs:
 
       - name: Compute unique debug build version
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DEBUG_VER="1.1.0-debug.b${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          DEBUG_VER="1.1.0-debug-b${GITHUB_RUN_NUMBER}"
           echo "DEBUG_VERSION=${DEBUG_VER}" >> "$GITHUB_ENV"
           echo "Computed Debug Version: ${DEBUG_VER}"
 

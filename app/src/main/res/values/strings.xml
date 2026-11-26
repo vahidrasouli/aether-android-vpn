@@ -56,6 +56,7 @@
     <string name="about_github_label">GitHub: vahidrasouli/aether-android-vpn</string>
     <string name="action_check_updates">Check for Updates</string>
     <string name="action_download_install">Download &amp; Update</string>
+    <string name="action_cancel_download">Cancel</string>
     <string name="update_status_idle">Tap to check GitHub Releases for a newer version.</string>
     <string name="channel_debug_prerelease">Channel: Debug (Pre-release)</string>
     <string name="channel_stable">Channel: Stable</string>

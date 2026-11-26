@@ -13,18 +13,12 @@ val keystoreProps = Properties().apply {
 }
 
 val baseVersionName = "1.1.0"
-val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.trim().orEmpty()
-val gitShortSha = runCatching {
-    val proc = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
-        .directory(rootProject.projectDir)
-        .redirectErrorStream(true)
-        .start()
-    proc.inputStream.bufferedReader().readText().trim().takeIf { proc.waitFor() == 0 && it.isNotEmpty() }
-}.getOrNull()
-val debugVersionSuffix = if (githubRunNumber.isNotEmpty() && !gitShortSha.isNullOrEmpty()) {
-    "-debug.b$githubRunNumber-$gitShortSha"
+val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.trim()?.toIntOrNull()
+val debugVersionCode = githubRunNumber?.coerceAtLeast(1) ?: 1
+val debugVersionSuffix = if (githubRunNumber != null) {
+    "-debug-b$githubRunNumber"
 } else {
-    "-debug.local"
+    "-debug-local"
 }
 
 android {
@@ -113,6 +107,9 @@ android {
         variant.outputs
             .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
             .forEach { output ->
+                if (variant.buildType.name == "debug") {
+                    output.versionCodeOverride = debugVersionCode
+                }
                 output.outputFileName = "aether-android-arm64-v${variant.versionName}.apk"
             }
     }

@@ -260,7 +260,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 while (System.currentTimeMillis() < deadline) {
                     if (!proc.isAlive) {
                         val output = runCatching {
-                            proc.inputStream.bufferedReader().readText().trim().take(300)
+                            stripAnsiCodes(proc.inputStream.bufferedReader().readText()).trim().take(300)
                         }.getOrDefault("")
                         return Result.failure(
                             IllegalStateException(

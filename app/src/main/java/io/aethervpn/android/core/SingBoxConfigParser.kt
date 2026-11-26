@@ -126,8 +126,6 @@ object SingBoxConfigParser {
         } else {
             val outbound = JSONObject(parsed.outboundOrFullJson.toString()).apply {
                 put("tag", "proxy")
-                put("tcp_keep_alive", "30s")
-                put("tcp_keep_alive_interval", "15s")
                 put("connect_timeout", "10s")
                 if (upstreamSocksPort != null) {
                     put("detour", UPSTREAM_SOCKS_TAG)

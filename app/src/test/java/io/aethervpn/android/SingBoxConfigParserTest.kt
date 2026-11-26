@@ -208,11 +208,11 @@ class SingBoxConfigParserTest {
             assertEquals("direct", localDns.getString("detour"))
             assertFalse(localDns.has("address"))
 
-            // Proxy outbound dial keep-alive & timeout fields
+            // Proxy outbound dial timeout field (no invalid tcp_keep_alive fields for sing-box 1.12)
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
             assertEquals("proxy", proxyOutbound.getString("tag"))
-            assertEquals("30s", proxyOutbound.getString("tcp_keep_alive"))
-            assertEquals("15s", proxyOutbound.getString("tcp_keep_alive_interval"))
+            assertFalse(proxyOutbound.has("tcp_keep_alive"))
+            assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
             assertEquals("10s", proxyOutbound.getString("connect_timeout"))
 
             // Route rules: sniff, hijack-dns, ip_is_private -> direct, quic -> reject
@@ -240,9 +240,37 @@ class SingBoxConfigParserTest {
     }
 
     @Test
+    fun buildRuntimeConfigOmitsTcpKeepAliveAcrossAllSupportedProtocols() {
+        val samples = listOf(
+            "vless://11111111-1111-1111-1111-111111111111@vless.example.com:443?security=tls&type=ws#VLESS",
+            "vmess://" + java.util.Base64.getEncoder().encodeToString(
+                """{"v":"2","ps":"VMess","add":"vmess.example.com","port":"443","id":"22222222-2222-2222-2222-222222222222","net":"tcp","tls":"tls"}""".toByteArray()
+            ),
+            "trojan://trojanpass@trojan.example.com:443?sni=trojan.example.com#Trojan",
+            "ss://" + java.util.Base64.getEncoder().encodeToString("aes-256-gcm:sspass".toByteArray()) + "@ss.example.com:8388#SS",
+            "hy2://hy2pass@hy2.example.com:8443?sni=hy2.example.com#HY2",
+            "socks://user:pass@socks.example.com:1080#SOCKS",
+            """{"type":"http","server":"http.example.com","server_port":8080}"""
+        )
+
+        samples.forEach { sample ->
+            val runtimeStr = SingBoxConfigParser.buildRuntimeConfig(sample).getOrThrow()
+            assertFalse("Unexpected tcp_keep_alive in $sample", runtimeStr.contains("tcp_keep_alive"))
+            val runtime = JSONObject(runtimeStr)
+            val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
+            assertEquals("proxy", proxyOutbound.getString("tag"))
+            assertEquals("10s", proxyOutbound.getString("connect_timeout"))
+        }
+    }
+
+    @Test
     fun stripsAnsiEscapeCodesFromSingBoxLogs() {
         val raw = "\u001B[33mWARN\u001B[0m[0005] \u001B[1;31mconnection reset\u001B[0m"
         assertEquals("WARN[0005] connection reset", SingBoxEngineManager.stripAnsiCodes(raw))
+        assertEquals(
+            "FATAL[0000] decode config",
+            SingBoxEngineManager.stripAnsiCodes("\u001B[31mFATAL\u001B[0m[0000] decode config")
+        )
         assertEquals("plain log line", SingBoxEngineManager.stripAnsiCodes("plain log line"))
     }
 }

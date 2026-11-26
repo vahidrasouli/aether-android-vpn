@@ -7,6 +7,7 @@ import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
@@ -62,7 +63,9 @@ import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.core.VpnStateStore
 import io.aethervpn.android.databinding.ActivityMainBinding
 import io.aethervpn.android.vpn.AetherVpnService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -1030,6 +1033,28 @@ class MainActivity : AppCompatActivity() {
 
     private var pendingUpdateRelease: ReleaseInfo? = null
     private var pendingInstallApkFile: java.io.File? = null
+    private var activeUpdateDownloadJob: Job? = null
+
+    private fun applyUpdateDownloadButtonStyle(isCancelMode: Boolean) {
+        if (isCancelMode) {
+            binding.btnDownloadInstallUpdate.isEnabled = true
+            binding.btnDownloadInstallUpdate.text = getString(R.string.action_cancel_download)
+            binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
+            binding.btnDownloadInstallUpdate.strokeColor = ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.error_text)
+            )
+            binding.btnDownloadInstallUpdate.strokeWidth =
+                (1 * resources.displayMetrics.density).toInt().coerceAtLeast(1)
+            binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.error_text))
+        } else {
+            binding.btnDownloadInstallUpdate.isEnabled = true
+            binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.accent_primary)
+            )
+            binding.btnDownloadInstallUpdate.strokeWidth = 0
+            binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.surface_bg))
+        }
+    }
 
     private fun setupAboutAndUpdater() {
         val versionLabel = "v${BuildConfig.VERSION_NAME}"
@@ -1052,6 +1077,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnCheckUpdates.setOnClickListener {
+            activeUpdateDownloadJob?.cancel()
+            activeUpdateDownloadJob = null
+            applyUpdateDownloadButtonStyle(isCancelMode = false)
             binding.btnCheckUpdates.isEnabled = false
             binding.tvUpdateStatus.text = "Checking GitHub Releases..."
             binding.layoutUpdateAvailable.visibility = View.GONE
@@ -1089,6 +1117,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnDownloadInstallUpdate.setOnClickListener {
+            if (activeUpdateDownloadJob?.isActive == true) {
+                activeUpdateDownloadJob?.cancel()
+                activeUpdateDownloadJob = null
+                binding.progressUpdateDownload.visibility = View.GONE
+                binding.progressUpdateDownload.progress = 0
+                binding.tvUpdateProgressDetail.visibility = View.GONE
+                binding.tvUpdateProgressDetail.text = ""
+                binding.tvUpdateStatus.text = "Download cancelled"
+                applyUpdateDownloadButtonStyle(isCancelMode = false)
+                binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
+                return@setOnClickListener
+            }
+
             val rel = pendingUpdateRelease ?: return@setOnClickListener
             val apkUrl = rel.apkDownloadUrl
             if (apkUrl.isNullOrBlank()) {
@@ -1104,7 +1145,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            binding.btnDownloadInstallUpdate.isEnabled = false
+            applyUpdateDownloadButtonStyle(isCancelMode = true)
             binding.progressUpdateDownload.visibility = View.VISIBLE
             binding.progressUpdateDownload.isIndeterminate = false
             binding.progressUpdateDownload.progress = 0
@@ -1112,29 +1153,44 @@ class MainActivity : AppCompatActivity() {
             binding.tvUpdateProgressDetail.text = "0% • Starting download…"
             binding.tvUpdateStatus.text = "Downloading ${rel.apkFileName ?: "update"}..."
 
-            uiScope.launch {
+            activeUpdateDownloadJob = uiScope.launch {
                 val fileName = rel.apkFileName ?: "aether-android-arm64-v${rel.versionName}.apk"
-                val downloadResult = UpdateManager.downloadApk(
-                    downloadUrl = apkUrl,
-                    fileName = fileName,
-                    cacheDir = cacheDir
-                ) { progress ->
-                    uiScope.launch {
-                        binding.progressUpdateDownload.progress = progress.percent
-                        binding.tvUpdateProgressDetail.text = progress.formatLabel()
+                try {
+                    val downloadResult = UpdateManager.downloadApk(
+                        downloadUrl = apkUrl,
+                        fileName = fileName,
+                        cacheDir = cacheDir
+                    ) { progress ->
+                        uiScope.launch {
+                            if (activeUpdateDownloadJob?.isActive == true) {
+                                binding.progressUpdateDownload.progress = progress.percent
+                                binding.tvUpdateProgressDetail.text = progress.formatLabel()
+                            }
+                        }
                     }
-                }
 
-                binding.btnDownloadInstallUpdate.isEnabled = true
-                downloadResult.onSuccess { file ->
-                    pendingInstallApkFile = file
-                    binding.progressUpdateDownload.progress = 100
-                    binding.tvUpdateStatus.text = "Download complete. Launching installer..."
-                    installDownloadedApk(file)
-                }.onFailure { err ->
+                    applyUpdateDownloadButtonStyle(isCancelMode = false)
+                    binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
+                    downloadResult.onSuccess { file ->
+                        pendingInstallApkFile = file
+                        binding.progressUpdateDownload.progress = 100
+                        binding.tvUpdateStatus.text = "Download complete. Launching installer..."
+                        installDownloadedApk(file)
+                    }.onFailure { err ->
+                        binding.progressUpdateDownload.visibility = View.GONE
+                        binding.tvUpdateProgressDetail.visibility = View.GONE
+                        binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
+                    }
+                } catch (_: CancellationException) {
                     binding.progressUpdateDownload.visibility = View.GONE
+                    binding.progressUpdateDownload.progress = 0
                     binding.tvUpdateProgressDetail.visibility = View.GONE
-                    binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
+                    binding.tvUpdateProgressDetail.text = ""
+                    binding.tvUpdateStatus.text = "Download cancelled"
+                    applyUpdateDownloadButtonStyle(isCancelMode = false)
+                    binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
+                } finally {
+                    activeUpdateDownloadJob = null
                 }
             }
         }

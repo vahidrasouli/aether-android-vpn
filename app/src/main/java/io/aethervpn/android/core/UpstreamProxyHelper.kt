@@ -185,6 +185,7 @@ object UpstreamProxyTester {
     private const val MASQUE_EDGE_PORT = 443
     private const val S3_HOST = "s3.amazonaws.com"
     private const val S3_PORT = 443
+    private const val S3_PSIPHON_PATH = "/psiphon/web/mjr4-p23r-puwl/server_list_compressed"
 
     internal fun parseCloudflareTrace(body: String): CloudflareTraceInfo? {
         val fields = mutableMapOf<String, String>()
@@ -497,8 +498,9 @@ object UpstreamProxyTester {
             )
             tlsSocket = tlsUpgrade(rawSocket, S3_HOST, S3_PORT, s3TimeoutMs, false)
             val out = tlsSocket.getOutputStream()
-            val req = "HEAD / HTTP/1.1\r\n" +
+            val req = "GET $S3_PSIPHON_PATH HTTP/1.1\r\n" +
                 "Host: $S3_HOST\r\n" +
+                "Range: bytes=0-1023\r\n" +
                 "User-Agent: AetherAndroid/2.4.0\r\n" +
                 "Connection: close\r\n\r\n"
             out.write(req.toByteArray(Charsets.US_ASCII))
@@ -508,7 +510,7 @@ object UpstreamProxyTester {
             val statusLine = reader.readLine()
                 ?: throw IllegalStateException("Empty S3 response")
             val code = statusLine.split(" ", limit = 3).getOrNull(1)?.toIntOrNull() ?: 0
-            if (code in 200..499) {
+            if (code == 206 || code == 200) {
                 true to "OK"
             } else {
                 false to "HTTP $code"
