@@ -73,6 +73,8 @@ class SingBoxTuningTest {
         // Changing any individual field switches to CUSTOM
         assertEquals(SingBoxTuningPreset.CUSTOM, turbo.copy(sbBypassIrDomains = true).detectSingBoxTuningPreset())
         assertEquals(SingBoxTuningPreset.CUSTOM, turbo.copy(sbRemoteDns = "8.8.8.8").detectSingBoxTuningPreset())
+        assertEquals(SingBoxTuningPreset.CUSTOM, turbo.copy(sbCustomBypassDomains = "digikala.com").detectSingBoxTuningPreset())
+        assertEquals(SingBoxTuningPreset.CUSTOM, turbo.copy(sbMultiplexEnabled = true).detectSingBoxTuningPreset())
 
         val reset = turbo.copy(sbBypassIrDomains = true, sbGoMemLimit = "24MiB").resetSingBoxTuningDefaults()
         assertEquals(SingBoxTuningPreset.BALANCED, reset.detectSingBoxTuningPreset())
@@ -95,6 +97,8 @@ class SingBoxTuningTest {
                 sbBlockQuic = SingBoxBlockQuicMode.OFF,
                 sbBypassPrivateIp = false,
                 sbBypassIrDomains = true,
+                sbCustomBypassDomains = "digikala.com, shaparak.ir",
+                sbMultiplexEnabled = true,
                 sbConnectTimeoutSec = 15,
                 sbTcpFastOpen = true,
                 sbLogLevel = "info"
@@ -111,6 +115,8 @@ class SingBoxTuningTest {
         assertEquals(SingBoxBlockQuicMode.OFF, restored.sbBlockQuic)
         assertFalse(restored.sbBypassPrivateIp)
         assertTrue(restored.sbBypassIrDomains)
+        assertEquals("digikala.com, shaparak.ir", restored.sbCustomBypassDomains)
+        assertTrue(restored.sbMultiplexEnabled)
         assertEquals(15, restored.sbConnectTimeoutSec)
         assertTrue(restored.sbTcpFastOpen)
         assertEquals("info", restored.sbLogLevel)
@@ -212,5 +218,36 @@ class SingBoxTuningTest {
         val offRules = offRuntime.getJSONObject("route").getJSONArray("rules")
         val offRuleList = (0 until offRules.length()).map { offRules.getJSONObject(it) }
         assertFalse(offRuleList.any { it.optString("protocol") == "quic" && it.optString("action") == "reject" })
+    }
+
+    @Test
+    fun customBypassDomainsAndMultiplexEmitValidSingBox112Json() {
+        val cfg = VpnConfig(
+            sbCustomBypassDomains = "digikala.com, shaparak.ir, *.bank.ir",
+            sbMultiplexEnabled = true
+        )
+
+        val vlessRuntime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(sampleVlessUri, config = cfg).getOrThrow())
+        val vlessOutbound = vlessRuntime.getJSONArray("outbounds").getJSONObject(0)
+        val mux = vlessOutbound.getJSONObject("multiplex")
+        assertTrue(mux.getBoolean("enabled"))
+        assertEquals("h2mux", mux.getString("protocol"))
+        assertEquals(4, mux.getInt("max_connections"))
+
+        val rules = vlessRuntime.getJSONObject("route").getJSONArray("rules")
+        val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
+        val customRule = ruleList.firstOrNull {
+            val arr = it.optJSONArray("domain_suffix")
+            arr != null && arr.length() == 3 && it.optString("outbound") == "direct"
+        }
+        assertTrue("Custom bypass domains rule must exist", customRule != null)
+        val suffixes = customRule!!.getJSONArray("domain_suffix")
+        assertEquals("digikala.com", suffixes.getString(0))
+        assertEquals("shaparak.ir", suffixes.getString(1))
+        assertEquals(".bank.ir", suffixes.getString(2))
+
+        // UDP-based outbounds like hysteria2 must NOT emit multiplex
+        val hy2Runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(sampleHy2Uri, config = cfg).getOrThrow())
+        assertFalse(hy2Runtime.getJSONArray("outbounds").getJSONObject(0).has("multiplex"))
     }
 }

@@ -16,7 +16,12 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
+import java.net.HttpURLConnection
+import java.net.URL
 import io.aethervpn.android.R
 import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.SingBoxConfigParser
@@ -177,6 +182,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             getString(R.string.action_add_profile)
         }
         sheetBinding.btnCopyShareUri.visibility = if (isEditing) View.VISIBLE else View.GONE
+        sheetBinding.btnImportSubscription.visibility = if (isEditing) View.GONE else View.VISIBLE
 
         if (editingProfile != null) {
             sheetBinding.etSingBoxUriOrJson.setText(editingProfile.rawUriOrJson)
@@ -206,6 +212,10 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             } else {
                 showSnack("Clipboard is empty")
             }
+        }
+
+        sheetBinding.btnImportSubscription.setOnClickListener {
+            showImportSubscriptionDialog(dialog)
         }
 
         sheetBinding.btnCopyShareUri.setOnClickListener {
@@ -277,6 +287,90 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    private fun showImportSubscriptionDialog(parentSheet: BottomSheetDialog) {
+        val density = resources.displayMetrics.density
+        val padH = (20 * density).toInt()
+        val padV = (8 * density).toInt()
+
+        val til = TextInputLayout(this).apply {
+            hint = "https://example.com/sub"
+            setPadding(padH, padV, padH, 0)
+        }
+        val etUrl = TextInputEditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            maxLines = 2
+            val clip = getSystemService(ClipboardManager::class.java)
+                ?.primaryClip?.getItemAt(0)?.coerceToText(this@SingBoxProfilesActivity)?.toString()?.trim().orEmpty()
+            if (clip.startsWith("http://", ignoreCase = true) || clip.startsWith("https://", ignoreCase = true)) {
+                setText(clip)
+            }
+        }
+        til.addView(etUrl)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Import Subscription")
+            .setMessage("Fetch base64 or plain multi-line sing-box URIs from an http(s):// URL.")
+            .setView(til)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton("Import") { _, _ ->
+                val urlStr = etUrl.text?.toString()?.trim().orEmpty()
+                if (!urlStr.startsWith("http://", ignoreCase = true) && !urlStr.startsWith("https://", ignoreCase = true)) {
+                    showSnack("Enter a valid http:// or https:// subscription URL")
+                    return@setPositiveButton
+                }
+                parentSheet.dismiss()
+                importSubscriptionFromUrl(urlStr)
+            }
+            .show()
+    }
+
+    private fun importSubscriptionFromUrl(urlStr: String) {
+        showSnack("Fetching subscription…")
+        uiScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 10_000
+                        readTimeout = 10_000
+                        instanceFollowRedirects = true
+                        setRequestProperty("User-Agent", "AetherVPN/1.1.0")
+                    }
+                    try {
+                        val code = conn.responseCode
+                        require(code in 200..299) { "HTTP $code from subscription server" }
+                        val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                            val buf = CharArray(8192)
+                            val sb = StringBuilder()
+                            var total = 0
+                            var read = reader.read(buf)
+                            while (read != -1 && total < 2 * 1024 * 1024) {
+                                sb.appendRange(buf, 0, read)
+                                total += read
+                                read = reader.read(buf)
+                            }
+                            sb.toString()
+                        }
+                        SingBoxProfileRepository.addSubscriptionPayload(filesDir, body).getOrThrow()
+                    } finally {
+                        conn.disconnect()
+                    }
+                }
+            }
+            if (result.isSuccess) {
+                val (imported, skipped) = result.getOrThrow()
+                refreshAll()
+                val msg = if (skipped > 0) {
+                    "Imported ${imported.size} profiles ($skipped skipped)"
+                } else {
+                    "Imported ${imported.size} profiles"
+                }
+                showSnack(msg)
+            } else {
+                showSnack("Subscription import failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+            }
+        }
     }
 
     private fun runTestAll() {

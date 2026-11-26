@@ -27,7 +27,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="end"
-                android:layout_marginEnd="8dp"
+                android:layout_marginEnd="6dp"
                 android:text="@string/action_reset"
                 android:textAllCaps="false"
                 android:textColor="@color/accent_primary"
@@ -44,13 +44,13 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:clipToPadding="false"
-            android:padding="16dp">
+            android:padding="12dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingBottom="32dp">
+                android:paddingBottom="20dp">
 
                 <!-- Top Hero Card: One-Tap Preset Chips -->
                 <com.google.android.material.card.MaterialCardView
@@ -64,7 +64,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="12dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -73,73 +73,67 @@
                             android:orientation="horizontal">
 
                             <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
                                 android:background="@drawable/bg_icon_badge"
                                 android:contentDescription="@null"
-                                android:padding="6dp"
+                                android:padding="4dp"
                                 android:src="@drawable/ic_tune_24"
                                 app:tint="@color/accent_primary" />
 
-                            <LinearLayout
+                            <TextView
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="12dp"
+                                android:layout_marginStart="8dp"
                                 android:layout_weight="1"
-                                android:orientation="vertical">
+                                android:text="SING-BOX PRESETS"
+                                android:textColor="@color/accent_primary"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
 
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="SING-BOX PRESETS"
-                                    android:textColor="@color/accent_primary"
-                                    android:textSize="11sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvSbAutoSaveStatus"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="Auto-save on"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
-                            </LinearLayout>
+                            <TextView
+                                android:id="@+id/tvSbAutoSaveStatus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Auto-save on"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbPreset"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            app:chipSpacingHorizontal="8dp"
-                            app:chipSpacingVertical="6dp"
+                            android:layout_marginTop="8dp"
+                            app:chipSpacingHorizontal="6dp"
+                            app:chipSpacingVertical="4dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbPresetEco"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Eco (Battery)" />
+                                android:text="Eco" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbPresetBalanced"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Balanced (Default)" />
+                                android:text="Balanced" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbPresetTurbo"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Turbo (Speed)" />
+                                android:text="Turbo" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbPresetCustom"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Custom" />
@@ -149,10 +143,12 @@
                             android:id="@+id/tvSbPresetSummary"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:text="Balanced: 48MiB, 2 cores, GOGC=50, Warn log, Auto QUIC block, Prefer IPv4, 10s timeout."
+                            android:layout_marginTop="4dp"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Balanced: 48MiB, 2 cores, GOGC=50, Warn, Auto QUIC, Prefer IPv4"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -161,13 +157,13 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="8dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="12dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -176,19 +172,19 @@
                             android:orientation="horizontal">
 
                             <ImageView
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
                                 android:background="@drawable/bg_icon_badge"
                                 android:contentDescription="@null"
-                                android:padding="5dp"
+                                android:padding="4dp"
                                 android:src="@drawable/ic_memory_24"
                                 app:tint="@color/accent_primary" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:text="GO RUNTIME RESOURCES (RAM &amp; CPU)"
+                                android:layout_marginStart="8dp"
+                                android:text="GO RUNTIME (RAM &amp; CPU)"
                                 android:textColor="@color/accent_primary"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
@@ -197,59 +193,62 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:text="Go Memory Limit (GOMEMLIMIT)"
+                            android:layout_marginTop="8dp"
+                            android:text="Memory Limit (GOMEMLIMIT)"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Soft RAM cap for libsing-box.so; lower saves memory, higher prevents GC pauses."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Soft RAM cap for libsing-box.so"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbGoMem"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
+                            app:chipSpacingVertical="4dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoMem24"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="24MiB" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoMem32"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="32MiB" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoMem48"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="48MiB" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoMem64"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="64MiB" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoMemAuto"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Auto" />
@@ -258,52 +257,54 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:text="CPU Cores (GOMAXPROCS)"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Limits Go scheduler threads; 1-2 saves battery, 4+ boosts peak throughput."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Go scheduler threads (1-2 battery, 4+ throughput)"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbGoProcs"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoProcs1"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="1" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoProcs2"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="2" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoProcs4"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="4" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoProcsAuto"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Auto" />
@@ -312,45 +313,47 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:text="GC Frequency (GOGC)"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Controls garbage collection aggressiveness; 25 trims RAM early, 100 reduces CPU."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="25 trims RAM early; 100 reduces GC CPU"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbGoGc"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoGc25"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="25" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoGc50"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="50" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoGc100"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="100" />
@@ -363,13 +366,13 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="8dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="12dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -378,19 +381,19 @@
                             android:orientation="horizontal">
 
                             <ImageView
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
                                 android:background="@drawable/bg_icon_badge"
                                 android:contentDescription="@null"
-                                android:padding="5dp"
+                                android:padding="4dp"
                                 android:src="@drawable/ic_protocol_24"
                                 app:tint="@color/accent_primary" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:text="DNS &amp; RESOLUTION (SING-BOX 1.12)"
+                                android:layout_marginStart="8dp"
+                                android:text="DNS &amp; RESOLUTION (1.12)"
                                 android:textColor="@color/accent_primary"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
@@ -399,60 +402,62 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:text="Remote DNS (Proxied)"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="DoH prevents DNS leaks over TLS; plain UDP is lighter and faster on weak links."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="DoH encrypts queries; UDP is lighter on weak links"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbRemoteDns"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:chipSpacingVertical="4dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbRemoteDnsCfDoh"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="1.1.1.1 DoH" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbRemoteDnsGoogleDoh"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="8.8.8.8 DoH" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbRemoteDnsCfUdp"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="1.1.1.1 UDP" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbRemoteDnsGoogleUdp"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="8.8.8.8 UDP" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbRemoteDnsQuad9Udp"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="9.9.9.9 UDP" />
@@ -461,45 +466,47 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:text="Direct DNS (Local &amp; Bootstrap)"
+                            android:layout_marginTop="8dp"
+                            android:text="Direct DNS (Bootstrap)"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Resolves your proxy server domain and direct-bypassed domains locally."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Resolves proxy hostnames and bypassed domains"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbDirectDns"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbDirectDnsCf"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="1.1.1.1" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbDirectDnsGoogle"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="8.8.8.8" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbDirectDnsAli"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="223.5.5.5" />
@@ -508,45 +515,47 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:text="DNS IP Strategy"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="IPv4 Only avoids broken IPv6 routes on mobile carriers; Prefer IPv4 keeps dual-stack."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="IPv4 Only avoids broken carrier IPv6 routes"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbDnsStrategy"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbDnsPreferV4"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Prefer IPv4" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbDnsV4Only"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="IPv4 Only" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbDnsPreferV6"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Prefer IPv6" />
@@ -559,13 +568,13 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="8dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="12dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -574,19 +583,19 @@
                             android:orientation="horizontal">
 
                             <ImageView
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
                                 android:background="@drawable/bg_icon_badge"
                                 android:contentDescription="@null"
-                                android:padding="5dp"
+                                android:padding="4dp"
                                 android:src="@drawable/ic_tunnel_24"
                                 app:tint="@color/accent_primary" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:text="ROUTING &amp; PROTOCOL BEHAVIOR"
+                                android:layout_marginStart="8dp"
+                                android:text="ROUTING &amp; PROTOCOL"
                                 android:textColor="@color/accent_primary"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
@@ -595,7 +604,7 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
@@ -610,65 +619,70 @@
                                     android:layout_height="wrap_content"
                                     android:text="Protocol Sniffing"
                                     android:textColor="@color/text_primary"
-                                    android:textSize="14sp"
+                                    android:textSize="13sp"
                                     android:textStyle="bold" />
 
                                 <TextView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="Detects TLS/HTTP/QUIC headers for accurate domain routing and QUIC blocking."
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Detects TLS/HTTP/QUIC headers for domain rules"
                                     android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
+                                    android:textSize="11sp" />
                             </LinearLayout>
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/switchSbSniff"
                                 android:layout_width="wrap_content"
-                                android:layout_height="wrap_content" />
+                                android:layout_height="wrap_content"
+                                android:minHeight="0dp" />
                         </LinearLayout>
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:text="Block QUIC (HTTP/3)"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Forces browsers onto reliable TCP; avoids UDP stalls on TCP-only proxies."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Forces browsers onto TCP; avoids UDP stalls"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbBlockQuic"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbQuicAuto"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Auto (TCP)" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbQuicAlways"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Always" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbQuicOff"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Off" />
@@ -677,7 +691,7 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
@@ -692,27 +706,30 @@
                                     android:layout_height="wrap_content"
                                     android:text="Bypass Private &amp; LAN IPs"
                                     android:textColor="@color/text_primary"
-                                    android:textSize="14sp"
+                                    android:textSize="13sp"
                                     android:textStyle="bold" />
 
                                 <TextView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="Routes local 192.168.x.x / 10.x.x.x traffic directly so LAN devices still work."
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Routes 192.168.x.x / 10.x.x.x directly"
                                     android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
+                                    android:textSize="11sp" />
                             </LinearLayout>
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/switchSbBypassPrivateIp"
                                 android:layout_width="wrap_content"
-                                android:layout_height="wrap_content" />
+                                android:layout_height="wrap_content"
+                                android:minHeight="0dp" />
                         </LinearLayout>
 
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
@@ -727,37 +744,78 @@
                                     android:layout_height="wrap_content"
                                     android:text="Bypass .ir Domains"
                                     android:textColor="@color/text_primary"
-                                    android:textSize="14sp"
+                                    android:textSize="13sp"
                                     android:textStyle="bold" />
 
                                 <TextView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="Sends Iranian .ir websites directly outside the proxy for lower latency."
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Sends .ir websites directly outside the proxy"
                                     android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
+                                    android:textSize="11sp" />
                             </LinearLayout>
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/switchSbBypassIrDomains"
                                 android:layout_width="wrap_content"
-                                android:layout_height="wrap_content" />
+                                android:layout_height="wrap_content"
+                                android:minHeight="0dp" />
                         </LinearLayout>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Custom Bypass Domains"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Comma-separated domain suffixes routed directly"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:hint="digikala.com, shaparak.ir"
+                            app:boxBackgroundColor="@color/surface_elevated"
+                            app:boxStrokeColor="@color/card_border"
+                            app:hintTextColor="@color/text_secondary">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etSbCustomBypassDomains"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textNoSuggestions"
+                                android:maxLines="2"
+                                android:paddingVertical="8dp"
+                                android:textColor="@color/text_primary"
+                                android:textSize="12.5sp" />
+                        </com.google.android.material.textfield.TextInputLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Card 4: Dialer & Logging -->
+                <!-- Card 4: Dialer, Multiplex & Logging -->
                 <com.google.android.material.card.MaterialCardView
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="8dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="12dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -766,19 +824,19 @@
                             android:orientation="horizontal">
 
                             <ImageView
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
                                 android:background="@drawable/bg_icon_badge"
                                 android:contentDescription="@null"
-                                android:padding="5dp"
+                                android:padding="4dp"
                                 android:src="@drawable/ic_battery_saver_24"
                                 app:tint="@color/accent_primary" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:text="DIALER &amp; LOGGING"
+                                android:layout_marginStart="8dp"
+                                android:text="DIALER, MUX &amp; LOGGING"
                                 android:textColor="@color/accent_primary"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
@@ -787,45 +845,47 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:text="Outbound Connect Timeout"
+                            android:layout_marginTop="8dp"
+                            android:text="Dial Connect Timeout"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="5s fails fast on dead nodes; 10-15s tolerates high-latency mobile handshakes."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="5s fails fast; 15s helps on high-latency links"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbConnectTimeout"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbTimeout5s"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="5s" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbTimeout10s"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="10s" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbTimeout15s"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="15s" />
@@ -834,7 +894,7 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
@@ -849,65 +909,108 @@
                                     android:layout_height="wrap_content"
                                     android:text="TCP Fast Open (TFO)"
                                     android:textColor="@color/text_primary"
-                                    android:textSize="14sp"
+                                    android:textSize="13sp"
                                     android:textStyle="bold" />
 
                                 <TextView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="Reduces handshake latency by 1 RTT; turn OFF if your carrier drops TFO packets."
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Cuts handshake latency by 1 RTT if carrier allows"
                                     android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
+                                    android:textSize="11sp" />
                             </LinearLayout>
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/switchSbTcpFastOpen"
                                 android:layout_width="wrap_content"
-                                android:layout_height="wrap_content" />
+                                android:layout_height="wrap_content"
+                                android:minHeight="0dp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Multiplex (h2mux)"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Pools TCP proxy streams (max 4) on VMess/VLESS/Trojan/SS"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/switchSbMultiplex"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minHeight="0dp" />
                         </LinearLayout>
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="8dp"
                             android:text="Core Log Level"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Error saves battery &amp; I/O; Warn is balanced; Info helps debug routing issues."
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Error saves I/O; Warn is balanced; Info aids debugging"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <com.google.android.material.chip.ChipGroup
                             android:id="@+id/chipGroupSbLogLevel"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            app:chipSpacingHorizontal="8dp"
+                            android:layout_marginTop="4dp"
+                            app:chipSpacingHorizontal="6dp"
                             app:selectionRequired="true"
                             app:singleSelection="true">
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbLogWarn"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Warn" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbLogError"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Error" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbLogInfo"
-                                style="@style/Widget.Aether.Chip.Choice"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Info" />

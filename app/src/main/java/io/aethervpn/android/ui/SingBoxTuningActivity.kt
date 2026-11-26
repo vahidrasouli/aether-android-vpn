@@ -1,6 +1,8 @@
 package io.aethervpn.android.ui
 
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.google.android.material.snackbar.Snackbar
@@ -14,8 +16,10 @@ import io.aethervpn.android.databinding.ActivitySingboxTuningBinding
 import io.aethervpn.android.vpn.AetherVpnService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -35,6 +39,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
     private var cachedConfig: VpnConfig? = null
 
     private var activeSnackbar: Snackbar? = null
+    private var bypassDomainsDebounceJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -176,6 +181,20 @@ class SingBoxTuningActivity : AppCompatActivity() {
             updateConfig { it.copy(sbBypassIrDomains = isChecked) }
         }
 
+        binding.etSbCustomBypassDomains.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                if (isBindingUi) return
+                val nextValue = s?.toString()?.trim().orEmpty()
+                bypassDomainsDebounceJob?.cancel()
+                bypassDomainsDebounceJob = uiScope.launch {
+                    delay(450L)
+                    updateConfig { it.copy(sbCustomBypassDomains = nextValue) }
+                }
+            }
+        })
+
         binding.chipGroupSbConnectTimeout.setOnCheckedStateChangeListener { _, checkedIds ->
             if (isBindingUi) return@setOnCheckedStateChangeListener
             val timeoutSec = when (checkedIds.firstOrNull()) {
@@ -189,6 +208,11 @@ class SingBoxTuningActivity : AppCompatActivity() {
         binding.switchSbTcpFastOpen.setOnCheckedChangeListener { _, isChecked ->
             if (isBindingUi) return@setOnCheckedChangeListener
             updateConfig { it.copy(sbTcpFastOpen = isChecked) }
+        }
+
+        binding.switchSbMultiplex.setOnCheckedChangeListener { _, isChecked ->
+            if (isBindingUi) return@setOnCheckedChangeListener
+            updateConfig { it.copy(sbMultiplexEnabled = isChecked) }
         }
 
         binding.chipGroupSbLogLevel.setOnCheckedStateChangeListener { _, checkedIds ->
@@ -286,6 +310,9 @@ class SingBoxTuningActivity : AppCompatActivity() {
             )
             binding.switchSbBypassPrivateIp.isChecked = cfg.sbBypassPrivateIp
             binding.switchSbBypassIrDomains.isChecked = cfg.sbBypassIrDomains
+            if (binding.etSbCustomBypassDomains.text?.toString().orEmpty() != cfg.sbCustomBypassDomains) {
+                binding.etSbCustomBypassDomains.setText(cfg.sbCustomBypassDomains)
+            }
 
             binding.chipGroupSbConnectTimeout.check(
                 when (cfg.sbConnectTimeoutSec) {
@@ -295,6 +322,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
                 }
             )
             binding.switchSbTcpFastOpen.isChecked = cfg.sbTcpFastOpen
+            binding.switchSbMultiplex.isChecked = cfg.sbMultiplexEnabled
             binding.chipGroupSbLogLevel.check(
                 when (cfg.sbLogLevel) {
                     "error" -> R.id.chipSbLogError

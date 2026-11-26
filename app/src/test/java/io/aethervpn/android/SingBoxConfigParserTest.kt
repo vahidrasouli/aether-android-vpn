@@ -323,4 +323,60 @@ class SingBoxConfigParserTest {
         )
         assertEquals("plain log line", SingBoxEngineManager.stripAnsiCodes("plain log line"))
     }
+
+    @Test
+    fun cleansSingBoxLogPrefixesToReadableLabels() {
+        assertEquals(
+            "[Error] connection: open connection to 1.1.1.1:443: dial tcp 82.38.31.220:8080: connect: connection refused",
+            SingBoxEngineManager.cleanSingBoxLogLine(
+                "\u001B[31mERROR\u001B[0m[0023] [586055002 475ms] connection: open connection to 1.1.1.1:443: dial tcp 82.38.31.220:8080: connect: connection refused"
+            )
+        )
+        assertEquals(
+            "[Warn] inbound/mixed[mixed-in]: connection reset",
+            SingBoxEngineManager.cleanSingBoxLogLine("WARN[0005] [123456 12ms] inbound/mixed[mixed-in]: connection reset")
+        )
+    }
+
+    @Test
+    fun port53HijackDnsAppearsImmediatelyAfterSniffAndStrictlyBeforeIpIsPrivate() {
+        val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
+        val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri).getOrThrow())
+        val rules = runtime.getJSONObject("route").getJSONArray("rules")
+        val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
+
+        val sniffIdx = ruleList.indexOfFirst { it.optString("action") == "sniff" }
+        val port53Idx = ruleList.indexOfFirst { it.optInt("port", -1) == 53 && it.optString("action") == "hijack-dns" }
+        val protoDnsIdx = ruleList.indexOfFirst { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" }
+        val privateIpIdx = ruleList.indexOfFirst { it.optBoolean("ip_is_private", false) }
+
+        assertTrue("sniff rule must exist", sniffIdx >= 0)
+        assertEquals("port:53 hijack-dns must be immediately after sniff", sniffIdx + 1, port53Idx)
+        assertEquals("protocol:dns hijack-dns must be immediately after port:53", port53Idx + 1, protoDnsIdx)
+        assertTrue("hijack-dns rules must appear strictly before ip_is_private", protoDnsIdx < privateIpIdx)
+    }
+
+    @Test
+    fun parsesBase64AndPlainSubscriptionPayloads() {
+        val vmessJson = """{"v":"2","ps":"SubVMess","add":"203.0.113.5","port":"443","id":"12345678-1234-1234-1234-1234567890ab","net":"tcp"}"""
+        val vmessUri = "vmess://" + Base64.getEncoder().encodeToString(vmessJson.toByteArray(Charsets.UTF_8))
+        val plainList = """
+            vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?security=tls#SubVless
+            $vmessUri
+            hy2://hy2pass@hy2.example.com:8443?sni=hy2.example.com#SubHy2
+        """.trimIndent()
+
+        val plainResult = SingBoxConfigParser.parseSubscriptionPayload(plainList)
+        assertEquals(3, plainResult.parsedItems.size)
+        assertEquals(0, plainResult.skippedCount)
+
+        val base64Payload = Base64.getEncoder().encodeToString(plainList.toByteArray(Charsets.UTF_8))
+        val b64Result = SingBoxConfigParser.parseSubscriptionPayload(base64Payload)
+        assertEquals(3, b64Result.parsedItems.size)
+        assertEquals(listOf("VLESS", "VMess", "HY2"), b64Result.parsedItems.map { it.second.protocol })
+
+        val urlSafeNoPad = Base64.getUrlEncoder().withoutPadding().encodeToString(plainList.toByteArray(Charsets.UTF_8))
+        val urlSafeResult = SingBoxConfigParser.parseSubscriptionPayload(urlSafeNoPad)
+        assertEquals(3, urlSafeResult.parsedItems.size)
+    }
 }

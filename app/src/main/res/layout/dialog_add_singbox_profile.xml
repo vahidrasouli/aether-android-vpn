@@ -46,16 +46,26 @@
             android:id="@+id/btnPasteClipboard"
             style="@style/Widget.Aether.Button.Tonal"
             android:layout_width="0dp"
-            android:layout_height="42dp"
+            android:layout_height="40dp"
             android:layout_weight="1"
             android:text="@string/action_paste_clipboard"
             android:textColor="@color/accent_primary" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnImportSubscription"
+            style="@style/Widget.Aether.Button.Tonal"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="@string/action_import_sub"
+            android:textColor="@color/singbox_accent_light" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCopyShareUri"
             style="@style/Widget.Aether.Button.Tonal"
             android:layout_width="0dp"
-            android:layout_height="42dp"
+            android:layout_height="40dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:text="@string/action_copy_uri"

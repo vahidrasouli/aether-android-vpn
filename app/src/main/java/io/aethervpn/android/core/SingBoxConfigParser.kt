@@ -109,6 +109,34 @@ object SingBoxConfigParser {
         return BulkSingBoxParseResult(valid, skipped)
     }
 
+    /**
+     * Parses a remote subscription payload that may be either plain multi-line URIs/JSON
+     * or a Base64-encoded (standard or URL-safe) multi-line URI list.
+     */
+    fun parseSubscriptionPayload(rawPayload: String): BulkSingBoxParseResult {
+        val trimmed = rawPayload.trim()
+        if (trimmed.isEmpty()) return BulkSingBoxParseResult(emptyList(), 0)
+
+        val direct = parseBulk(trimmed)
+        if (direct.parsedItems.isNotEmpty() || trimmed.startsWith("{") || trimmed.contains("://")) {
+            return direct
+        }
+
+        val compact = trimmed.replace(Regex("\\s+"), "")
+        val decoded = runCatching { decodeBase64String(compact) }.getOrNull()?.trim().orEmpty()
+        if (decoded.isEmpty()) return direct
+
+        return parseBulk(decoded)
+    }
+
+    internal fun parseDomainSuffixes(rawDomains: String): List<String> {
+        if (rawDomains.isBlank()) return emptyList()
+        return rawDomains.split(Regex("[,;\\s]+"))
+            .map { it.trim().lowercase().removePrefix("*") }
+            .filter { it.isNotEmpty() }
+            .distinct()
+    }
+
     fun extractServerPreview(rawUriOrJson: String): String {
         val parsed = parse(rawUriOrJson).getOrNull() ?: return "Invalid config"
         if (!parsed.isFullConfig) {
@@ -210,6 +238,13 @@ object SingBoxConfigParser {
                 if (optString("type").equals("shadowsocks", ignoreCase = true) && has("method")) {
                     put("method", normalizeShadowsocksMethod(optString("method")))
                 }
+                if (config.sbMultiplexEnabled && optString("type").lowercase() in MULTIPLEX_SUPPORTED_TYPES) {
+                    put("multiplex", JSONObject().apply {
+                        put("enabled", true)
+                        put("protocol", "h2mux")
+                        put("max_connections", 4)
+                    })
+                }
             }
             val isTcpOutbound = outbound.optString("type").lowercase() in TCP_BASED_OUTBOUND_TYPES
             val shouldBlockQuic = when (config.sbBlockQuic) {
@@ -252,6 +287,10 @@ object SingBoxConfigParser {
                             })
                         }
                         put(JSONObject().apply {
+                            put("port", 53)
+                            put("action", "hijack-dns")
+                        })
+                        put(JSONObject().apply {
                             put("protocol", "dns")
                             put("action", "hijack-dns")
                         })
@@ -264,6 +303,13 @@ object SingBoxConfigParser {
                         if (config.sbBypassIrDomains) {
                             put(JSONObject().apply {
                                 put("domain_suffix", JSONArray().apply { put(".ir") })
+                                put("outbound", "direct")
+                            })
+                        }
+                        val customBypassDomains = parseDomainSuffixes(config.sbCustomBypassDomains)
+                        if (customBypassDomains.isNotEmpty()) {
+                            put(JSONObject().apply {
+                                put("domain_suffix", JSONArray(customBypassDomains))
                                 put("outbound", "direct")
                             })
                         }
@@ -286,6 +332,7 @@ object SingBoxConfigParser {
     private const val UPSTREAM_SOCKS_TAG = "upstream-socks"
     private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
     private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
+    private val MULTIPLEX_SUPPORTED_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks")
 
     private fun buildLogObject(config: VpnConfig): JSONObject = JSONObject().apply {
         put("disabled", false)

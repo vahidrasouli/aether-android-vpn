@@ -200,4 +200,24 @@ class DiagnosticsLogTest {
         assertEquals("Watchdog must emit exactly one warning per outage", 1, warnings.size)
         assertEquals("Upstream proxy 127.0.0.1:10808 appears stopped or unreachable", warnings[0])
     }
+
+    @Test
+    fun testSingBoxErrorLogDeduplicationWithDynamicIdsAndDurations() {
+        DiagnosticsLog.record(
+            "SingBox",
+            "ERROR[0023] [586055002 475ms] connection: open connection to 1.1.1.1:443 using outbound/proxy[proxy]: dial tcp 82.38.31.220:8080: connect: connection refused"
+        )
+        DiagnosticsLog.record(
+            "SingBox",
+            "ERROR[0024] [586055099 5.30s] connection: open connection to 8.8.8.8:443 using outbound/proxy[proxy]: dial tcp 82.38.31.220:8080: connect: connection refused"
+        )
+        DiagnosticsLog.record(
+            "SingBox",
+            "ERROR[0025] [586055140 418ms] connection: open connection to 9.9.9.9:443 using outbound/proxy[proxy]: dial tcp 82.38.31.220:8080: connect: connection refused"
+        )
+
+        val entries = DiagnosticsLog.entries()
+        assertEquals("Repeated SingBox connection refused errors must collapse into 1 line", 1, entries.size)
+        assertTrue("Collapsed entry must end with (x3): ${entries[0]}", entries[0].endsWith("(x3)"))
+    }
 }

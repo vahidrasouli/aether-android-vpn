@@ -43,6 +43,14 @@ object DiagnosticsLog {
     private val portFieldRegex = Regex("(?i)\\bport\\s*[=:]?\\s*\\d+\\b")
     private val dynamicIdRegex =
         Regex("(?i)\\b(tunnel|conn|connection|session|stream|req|request|cid|id)(?:[_-]?id)?\\s*[=:#]\\s*[A-Za-z0-9_-]+")
+    private val singBoxLevelPrefixRegex =
+        Regex("(?i)\\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\[\\d+\\]")
+    private val singBoxConnDurationRegex =
+        Regex("\\[\\d+\\s+\\d+(?:\\.\\d+)?(?:µs|us|ms|ns|s|m)\\]")
+    private val durationRegex =
+        Regex("\\b\\d+(?:\\.\\d+)?(?:µs|us|ms|ns|s)\\b")
+    private val upstreamOpenFailureRegex =
+        Regex("(?i)(open connection to )\\S+( using outbound/[^\\s:]+:\\s*dial (?:tcp|udp)\\s+[^:]+:(?:\\d+|<port>):\\s*(?:connect:\\s*connection refused|i/o timeout|connection reset by peer))")
     private val hexTokenRegex = Regex("\\b0x[0-9a-fA-F]+\\b")
     private val multiSpaceRegex = Regex("\\s+")
 
@@ -62,9 +70,13 @@ object DiagnosticsLog {
         norm = isoTimestampRegex.replace(norm, "<ts>")
         norm = timeOnlyRegex.replace(norm, "<ts>")
         norm = uuidRegex.replace(norm, "<uuid>")
+        norm = singBoxLevelPrefixRegex.replace(norm) { "[${it.groupValues[1].lowercase(Locale.US)}]" }
+        norm = singBoxConnDurationRegex.replace(norm, "<conn>")
+        norm = durationRegex.replace(norm, "<dur>")
         norm = dynamicIdRegex.replace(norm) { "${it.groupValues[1].lowercase(Locale.US)}=<id>" }
         norm = portSuffixRegex.replace(norm, ":<port>")
         norm = portFieldRegex.replace(norm, "port=<port>")
+        norm = upstreamOpenFailureRegex.replace(norm) { "${it.groupValues[1]}<dst>${it.groupValues[2]}" }
         norm = hexTokenRegex.replace(norm, "<hex>")
         norm = multiSpaceRegex.replace(norm, " ").trim()
         return "$tag|$norm"

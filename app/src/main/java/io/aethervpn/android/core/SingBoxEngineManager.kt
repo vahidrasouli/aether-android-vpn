@@ -13,6 +13,7 @@ import java.io.File
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
@@ -148,7 +149,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
                     var line: String? = reader.readLine()
                     while (isActive && line != null) {
-                        val cleaned = stripAnsiCodes(line).trim()
+                        val cleaned = cleanSingBoxLogLine(line)
                         if (cleaned.isNotEmpty()) {
                             DiagnosticsLog.record(tag, cleaned)
                         }
@@ -161,9 +162,35 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
     companion object {
         private val ANSI_ESCAPE_REGEX = Regex("\\u001B\\[[0-9;]*m")
+        private val SINGBOX_PREFIX_REGEX = Regex(
+            "^\\s*(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\[\\d+\\]\\s*(?:\\[\\d+\\s+[^\\]]+\\]\\s*)?(.*)$",
+            RegexOption.IGNORE_CASE
+        )
+        private val SINGBOX_CONN_PREFIX_REGEX = Regex("^\\[\\d+\\s+[^\\]]+\\]\\s*")
 
         internal fun stripAnsiCodes(line: String): String {
             return ANSI_ESCAPE_REGEX.replace(line, "")
+        }
+
+        internal fun cleanSingBoxLogLine(rawLine: String): String {
+            val noAnsi = stripAnsiCodes(rawLine).trim()
+            if (noAnsi.isEmpty()) return ""
+            val match = SINGBOX_PREFIX_REGEX.matchEntire(noAnsi)
+            if (match != null) {
+                val rawLevel = match.groupValues[1].uppercase(Locale.US)
+                val label = when (rawLevel) {
+                    "ERROR" -> "[Error]"
+                    "FATAL" -> "[Fatal]"
+                    "WARN", "WARNING" -> "[Warn]"
+                    "INFO" -> "[Info]"
+                    "DEBUG" -> "[Debug]"
+                    "TRACE" -> "[Trace]"
+                    else -> "[$rawLevel]"
+                }
+                val rest = match.groupValues[2].trim()
+                return if (rest.isNotEmpty()) "$label $rest" else label
+            }
+            return SINGBOX_CONN_PREFIX_REGEX.replace(noAnsi, "").trim()
         }
 
         internal fun resolveGoEnvironment(config: VpnConfig): Map<String, String?> {

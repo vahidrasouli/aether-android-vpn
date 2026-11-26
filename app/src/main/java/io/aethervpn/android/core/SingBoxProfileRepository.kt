@@ -110,6 +110,24 @@ object SingBoxProfileRepository {
         require(bulk.parsedItems.isNotEmpty()) {
             "No valid Sing-box profiles found in input"
         }
+        saveParsedBulk(filesDir, bulk)
+    }
+
+    fun addSubscriptionPayload(
+        filesDir: File,
+        rawPayload: String
+    ): Result<Pair<List<SingBoxProfile>, Int>> = runCatching {
+        val bulk = SingBoxConfigParser.parseSubscriptionPayload(rawPayload)
+        require(bulk.parsedItems.isNotEmpty()) {
+            "No valid Sing-box profiles found in subscription"
+        }
+        saveParsedBulk(filesDir, bulk)
+    }
+
+    private fun saveParsedBulk(
+        filesDir: File,
+        bulk: BulkSingBoxParseResult
+    ): Pair<List<SingBoxProfile>, Int> {
         val newProfiles = bulk.parsedItems.map { (rawLine, parsed) ->
             SingBoxProfile(
                 id = UUID.randomUUID().toString(),
@@ -124,7 +142,7 @@ object SingBoxProfileRepository {
             profiles = current.profiles + newProfiles
         )
         save(filesDir, updated)
-        newProfiles to bulk.skippedCount
+        return newProfiles to bulk.skippedCount
     }
 
     fun updateProfile(

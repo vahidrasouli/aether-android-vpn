@@ -275,6 +275,8 @@ data class VpnConfig(
     val sbBlockQuic: SingBoxBlockQuicMode = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
     val sbBypassPrivateIp: Boolean = true,
     val sbBypassIrDomains: Boolean = false,
+    val sbCustomBypassDomains: String = "",
+    val sbMultiplexEnabled: Boolean = false,
     val sbConnectTimeoutSec: Int = 10,
     val sbTcpFastOpen: Boolean = false,
     val sbLogLevel: String = "warn"
@@ -396,7 +398,9 @@ data class VpnConfig(
                 sbDirectDns == "1.1.1.1" &&
                 sbSniffEnabled &&
                 sbBypassPrivateIp &&
-                !sbBypassIrDomains
+                !sbBypassIrDomains &&
+                sbCustomBypassDomains.isBlank() &&
+                !sbMultiplexEnabled
         if (!baseRoutingAndDnsDefaults) return SingBoxTuningPreset.CUSTOM
 
         return when {
@@ -443,6 +447,8 @@ data class VpnConfig(
             sbBlockQuic = SingBoxBlockQuicMode.ALWAYS,
             sbBypassPrivateIp = true,
             sbBypassIrDomains = false,
+            sbCustomBypassDomains = "",
+            sbMultiplexEnabled = false,
             sbConnectTimeoutSec = 10,
             sbTcpFastOpen = false,
             sbLogLevel = "error"
@@ -459,6 +465,8 @@ data class VpnConfig(
             sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
             sbBypassPrivateIp = true,
             sbBypassIrDomains = false,
+            sbCustomBypassDomains = "",
+            sbMultiplexEnabled = false,
             sbConnectTimeoutSec = 10,
             sbTcpFastOpen = false,
             sbLogLevel = "warn"
@@ -475,6 +483,8 @@ data class VpnConfig(
             sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
             sbBypassPrivateIp = true,
             sbBypassIrDomains = false,
+            sbCustomBypassDomains = "",
+            sbMultiplexEnabled = false,
             sbConnectTimeoutSec = 5,
             sbTcpFastOpen = true,
             sbLogLevel = "warn"
@@ -596,6 +606,8 @@ data class VpnConfig(
             put("sbBlockQuic", sbBlockQuic.name)
             put("sbBypassPrivateIp", sbBypassPrivateIp)
             put("sbBypassIrDomains", sbBypassIrDomains)
+            put("sbCustomBypassDomains", sbCustomBypassDomains)
+            put("sbMultiplexEnabled", sbMultiplexEnabled)
             put("sbConnectTimeoutSec", sbConnectTimeoutSec)
             put("sbTcpFastOpen", sbTcpFastOpen)
             put("sbLogLevel", sbLogLevel)
@@ -744,6 +756,8 @@ data class VpnConfig(
                 sbBlockQuic = enumOrDefault(o.optString("sbBlockQuic"), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
                 sbBypassPrivateIp = o.optBoolean("sbBypassPrivateIp", true),
                 sbBypassIrDomains = o.optBoolean("sbBypassIrDomains", false),
+                sbCustomBypassDomains = o.optString("sbCustomBypassDomains", "").trim(),
+                sbMultiplexEnabled = o.optBoolean("sbMultiplexEnabled", false),
                 sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
                 sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" }
@@ -812,6 +826,8 @@ data class VpnConfig(
                 sbBlockQuic = enumOrDefault(p.getString("sb_block_quic", null), SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS),
                 sbBypassPrivateIp = p.getBoolean("sb_bypass_private_ip", true),
                 sbBypassIrDomains = p.getBoolean("sb_bypass_ir_domains", false),
+                sbCustomBypassDomains = p.getString("sb_custom_bypass_domains", "").orEmpty(),
+                sbMultiplexEnabled = p.getBoolean("sb_multiplex_enabled", false),
                 sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
                 sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" }
@@ -880,6 +896,8 @@ data class VpnConfig(
                 .putString("sb_block_quic", config.sbBlockQuic.name)
                 .putBoolean("sb_bypass_private_ip", config.sbBypassPrivateIp)
                 .putBoolean("sb_bypass_ir_domains", config.sbBypassIrDomains)
+                .putString("sb_custom_bypass_domains", config.sbCustomBypassDomains.trim())
+                .putBoolean("sb_multiplex_enabled", config.sbMultiplexEnabled)
                 .putInt("sb_connect_timeout_sec", config.sbConnectTimeoutSec)
                 .putBoolean("sb_tcp_fast_open", config.sbTcpFastOpen)
                 .putString("sb_log_level", config.sbLogLevel)
