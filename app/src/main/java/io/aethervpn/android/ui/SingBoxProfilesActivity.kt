@@ -318,10 +318,10 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 val urlStr = etUrl.text?.toString()?.trim().orEmpty()
                 if (!urlStr.startsWith("http://", ignoreCase = true) && !urlStr.startsWith("https://", ignoreCase = true)) {
                     showSnack("Enter a valid http:// or https:// subscription URL")
-                    return@setPositiveButton
+                } else {
+                    parentSheet.dismiss()
+                    importSubscriptionFromUrl(urlStr)
                 }
-                parentSheet.dismiss()
-                importSubscriptionFromUrl(urlStr)
             }
             .show()
     }
@@ -346,7 +346,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                             var total = 0
                             var read = reader.read(buf)
                             while (read != -1 && total < 2 * 1024 * 1024) {
-                                sb.appendRange(buf, 0, read)
+                                sb.append(buf, 0, read)
                                 total += read
                                 read = reader.read(buf)
                             }
