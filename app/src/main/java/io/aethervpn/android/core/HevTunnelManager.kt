@@ -45,10 +45,10 @@ class HevTunnelManager(private val cacheDir: File) {
             append("\n")
             if (config.useMapDns) {
                 append("mapdns:\n")
-                append("  address: ").append(VpnConfig.DNS_IPV4_MAPDNS).append('\n')
+                append("  address: ").append(config.effectiveMapDnsAddress).append('\n')
                 append("  port: 53\n")
-                append("  network: ").append(VpnConfig.MAPDNS_NETWORK).append('\n')
-                append("  netmask: ").append(VpnConfig.MAPDNS_NETMASK).append('\n')
+                append("  network: ").append(config.effectiveMapDnsNetwork).append('\n')
+                append("  netmask: ").append(config.effectiveMapDnsNetmask).append('\n')
                 append("  cache-size: 10000\n")
                 append("\n")
             }

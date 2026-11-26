@@ -172,7 +172,10 @@ class SingBoxTuningTest {
         assertTrue(yaml.contains("connect-timeout: 15000"))
         assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
         assertTrue(yaml.contains("udp: 'udp'"))
-        assertFalse(yaml.contains("mapdns:"))
+        assertTrue(yaml.contains("mapdns:"))
+        assertTrue(yaml.contains("address: 198.18.0.2"))
+        assertTrue(yaml.contains("network: 198.18.0.0"))
+        assertTrue(yaml.contains("netmask: 255.254.0.0"))
     }
 
     @Test
@@ -202,9 +205,10 @@ class SingBoxTuningTest {
         assertEquals("prefer_ipv6", dns.getString("strategy"))
         val servers = dns.getJSONArray("servers")
         val remote = servers.getJSONObject(0)
-        assertEquals("tcp", remote.getString("type"))
+        assertEquals("https", remote.getString("type"))
         assertEquals("9.9.9.9", remote.getString("server"))
-        assertEquals(53, remote.getInt("server_port"))
+        assertEquals(443, remote.getInt("server_port"))
+        assertEquals("/dns-query", remote.getString("path"))
         assertEquals("proxy", remote.getString("detour"))
         val local = servers.getJSONObject(1)
         assertEquals("udp", local.getString("type"))

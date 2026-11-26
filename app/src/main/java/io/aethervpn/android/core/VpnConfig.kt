@@ -308,7 +308,16 @@ data class VpnConfig(
         get() = hevMode == HevMode.TCP_UDP
 
     val useMapDns: Boolean
-        get() = mapDnsEnabled && !bypassIran && customDns.isBlank() && !isSingBoxOnlyActive
+        get() = mapDnsEnabled && !bypassIran && customDns.isBlank()
+
+    val effectiveMapDnsAddress: String
+        get() = if (isSingBoxOnlyActive) SING_BOX_MAPDNS_ADDRESS else DNS_IPV4_MAPDNS
+
+    val effectiveMapDnsNetwork: String
+        get() = if (isSingBoxOnlyActive) SING_BOX_MAPDNS_NETWORK else MAPDNS_NETWORK
+
+    val effectiveMapDnsNetmask: String
+        get() = if (isSingBoxOnlyActive) SING_BOX_MAPDNS_NETMASK else MAPDNS_NETMASK
 
     fun detectEngineLabPreset(): EngineLabPreset = when {
         perfProfile == PerfProfile.LOW &&
@@ -644,6 +653,9 @@ data class VpnConfig(
         const val DNS_IPV4_MAPDNS = "172.19.0.2"
         const val MAPDNS_NETWORK = "240.0.0.0"
         const val MAPDNS_NETMASK = "240.0.0.0"
+        const val SING_BOX_MAPDNS_ADDRESS = "198.18.0.2"
+        const val SING_BOX_MAPDNS_NETWORK = "198.18.0.0"
+        const val SING_BOX_MAPDNS_NETMASK = "255.254.0.0"
         const val DNS_IPV4_PRIMARY = "1.1.1.1"
         const val DNS_IPV4_SECONDARY = "1.0.0.1"
         const val DNS_IPV6_PRIMARY = "2606:4700:4700::1111"

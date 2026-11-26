@@ -206,14 +206,14 @@ class RoutingAndSplitTunnelTest {
     }
 
     @Test
-    fun singBoxOnlyDisablesMapDnsUsesRealDnsAndStandard1500Mtu() {
+    fun singBoxOnlyEnablesMapDnsAndStandard1500Mtu() {
         val singBoxOnly = VpnConfig(
             singBoxEnabled = true,
             chainMode = ChainMode.SINGBOX_ONLY
         )
-        assertFalse(singBoxOnly.useMapDns)
+        assertTrue(singBoxOnly.useMapDns)
         assertEquals(1500, singBoxOnly.effectiveTunMtu)
-        assertEquals(listOf("1.1.1.1", "8.8.8.8"), AetherVpnService.resolveIpv4DnsServers(singBoxOnly))
+        assertEquals(listOf(VpnConfig.SING_BOX_MAPDNS_ADDRESS), AetherVpnService.resolveIpv4DnsServers(singBoxOnly))
 
         val defaultWarp = VpnConfig()
         assertTrue(defaultWarp.useMapDns)

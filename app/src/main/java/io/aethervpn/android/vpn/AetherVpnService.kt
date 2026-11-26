@@ -94,7 +94,7 @@ class AetherVpnService : VpnService() {
 
         internal fun resolveIpv4DnsServers(config: VpnConfig): List<String> {
             if (config.useMapDns) {
-                return listOf(VpnConfig.DNS_IPV4_MAPDNS)
+                return listOf(config.effectiveMapDnsAddress)
             }
             val rawDns = config.customDns.trim()
             val parsedDns = when {
@@ -1082,8 +1082,9 @@ class AetherVpnService : VpnService() {
         }
 
         if (config.useMapDns) {
-            builder.addDnsServer(VpnConfig.DNS_IPV4_MAPDNS)
-            DiagnosticsLog.record("Tunnel", "HEV mapdns active (${VpnConfig.DNS_IPV4_MAPDNS}:53)")
+            val mapDnsAddress = config.effectiveMapDnsAddress
+            builder.addDnsServer(mapDnsAddress)
+            DiagnosticsLog.record("Tunnel", "HEV mapdns active ($mapDnsAddress:53)")
         } else {
             val resolvedDns = resolveIpv4DnsServers(config)
             var dnsAdded = false

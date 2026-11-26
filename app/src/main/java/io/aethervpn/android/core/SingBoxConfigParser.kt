@@ -513,9 +513,10 @@ object SingBoxConfigParser {
         } else {
             JSONObject().apply {
                 put("tag", "dns-remote")
-                put("type", "tcp")
+                put("type", "https")
                 put("server", trimmed)
-                put("server_port", 53)
+                put("server_port", 443)
+                put("path", "/dns-query")
                 put("detour", "proxy")
             }
         }

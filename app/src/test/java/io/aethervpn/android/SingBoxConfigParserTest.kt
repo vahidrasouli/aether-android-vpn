@@ -199,9 +199,10 @@ class SingBoxConfigParserTest {
 
             val remoteDns = servers.getJSONObject(0)
             assertEquals("dns-remote", remoteDns.getString("tag"))
-            assertEquals("tcp", remoteDns.getString("type"))
+            assertEquals("https", remoteDns.getString("type"))
             assertEquals("1.1.1.1", remoteDns.getString("server"))
-            assertEquals(53, remoteDns.getInt("server_port"))
+            assertEquals(443, remoteDns.getInt("server_port"))
+            assertEquals("/dns-query", remoteDns.getString("path"))
             assertEquals("proxy", remoteDns.getString("detour"))
             assertFalse(remoteDns.has("address"))
 
@@ -412,7 +413,7 @@ class SingBoxConfigParserTest {
     }
 
     @Test
-    fun plainIpRemoteDnsUsesTcpPort53OverProxyWhileLocalRemainsUdp() {
+    fun plainIpRemoteDnsUsesDohOverProxyWhileLocalRemainsUdp() {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=ws&security=tls#VlessWs"
         for (dnsIp in listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")) {
             val cfg = VpnConfig(sbRemoteDns = dnsIp, sbDirectDns = "1.1.1.1")
@@ -421,9 +422,10 @@ class SingBoxConfigParserTest {
 
             val remoteDns = servers.getJSONObject(0)
             assertEquals("dns-remote", remoteDns.getString("tag"))
-            assertEquals("tcp", remoteDns.getString("type"))
+            assertEquals("https", remoteDns.getString("type"))
             assertEquals(dnsIp, remoteDns.getString("server"))
-            assertEquals(53, remoteDns.getInt("server_port"))
+            assertEquals(443, remoteDns.getInt("server_port"))
+            assertEquals("/dns-query", remoteDns.getString("path"))
             assertEquals("proxy", remoteDns.getString("detour"))
 
             val localDns = servers.getJSONObject(1)

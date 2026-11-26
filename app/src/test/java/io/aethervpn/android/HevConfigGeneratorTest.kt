@@ -54,7 +54,12 @@ class HevConfigGeneratorTest {
         assertTrue(singBoxOnlyYaml.contains("task-stack-size: 81920"))
         assertTrue(singBoxOnlyYaml.contains("tcp-read-write-timeout: 300000"))
         assertTrue(singBoxOnlyYaml.contains("udp: 'udp'"))
-        assertFalse("Sing-box Only must omit mapdns to prevent 240.0.0.x Fake-IP leaks", singBoxOnlyYaml.contains("mapdns:"))
+        assertTrue("Sing-box Only must enable mapdns", singBoxOnlyYaml.contains("mapdns:"))
+        assertTrue(singBoxOnlyYaml.contains("address: 198.18.0.2"))
+        assertTrue(singBoxOnlyYaml.contains("port: 53"))
+        assertTrue(singBoxOnlyYaml.contains("network: 198.18.0.0"))
+        assertTrue(singBoxOnlyYaml.contains("netmask: 255.254.0.0"))
+        assertTrue(singBoxOnlyYaml.contains("cache-size: 10000"))
 
         val singBoxToWarpYaml = manager.generateYamlConfig(
             VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_WARP)
