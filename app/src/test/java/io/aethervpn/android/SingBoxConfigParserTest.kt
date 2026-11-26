@@ -184,10 +184,10 @@ class SingBoxConfigParserTest {
         for (uri in listOf(vlessUri, vmessUri)) {
             val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(uri).getOrThrow())
 
-            // Log config: debug level (temporary transparent diagnostics), not disabled, no timestamp
+            // Log config: warn level by default, not disabled, no timestamp
             val log = runtime.getJSONObject("log")
             assertFalse(log.getBoolean("disabled"))
-            assertEquals("debug", log.getString("level"))
+            assertEquals("warn", log.getString("level"))
             assertFalse(log.getBoolean("timestamp"))
 
             // Sing-box 1.12 typed DNS servers (1.14+ deprecated independent_cache removed)
