@@ -231,7 +231,6 @@ object SingBoxConfigParser {
         } else {
             val outbound = JSONObject(parsed.outboundOrFullJson.toString()).apply {
                 put("tag", "proxy")
-                put("domain_strategy", "ipv4_only")
                 put("connect_timeout", "${config.sbConnectTimeoutSec.coerceIn(3, 60)}s")
                 if (config.sbTcpFastOpen) {
                     put("tcp_fast_open", true)
@@ -301,16 +300,10 @@ object SingBoxConfigParser {
                     put(JSONObject().apply {
                         put("type", "direct")
                         put("tag", "direct")
-                        put("domain_strategy", "ipv4_only")
                     })
                 })
                 put("route", JSONObject().apply {
                     put("rules", JSONArray().apply {
-                        if (config.sbSniffEnabled) {
-                            put(JSONObject().apply {
-                                put("action", "sniff")
-                            })
-                        }
                         put(JSONObject().apply {
                             put("port", 53)
                             put("action", "hijack-dns")
@@ -337,12 +330,6 @@ object SingBoxConfigParser {
                                 put("network", "udp")
                                 put("port", 443)
                                 put("action", "reject")
-                            })
-                        }
-                        if (config.sbBypassPrivateIp) {
-                            put(JSONObject().apply {
-                                put("ip_is_private", true)
-                                put("outbound", "direct")
                             })
                         }
                     })
@@ -421,7 +408,6 @@ object SingBoxConfigParser {
             put(JSONObject().apply {
                 put("type", "direct")
                 put("tag", "direct")
-                put("domain_strategy", "ipv4_only")
             })
         })
     }.toString(2)
@@ -536,9 +522,9 @@ object SingBoxConfigParser {
     private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
     private val MULTIPLEX_SUPPORTED_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks")
 
-    private fun buildLogObject(@Suppress("UNUSED_PARAMETER") config: VpnConfig): JSONObject = JSONObject().apply {
+    private fun buildLogObject(config: VpnConfig): JSONObject = JSONObject().apply {
         put("disabled", false)
-        put("level", "debug")
+        put("level", config.sbLogLevel.ifBlank { "warn" })
         put("timestamp", false)
     }
 

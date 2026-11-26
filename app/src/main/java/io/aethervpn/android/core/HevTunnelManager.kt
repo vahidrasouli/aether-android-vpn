@@ -62,7 +62,7 @@ class HevTunnelManager(private val cacheDir: File) {
             append("  udp-read-write-timeout: ").append(config.udpTimeoutMs).append('\n')
             append("  limit-nofile: 65535\n")
             append("  log-file: 'stderr'\n")
-            append("  log-level: 'debug'\n")
+            append("  log-level: 'warn'\n")
         }
     }
 
@@ -119,7 +119,7 @@ class HevTunnelManager(private val cacheDir: File) {
     }
 
     companion object {
-        const val TCP_BUFFER_SIZE_BYTES = 65536
+        const val TCP_BUFFER_SIZE_BYTES = 131072
         const val CONNECT_TIMEOUT_MS = 15000
     }
 }

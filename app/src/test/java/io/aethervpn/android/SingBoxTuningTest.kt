@@ -166,8 +166,9 @@ class SingBoxTuningTest {
                 chainMode = io.aethervpn.android.core.ChainMode.SINGBOX_ONLY
             )
         )
-        assertTrue(yaml.contains("mtu: 1280"))
-        assertTrue(yaml.contains("tcp-buffer-size: 65536"))
+        assertTrue(yaml.contains("mtu: 1500"))
+        assertTrue(yaml.contains("tcp-buffer-size: 131072"))
+        assertTrue(yaml.contains("log-level: 'warn'"))
         assertTrue(yaml.contains("task-stack-size: 81920"))
         assertTrue(yaml.contains("connect-timeout: 15000"))
         assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
@@ -197,8 +198,8 @@ class SingBoxTuningTest {
             SingBoxConfigParser.buildRuntimeConfig(sampleHy2Uri, config = tuned).getOrThrow()
         )
 
-        // Log (forced to debug for temporary transparent diagnostics)
-        assertEquals("debug", runtime.getJSONObject("log").getString("level"))
+        // Log level respects sbLogLevel (and defaults to warn)
+        assertEquals("info", runtime.getJSONObject("log").getString("level"))
 
         // DNS 1.12 (forced ipv4_only to eliminate IPv6 dial stalls; dns-local must omit detour)
         val dns = runtime.getJSONObject("dns")

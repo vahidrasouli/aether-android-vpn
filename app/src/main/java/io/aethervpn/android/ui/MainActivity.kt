@@ -46,6 +46,7 @@ import io.aethervpn.android.core.PerfProfile
 import io.aethervpn.android.core.ProfileLevel
 import io.aethervpn.android.core.ProxyTestResult
 import io.aethervpn.android.core.PsiphonMode
+import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfile
 import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.PsiphonProtocol
@@ -699,6 +700,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         binding.layoutSingBoxChain.visibility = if (cfg.singBoxEnabled) View.VISIBLE else View.GONE
         binding.tvChainModeDetail.text = cfg.chainMode.description
+        updateSpeedCompareButtonVisibility(cfg)
         val summary = when {
             !cfg.singBoxEnabled -> "OFF • Zero overhead (tap to manage profiles)"
             activeProfile != null ->
@@ -731,7 +733,32 @@ class MainActivity : AppCompatActivity() {
             "Profile: ${cfg.profileLevel.label} • ${cfg.protocol.label} • Perf: ${cfg.perfProfile.label}"
     }
 
+    private fun updateSpeedCompareButtonVisibility(cfg: VpnConfig? = cachedConfig) {
+        val show = vpnUiStateMachine.current == VpnUiState.CONNECTED && cfg?.isSingBoxOnlyActive == true
+        binding.btnSingBoxSpeedCompare.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
     private fun bindActions() {
+        binding.btnSingBoxSpeedCompare.setOnClickListener {
+            val cfg = cachedConfig
+            if (vpnUiStateMachine.current != VpnUiState.CONNECTED || cfg?.isSingBoxOnlyActive != true) {
+                toast("Connect in Sing-box Only mode first")
+                return@setOnClickListener
+            }
+            binding.btnSingBoxSpeedCompare.isEnabled = false
+            binding.btnSingBoxSpeedCompare.text = "Running Speed Check..."
+            uiScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    SingBoxEngineManager.runSocksVsTunSpeedCompare(socksPort = cfg.effectiveSocksPort)
+                }
+                val line = SingBoxEngineManager.formatSpeedCompareLog(result)
+                DiagnosticsLog.record("SingBox", line)
+                binding.btnSingBoxSpeedCompare.isEnabled = true
+                binding.btnSingBoxSpeedCompare.text = "Speed Check (SOCKS5 vs TUN)"
+                toast(line)
+            }
+        }
+
         binding.cardEngineLab.setOnClickListener {
             startActivity(Intent(this, EngineLabActivity::class.java))
         }
@@ -1001,6 +1028,7 @@ class MainActivity : AppCompatActivity() {
             "Core: ${if (snapshot.coreActive) "Ready (127.0.0.1:$egressPort)" else "Stopped"} • TUN: ${if (snapshot.tunActive) "Active (/dev/tun)" else "Stopped"}"
         binding.btnToggleCore.text = if (snapshot.coreActive) getString(R.string.action_stop_core) else getString(R.string.action_start_core)
         binding.btnToggleTun.text = if (snapshot.tunActive) getString(R.string.action_stop_tun) else getString(R.string.action_start_tun)
+        updateSpeedCompareButtonVisibility()
     }
 
     private fun updateStatsLoop(snapshot: TunnelSnapshot) {

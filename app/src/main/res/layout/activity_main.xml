@@ -448,6 +448,16 @@
                                 android:fontFamily="monospace"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="11sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnSingBoxSpeedCompare"
+                                style="@style/Widget.Aether.Button.Outlined"
+                                android:layout_width="match_parent"
+                                android:layout_height="44dp"
+                                android:layout_marginTop="8dp"
+                                android:text="Speed Check (SOCKS5 vs TUN)"
+                                android:textSize="12sp"
+                                android:visibility="gone" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>

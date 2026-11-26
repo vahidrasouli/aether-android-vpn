@@ -237,10 +237,10 @@ class SingBoxConfigParserTest {
             assertEquals("socks", socksInbound.getString("type"))
             assertFalse(socksInbound.has("domain_strategy"))
 
-            // Proxy outbound forces ipv4_only domain_strategy and omits invalid tcp_keep_alive fields for sing-box 1.12
+            // Proxy outbound omits deprecated domain_strategy and invalid tcp_keep_alive fields for sing-box 1.12
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
             assertEquals("proxy", proxyOutbound.getString("tag"))
-            assertEquals("ipv4_only", proxyOutbound.getString("domain_strategy"))
+            assertFalse(proxyOutbound.has("domain_strategy"))
             assertFalse(proxyOutbound.has("tcp_keep_alive"))
             assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
             assertEquals("10s", proxyOutbound.getString("connect_timeout"))
@@ -371,22 +371,19 @@ class SingBoxConfigParserTest {
     }
 
     @Test
-    fun port53HijackDnsAppearsImmediatelyAfterSniffAndStrictlyBeforeIpIsPrivateWhenEnabled() {
+    fun omitsSniffAndIpIsPrivateEvenWhenFlagsEnabledAndKeepsHijackDnsFirst() {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
         val cfg = VpnConfig(sbSniffEnabled = true, sbBypassPrivateIp = true)
         val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, config = cfg).getOrThrow())
         val rules = runtime.getJSONObject("route").getJSONArray("rules")
         val ruleList = (0 until rules.length()).map { rules.getJSONObject(it) }
 
-        val sniffIdx = ruleList.indexOfFirst { it.optString("action") == "sniff" }
-        val port53Idx = ruleList.indexOfFirst { it.optInt("port", -1) == 53 && it.optString("action") == "hijack-dns" }
-        val protoDnsIdx = ruleList.indexOfFirst { it.optString("protocol") == "dns" && it.optString("action") == "hijack-dns" }
-        val privateIpIdx = ruleList.indexOfFirst { it.optBoolean("ip_is_private", false) }
-
-        assertTrue("sniff rule must exist when explicitly enabled", sniffIdx >= 0)
-        assertEquals("port:53 hijack-dns must be immediately after sniff", sniffIdx + 1, port53Idx)
-        assertEquals("protocol:dns hijack-dns must be immediately after port:53", port53Idx + 1, protoDnsIdx)
-        assertTrue("hijack-dns rules must appear strictly before ip_is_private", protoDnsIdx < privateIpIdx)
+        assertFalse("sniff rule must be removed", ruleList.any { it.optString("action") == "sniff" })
+        assertFalse("ip_is_private rule must be removed", ruleList.any { it.optBoolean("ip_is_private", false) })
+        assertEquals(53, ruleList[0].optInt("port", -1))
+        assertEquals("hijack-dns", ruleList[0].optString("action"))
+        assertEquals("dns", ruleList[1].optString("protocol"))
+        assertEquals("hijack-dns", ruleList[1].optString("action"))
     }
 
     @Test
@@ -593,17 +590,17 @@ class SingBoxConfigParserTest {
         assertEquals(1, direct.getJSONArray("outbounds").length())
         assertEquals("direct", direct.getJSONArray("outbounds").getJSONObject(0).getString("type"))
         assertEquals("direct", direct.getJSONArray("outbounds").getJSONObject(0).getString("tag"))
-        assertEquals("ipv4_only", direct.getJSONArray("outbounds").getJSONObject(0).getString("domain_strategy"))
+        assertFalse(direct.getJSONArray("outbounds").getJSONObject(0).has("domain_strategy"))
     }
 
     @Test
-    fun forcesIpv4OnlyAndDebugLoggingAcrossDnsAndOutbounds() {
+    fun usesWarnLoggingByDefaultAndOmitsDeprecatedOutboundDomainStrategy() {
         val vlessUri = "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?type=tcp&security=tls#VlessNode"
-        val cfg = VpnConfig(sbDnsStrategy = "prefer_ipv6", sbLogLevel = "error")
+        val cfg = VpnConfig(sbDnsStrategy = "prefer_ipv6")
         val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(vlessUri, config = cfg).getOrThrow())
 
         val logObj = runtime.getJSONObject("log")
-        assertEquals("debug", logObj.getString("level"))
+        assertEquals("warn", logObj.getString("level"))
         assertFalse(logObj.getBoolean("timestamp"))
 
         assertEquals("ipv4_only", runtime.getJSONObject("dns").getString("strategy"))
@@ -611,11 +608,23 @@ class SingBoxConfigParserTest {
         val outbounds = runtime.getJSONArray("outbounds")
         val proxy = outbounds.getJSONObject(0)
         assertEquals("proxy", proxy.getString("tag"))
-        assertEquals("ipv4_only", proxy.getString("domain_strategy"))
+        assertFalse(proxy.has("domain_strategy"))
 
         val direct = outbounds.getJSONObject(1)
         assertEquals("direct", direct.getString("tag"))
-        assertEquals("ipv4_only", direct.getString("domain_strategy"))
+        assertFalse(direct.has("domain_strategy"))
+    }
+
+    @Test
+    fun formatsSpeedCompareLogFor512KbProbe() {
+        val ok = io.aethervpn.android.core.SpeedCompareResult(
+            directSocks5 = Result.success(io.aethervpn.android.core.SpeedProbeResult(524_288, 250, 2048)),
+            throughTun = Result.success(io.aethervpn.android.core.SpeedProbeResult(524_288, 500, 1024))
+        )
+        assertEquals(
+            "Speed Compare (512KB): Direct SOCKS5=2048 KB/s | Through TUN=1024 KB/s",
+            SingBoxEngineManager.formatSpeedCompareLog(ok)
+        )
     }
 
     @Test
