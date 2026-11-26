@@ -105,9 +105,10 @@ class SingBoxTuningActivity : AppCompatActivity() {
             val mem = when (checkedIds.firstOrNull()) {
                 R.id.chipSbGoMem24 -> "24MiB"
                 R.id.chipSbGoMem32 -> "32MiB"
+                R.id.chipSbGoMem48 -> "48MiB"
                 R.id.chipSbGoMem64 -> "64MiB"
                 R.id.chipSbGoMemAuto -> "Auto"
-                else -> "48MiB"
+                else -> "96MiB"
             }
             updateConfig { it.copy(sbGoMemLimit = mem) }
         }
@@ -264,9 +265,10 @@ class SingBoxTuningActivity : AppCompatActivity() {
                 when {
                     cfg.sbGoMemLimit.equals("24MiB", true) -> R.id.chipSbGoMem24
                     cfg.sbGoMemLimit.equals("32MiB", true) -> R.id.chipSbGoMem32
+                    cfg.sbGoMemLimit.equals("48MiB", true) -> R.id.chipSbGoMem48
                     cfg.sbGoMemLimit.equals("64MiB", true) -> R.id.chipSbGoMem64
                     cfg.sbGoMemLimit.equals("Auto", true) -> R.id.chipSbGoMemAuto
-                    else -> R.id.chipSbGoMem48
+                    else -> R.id.chipSbGoMem96
                 }
             )
             binding.chipGroupSbGoProcs.check(
@@ -358,9 +360,9 @@ class SingBoxTuningActivity : AppCompatActivity() {
                 }
             )
             binding.tvSbPresetSummary.text = when (preset) {
-                SingBoxTuningPreset.ECO -> "Eco: 32MiB, 1 core, GOGC=25, Error log, QUIC=Always, IPv4 Only, 10s timeout."
-                SingBoxTuningPreset.BALANCED -> "Balanced: 48MiB, 2 cores, GOGC=50, Warn log, QUIC=Auto, IPv4 Only, 10s timeout."
-                SingBoxTuningPreset.TURBO -> "Turbo: 64MiB, 4 cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, TFO=On, 5s timeout."
+                SingBoxTuningPreset.ECO -> "Eco: 48MiB, 2 cores, GOGC=50, Error log, QUIC=Always, IPv4 Only, 15s timeout."
+                SingBoxTuningPreset.BALANCED -> "Balanced: 96MiB, Auto cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, 15s timeout."
+                SingBoxTuningPreset.TURBO -> "Turbo: Auto mem, Auto cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, TFO=On, 15s timeout."
                 SingBoxTuningPreset.CUSTOM -> "Custom: ${cfg.sbGoMemLimit} • ${cfg.sbGoMaxProcs} cores • ${cfg.sbDnsStrategy} • ${cfg.sbConnectTimeoutSec}s dial"
             }
         } finally {

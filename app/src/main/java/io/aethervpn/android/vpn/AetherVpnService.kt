@@ -519,7 +519,7 @@ class AetherVpnService : VpnService() {
 
             DiagnosticsLog.record(
                 "Tunnel",
-                "HEV config (${plan.chainMode.label}): mtu=${config.tunMtu}, socks=127.0.0.1:${plan.tunTargetPort}, mapdns=${config.useMapDns}"
+                "HEV config (${plan.chainMode.label}): mtu=${config.effectiveTunMtu}, tcpBuf=${HevTunnelManager.TCP_BUFFER_SIZE_BYTES}, socks=127.0.0.1:${plan.tunTargetPort}, mapdns=${config.useMapDns}"
             )
             val hevResult = hevManager.start(config, pfd.fd)
             if (hevResult.isFailure) {
@@ -701,7 +701,7 @@ class AetherVpnService : VpnService() {
             // 3. Start single managed HEV SOCKS5 Tunnel bridging TUN fd -> egress SOCKS5 port (1819 or 1821)
             DiagnosticsLog.record(
                 "Tunnel",
-                "HEV config: mtu=${config.tunMtu}, stack=${config.taskStackSize}, udpTimeout=${config.udpTimeoutMs}ms, mapdns=${config.useMapDns}"
+                "HEV config: mtu=${config.effectiveTunMtu}, tcpBuf=${HevTunnelManager.TCP_BUFFER_SIZE_BYTES}, stack=${config.taskStackSize}, udpTimeout=${config.udpTimeoutMs}ms, mapdns=${config.useMapDns}"
             )
             val hevResult = hevManager.start(config, pfd.fd)
             if (hevResult.isFailure) {
@@ -1031,7 +1031,7 @@ class AetherVpnService : VpnService() {
     private fun establishTun(config: VpnConfig): ParcelFileDescriptor? {
         val builder = Builder()
             .setSession("Aether VPN")
-            .setMtu(config.tunMtu)
+            .setMtu(config.effectiveTunMtu)
             .addAddress(VpnConfig.TUN_IPV4_ADDRESS, VpnConfig.TUN_IPV4_PREFIX)
             .setBlocking(false)
 

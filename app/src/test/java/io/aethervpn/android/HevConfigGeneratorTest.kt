@@ -1,5 +1,6 @@
 package io.aethervpn.android
 
+import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.HevMode
 import io.aethervpn.android.core.HevTunnelManager
 import io.aethervpn.android.core.IpFamily
@@ -24,7 +25,8 @@ class HevConfigGeneratorTest {
         assertTrue(yaml.contains("ipv4: '198.18.0.1'"))
         assertTrue(yaml.contains("ipv6: 'fd00:ae7::1'"))
         assertTrue(yaml.contains("task-stack-size: 81920"))
-        assertTrue(yaml.contains("tcp-buffer-size: 65536"))
+        assertTrue(yaml.contains("tcp-buffer-size: 524288"))
+        assertTrue(yaml.contains("connect-timeout: 15000"))
         assertTrue(yaml.contains("max-session-count: 512"))
         assertTrue(yaml.contains("cache-size: 10000"))
         assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
@@ -38,6 +40,17 @@ class HevConfigGeneratorTest {
 
         val customMtuYaml = manager.generateYamlConfig(VpnConfig(tunMtu = 1400))
         assertTrue(customMtuYaml.contains("mtu: 1400"))
+
+        val singBoxOnlyYaml = manager.generateYamlConfig(
+            VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY)
+        )
+        assertTrue(singBoxOnlyYaml.contains("mtu: 8500"))
+        assertTrue(singBoxOnlyYaml.contains("tcp-buffer-size: 524288"))
+
+        val singBoxToWarpYaml = manager.generateYamlConfig(
+            VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_TO_WARP)
+        )
+        assertTrue(singBoxToWarpYaml.contains("mtu: 1280"))
     }
 
     @Test

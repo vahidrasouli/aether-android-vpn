@@ -24,7 +24,7 @@ class HevTunnelManager(private val cacheDir: File) {
         }
         return buildString {
             append("tunnel:\n")
-            append("  mtu: ").append(config.tunMtu).append('\n')
+            append("  mtu: ").append(config.effectiveTunMtu).append('\n')
             append("  ipv4: '").append(VpnConfig.TUN_IPV4_ADDRESS).append("'\n")
             append(ipv6Line)
             append("\n")
@@ -55,9 +55,9 @@ class HevTunnelManager(private val cacheDir: File) {
             append("misc:\n")
             // Bounded coroutine stack & UDP session lifetime from Engine & Performance Lab
             append("  task-stack-size: ").append(config.taskStackSize).append('\n')
-            append("  tcp-buffer-size: 65536\n")
+            append("  tcp-buffer-size: ").append(TCP_BUFFER_SIZE_BYTES).append('\n')
             append("  max-session-count: 512\n")
-            append("  connect-timeout: 10000\n")
+            append("  connect-timeout: ").append(CONNECT_TIMEOUT_MS).append('\n')
             append("  read-write-timeout: 60000\n")
             append("  tcp-read-write-timeout: 300000\n")
             append("  udp-read-write-timeout: ").append(config.udpTimeoutMs).append('\n')
@@ -116,5 +116,10 @@ class HevTunnelManager(private val cacheDir: File) {
         running = false
         activeConfigFile?.delete()
         activeConfigFile = null
+    }
+
+    companion object {
+        const val TCP_BUFFER_SIZE_BYTES = 524288
+        const val CONNECT_TIMEOUT_MS = 15000
     }
 }

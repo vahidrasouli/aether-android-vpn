@@ -282,6 +282,13 @@
                                 android:text="64MiB" />
 
                             <com.google.android.material.chip.Chip
+                                android:id="@+id/chipSbGoMem96"
+                                style="@style/Widget.Aether.Chip.Choice.Compact"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="96MiB" />
+
+                            <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSbGoMemAuto"
                                 style="@style/Widget.Aether.Chip.Choice.Compact"
                                 android:layout_width="wrap_content"

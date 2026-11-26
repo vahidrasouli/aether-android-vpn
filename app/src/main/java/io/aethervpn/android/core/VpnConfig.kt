@@ -265,9 +265,9 @@ data class VpnConfig(
     val singBoxOnly: Boolean = false,
     val chainMode: ChainMode = ChainMode.SINGBOX_ONLY,
     // Dedicated Sing-box Engine & Tuning Lab config (independent of Psiphon Go limits)
-    val sbGoMemLimit: String = "48MiB",
-    val sbGoMaxProcs: String = "2",
-    val sbGoGc: String = "50",
+    val sbGoMemLimit: String = "96MiB",
+    val sbGoMaxProcs: String = "Auto",
+    val sbGoGc: String = "100",
     val sbRemoteDns: String = "1.1.1.1",
     val sbDirectDns: String = "1.1.1.1",
     val sbDnsStrategy: String = "ipv4_only",
@@ -277,12 +277,15 @@ data class VpnConfig(
     val sbBypassIrDomains: Boolean = false,
     val sbCustomBypassDomains: String = "",
     val sbMultiplexEnabled: Boolean = false,
-    val sbConnectTimeoutSec: Int = 10,
+    val sbConnectTimeoutSec: Int = 15,
     val sbTcpFastOpen: Boolean = false,
     val sbLogLevel: String = "warn"
 ) {
     val isSingBoxOnlyActive: Boolean
         get() = singBoxEnabled && chainMode == ChainMode.SINGBOX_ONLY
+
+    val effectiveTunMtu: Int
+        get() = if (isSingBoxOnlyActive) SING_BOX_ONLY_TUN_MTU else tunMtu
 
     val socksBindAddress: String
         get() = "$LOOPBACK_HOST:$socksPort"
@@ -404,31 +407,31 @@ data class VpnConfig(
         if (!baseRoutingAndDnsDefaults) return SingBoxTuningPreset.CUSTOM
 
         return when {
-            sbGoMemLimit == "32MiB" &&
-                sbGoMaxProcs == "1" &&
-                sbGoGc == "25" &&
-                sbLogLevel == "error" &&
-                sbBlockQuic == SingBoxBlockQuicMode.ALWAYS &&
-                sbDnsStrategy == "ipv4_only" &&
-                sbConnectTimeoutSec == 10 &&
-                !sbTcpFastOpen -> SingBoxTuningPreset.ECO
-
             sbGoMemLimit == "48MiB" &&
                 sbGoMaxProcs == "2" &&
                 sbGoGc == "50" &&
-                sbLogLevel == "warn" &&
-                sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
+                sbLogLevel == "error" &&
+                sbBlockQuic == SingBoxBlockQuicMode.ALWAYS &&
                 sbDnsStrategy == "ipv4_only" &&
-                sbConnectTimeoutSec == 10 &&
-                !sbTcpFastOpen -> SingBoxTuningPreset.BALANCED
+                sbConnectTimeoutSec == 15 &&
+                !sbTcpFastOpen -> SingBoxTuningPreset.ECO
 
-            sbGoMemLimit == "64MiB" &&
-                sbGoMaxProcs == "4" &&
+            sbGoMemLimit == "96MiB" &&
+                sbGoMaxProcs == "Auto" &&
                 sbGoGc == "100" &&
                 sbLogLevel == "warn" &&
                 sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
                 sbDnsStrategy == "ipv4_only" &&
-                sbConnectTimeoutSec == 5 &&
+                sbConnectTimeoutSec == 15 &&
+                !sbTcpFastOpen -> SingBoxTuningPreset.BALANCED
+
+            sbGoMemLimit == "Auto" &&
+                sbGoMaxProcs == "Auto" &&
+                sbGoGc == "100" &&
+                sbLogLevel == "warn" &&
+                sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
+                sbDnsStrategy == "ipv4_only" &&
+                sbConnectTimeoutSec == 15 &&
                 sbTcpFastOpen -> SingBoxTuningPreset.TURBO
 
             else -> SingBoxTuningPreset.CUSTOM
@@ -437,9 +440,9 @@ data class VpnConfig(
 
     fun applySingBoxTuningPreset(preset: SingBoxTuningPreset): VpnConfig = when (preset) {
         SingBoxTuningPreset.ECO -> copy(
-            sbGoMemLimit = "32MiB",
-            sbGoMaxProcs = "1",
-            sbGoGc = "25",
+            sbGoMemLimit = "48MiB",
+            sbGoMaxProcs = "2",
+            sbGoGc = "50",
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "ipv4_only",
@@ -449,32 +452,14 @@ data class VpnConfig(
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
-            sbConnectTimeoutSec = 10,
+            sbConnectTimeoutSec = 15,
             sbTcpFastOpen = false,
             sbLogLevel = "error"
         )
 
         SingBoxTuningPreset.BALANCED -> copy(
-            sbGoMemLimit = "48MiB",
-            sbGoMaxProcs = "2",
-            sbGoGc = "50",
-            sbRemoteDns = "1.1.1.1",
-            sbDirectDns = "1.1.1.1",
-            sbDnsStrategy = "ipv4_only",
-            sbSniffEnabled = true,
-            sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
-            sbBypassPrivateIp = true,
-            sbBypassIrDomains = false,
-            sbCustomBypassDomains = "",
-            sbMultiplexEnabled = false,
-            sbConnectTimeoutSec = 10,
-            sbTcpFastOpen = false,
-            sbLogLevel = "warn"
-        )
-
-        SingBoxTuningPreset.TURBO -> copy(
-            sbGoMemLimit = "64MiB",
-            sbGoMaxProcs = "4",
+            sbGoMemLimit = "96MiB",
+            sbGoMaxProcs = "Auto",
             sbGoGc = "100",
             sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
@@ -485,7 +470,25 @@ data class VpnConfig(
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
-            sbConnectTimeoutSec = 5,
+            sbConnectTimeoutSec = 15,
+            sbTcpFastOpen = false,
+            sbLogLevel = "warn"
+        )
+
+        SingBoxTuningPreset.TURBO -> copy(
+            sbGoMemLimit = "Auto",
+            sbGoMaxProcs = "Auto",
+            sbGoGc = "100",
+            sbRemoteDns = "1.1.1.1",
+            sbDirectDns = "1.1.1.1",
+            sbDnsStrategy = "ipv4_only",
+            sbSniffEnabled = true,
+            sbBlockQuic = SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS,
+            sbBypassPrivateIp = true,
+            sbBypassIrDomains = false,
+            sbCustomBypassDomains = "",
+            sbMultiplexEnabled = false,
+            sbConnectTimeoutSec = 15,
             sbTcpFastOpen = true,
             sbLogLevel = "warn"
         )
@@ -633,6 +636,7 @@ data class VpnConfig(
         const val PSIPHON_SOCKS_PORT = 1821
         const val SING_BOX_SOCKS_PORT = 1825
         const val DEFAULT_TUN_MTU = 1280
+        const val SING_BOX_ONLY_TUN_MTU = 8500
         const val TUN_IPV4_ADDRESS = "198.18.0.1"
         const val TUN_IPV4_PREFIX = 30
         const val TUN_IPV6_ADDRESS = "fd00:ae7::1"
@@ -746,9 +750,9 @@ data class VpnConfig(
                 singBoxEnabled = o.optBoolean("singBoxEnabled", false),
                 singBoxOnly = o.optBoolean("singBoxOnly", false),
                 chainMode = enumOrDefault(o.optString("chainMode"), ChainMode.SINGBOX_ONLY),
-                sbGoMemLimit = o.optString("sbGoMemLimit", "48MiB").ifBlank { "48MiB" },
-                sbGoMaxProcs = o.optString("sbGoMaxProcs", "2").ifBlank { "2" },
-                sbGoGc = o.optString("sbGoGc", "50").ifBlank { "50" },
+                sbGoMemLimit = o.optString("sbGoMemLimit", "96MiB").ifBlank { "96MiB" },
+                sbGoMaxProcs = o.optString("sbGoMaxProcs", "Auto").ifBlank { "Auto" },
+                sbGoGc = o.optString("sbGoGc", "100").ifBlank { "100" },
                 sbRemoteDns = o.optString("sbRemoteDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDirectDns = o.optString("sbDirectDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDnsStrategy = o.optString("sbDnsStrategy", "ipv4_only").ifBlank { "ipv4_only" },
@@ -758,7 +762,7 @@ data class VpnConfig(
                 sbBypassIrDomains = o.optBoolean("sbBypassIrDomains", false),
                 sbCustomBypassDomains = o.optString("sbCustomBypassDomains", "").trim(),
                 sbMultiplexEnabled = o.optBoolean("sbMultiplexEnabled", false),
-                sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
+                sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 15).coerceIn(3, 60),
                 sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
                 sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" }
             )
@@ -816,9 +820,9 @@ data class VpnConfig(
                 singBoxEnabled = p.getBoolean("sing_box_enabled", false),
                 singBoxOnly = p.getBoolean("sing_box_only", false),
                 chainMode = enumOrDefault(p.getString("chain_mode", null), ChainMode.SINGBOX_ONLY),
-                sbGoMemLimit = p.getString("sb_go_mem_limit", "48MiB").orEmpty().ifBlank { "48MiB" },
-                sbGoMaxProcs = p.getString("sb_go_max_procs", "2").orEmpty().ifBlank { "2" },
-                sbGoGc = p.getString("sb_go_gc", "50").orEmpty().ifBlank { "50" },
+                sbGoMemLimit = p.getString("sb_go_mem_limit", "96MiB").orEmpty().ifBlank { "96MiB" },
+                sbGoMaxProcs = p.getString("sb_go_max_procs", "Auto").orEmpty().ifBlank { "Auto" },
+                sbGoGc = p.getString("sb_go_gc", "100").orEmpty().ifBlank { "100" },
                 sbRemoteDns = p.getString("sb_remote_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDirectDns = p.getString("sb_direct_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDnsStrategy = p.getString("sb_dns_strategy", "ipv4_only").orEmpty().ifBlank { "ipv4_only" },
@@ -828,7 +832,7 @@ data class VpnConfig(
                 sbBypassIrDomains = p.getBoolean("sb_bypass_ir_domains", false),
                 sbCustomBypassDomains = p.getString("sb_custom_bypass_domains", "").orEmpty(),
                 sbMultiplexEnabled = p.getBoolean("sb_multiplex_enabled", false),
-                sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
+                sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 15).coerceIn(3, 60),
                 sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
                 sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" }
             )

@@ -238,7 +238,7 @@ class SingBoxConfigParserTest {
             assertFalse(proxyOutbound.has("domain_strategy"))
             assertFalse(proxyOutbound.has("tcp_keep_alive"))
             assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
-            assertEquals("10s", proxyOutbound.getString("connect_timeout"))
+            assertEquals("15s", proxyOutbound.getString("connect_timeout"))
 
             // Route rules: sniff, hijack-dns, ip_is_private -> direct, quic -> reject
             val route = runtime.getJSONObject("route")
@@ -284,7 +284,7 @@ class SingBoxConfigParserTest {
             val runtime = JSONObject(runtimeStr)
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
             assertEquals("proxy", proxyOutbound.getString("tag"))
-            assertEquals("10s", proxyOutbound.getString("connect_timeout"))
+            assertEquals("15s", proxyOutbound.getString("connect_timeout"))
         }
     }
 

@@ -76,7 +76,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         val envMap = resolveGoEnvironment(config)
         DiagnosticsLog.record(
             "SingBox",
-            "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "auto"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "50"}, log=${config.sbLogLevel}, dns=${config.sbRemoteDns}, tfo=${config.sbTcpFastOpen}]"
+            "Starting sing-box on 127.0.0.1:$listenPort [Go: mem=${envMap["GOMEMLIMIT"] ?: "auto"}, procs=${envMap["GOMAXPROCS"] ?: "auto"}, gc=${envMap["GOGC"] ?: "100"}, log=${config.sbLogLevel}, dns=${config.sbRemoteDns}, tfo=${config.sbTcpFastOpen}]"
         )
 
         val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
@@ -203,7 +203,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             } else {
                 config.sbGoMemLimit
             }
-            env["GOGC"] = config.sbGoGc.ifBlank { "50" }
+            env["GOGC"] = config.sbGoGc.ifBlank { "100" }
             env["GOMAXPROCS"] = if (config.sbGoMaxProcs.equals("Auto", ignoreCase = true) || config.sbGoMaxProcs.isBlank()) {
                 null
             } else {

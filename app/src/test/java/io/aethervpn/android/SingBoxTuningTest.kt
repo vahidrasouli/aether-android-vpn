@@ -23,9 +23,9 @@ class SingBoxTuningTest {
     fun defaultConfigMatchesBalancedSingBoxTuningPreset() {
         val cfg = VpnConfig()
         assertEquals(SingBoxTuningPreset.BALANCED, cfg.detectSingBoxTuningPreset())
-        assertEquals("48MiB", cfg.sbGoMemLimit)
-        assertEquals("2", cfg.sbGoMaxProcs)
-        assertEquals("50", cfg.sbGoGc)
+        assertEquals("96MiB", cfg.sbGoMemLimit)
+        assertEquals("Auto", cfg.sbGoMaxProcs)
+        assertEquals("100", cfg.sbGoGc)
         assertEquals("1.1.1.1", cfg.sbRemoteDns)
         assertEquals("1.1.1.1", cfg.sbDirectDns)
         assertEquals("ipv4_only", cfg.sbDnsStrategy)
@@ -33,7 +33,7 @@ class SingBoxTuningTest {
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, cfg.sbBlockQuic)
         assertTrue(cfg.sbBypassPrivateIp)
         assertFalse(cfg.sbBypassIrDomains)
-        assertEquals(10, cfg.sbConnectTimeoutSec)
+        assertEquals(15, cfg.sbConnectTimeoutSec)
         assertFalse(cfg.sbTcpFastOpen)
         assertEquals("warn", cfg.sbLogLevel)
     }
@@ -42,33 +42,34 @@ class SingBoxTuningTest {
     fun ecoBalancedTurboPresetsApplyExactValuesAndDetectCustom() {
         val eco = VpnConfig().applySingBoxTuningPreset(SingBoxTuningPreset.ECO)
         assertEquals(SingBoxTuningPreset.ECO, eco.detectSingBoxTuningPreset())
-        assertEquals("32MiB", eco.sbGoMemLimit)
-        assertEquals("1", eco.sbGoMaxProcs)
-        assertEquals("25", eco.sbGoGc)
+        assertEquals("48MiB", eco.sbGoMemLimit)
+        assertEquals("2", eco.sbGoMaxProcs)
+        assertEquals("50", eco.sbGoGc)
         assertEquals("error", eco.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.ALWAYS, eco.sbBlockQuic)
         assertEquals("ipv4_only", eco.sbDnsStrategy)
-        assertEquals(10, eco.sbConnectTimeoutSec)
+        assertEquals(15, eco.sbConnectTimeoutSec)
         assertFalse(eco.sbTcpFastOpen)
 
         val balanced = eco.applySingBoxTuningPreset(SingBoxTuningPreset.BALANCED)
         assertEquals(SingBoxTuningPreset.BALANCED, balanced.detectSingBoxTuningPreset())
-        assertEquals("48MiB", balanced.sbGoMemLimit)
-        assertEquals("2", balanced.sbGoMaxProcs)
-        assertEquals("50", balanced.sbGoGc)
+        assertEquals("96MiB", balanced.sbGoMemLimit)
+        assertEquals("Auto", balanced.sbGoMaxProcs)
+        assertEquals("100", balanced.sbGoGc)
         assertEquals("warn", balanced.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, balanced.sbBlockQuic)
         assertEquals("ipv4_only", balanced.sbDnsStrategy)
+        assertEquals(15, balanced.sbConnectTimeoutSec)
 
         val turbo = balanced.applySingBoxTuningPreset(SingBoxTuningPreset.TURBO)
         assertEquals(SingBoxTuningPreset.TURBO, turbo.detectSingBoxTuningPreset())
-        assertEquals("64MiB", turbo.sbGoMemLimit)
-        assertEquals("4", turbo.sbGoMaxProcs)
+        assertEquals("Auto", turbo.sbGoMemLimit)
+        assertEquals("Auto", turbo.sbGoMaxProcs)
         assertEquals("100", turbo.sbGoGc)
         assertEquals("warn", turbo.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, turbo.sbBlockQuic)
         assertTrue(turbo.sbTcpFastOpen)
-        assertEquals(5, turbo.sbConnectTimeoutSec)
+        assertEquals(15, turbo.sbConnectTimeoutSec)
 
         // Changing any individual field switches to CUSTOM
         assertEquals(SingBoxTuningPreset.CUSTOM, turbo.copy(sbBypassIrDomains = true).detectSingBoxTuningPreset())
@@ -79,7 +80,7 @@ class SingBoxTuningTest {
         val reset = turbo.copy(sbBypassIrDomains = true, sbGoMemLimit = "24MiB").resetSingBoxTuningDefaults()
         assertEquals(SingBoxTuningPreset.BALANCED, reset.detectSingBoxTuningPreset())
         assertFalse(reset.sbBypassIrDomains)
-        assertEquals("48MiB", reset.sbGoMemLimit)
+        assertEquals("96MiB", reset.sbGoMemLimit)
     }
 
     @Test
@@ -165,7 +166,9 @@ class SingBoxTuningTest {
                 chainMode = io.aethervpn.android.core.ChainMode.SINGBOX_ONLY
             )
         )
-        assertTrue(yaml.contains("connect-timeout: 10000"))
+        assertTrue(yaml.contains("mtu: 8500"))
+        assertTrue(yaml.contains("tcp-buffer-size: 524288"))
+        assertTrue(yaml.contains("connect-timeout: 15000"))
         assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
     }
 
