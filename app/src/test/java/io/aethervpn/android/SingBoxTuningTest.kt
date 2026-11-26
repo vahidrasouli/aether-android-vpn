@@ -33,7 +33,7 @@ class SingBoxTuningTest {
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, cfg.sbBlockQuic)
         assertFalse(cfg.sbBypassPrivateIp)
         assertFalse(cfg.sbBypassIrDomains)
-        assertEquals(15, cfg.sbConnectTimeoutSec)
+        assertEquals(10, cfg.sbConnectTimeoutSec)
         assertFalse(cfg.sbTcpFastOpen)
         assertEquals("warn", cfg.sbLogLevel)
     }
@@ -48,7 +48,7 @@ class SingBoxTuningTest {
         assertEquals("error", eco.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.ALWAYS, eco.sbBlockQuic)
         assertEquals("ipv4_only", eco.sbDnsStrategy)
-        assertEquals(15, eco.sbConnectTimeoutSec)
+        assertEquals(10, eco.sbConnectTimeoutSec)
         assertFalse(eco.sbTcpFastOpen)
 
         val balanced = eco.applySingBoxTuningPreset(SingBoxTuningPreset.BALANCED)
@@ -59,7 +59,7 @@ class SingBoxTuningTest {
         assertEquals("warn", balanced.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, balanced.sbBlockQuic)
         assertEquals("ipv4_only", balanced.sbDnsStrategy)
-        assertEquals(15, balanced.sbConnectTimeoutSec)
+        assertEquals(10, balanced.sbConnectTimeoutSec)
 
         val turbo = balanced.applySingBoxTuningPreset(SingBoxTuningPreset.TURBO)
         assertEquals(SingBoxTuningPreset.TURBO, turbo.detectSingBoxTuningPreset())
@@ -69,7 +69,7 @@ class SingBoxTuningTest {
         assertEquals("warn", turbo.sbLogLevel)
         assertEquals(SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS, turbo.sbBlockQuic)
         assertTrue(turbo.sbTcpFastOpen)
-        assertEquals(15, turbo.sbConnectTimeoutSec)
+        assertEquals(10, turbo.sbConnectTimeoutSec)
 
         // Changing any individual field switches to CUSTOM
         assertEquals(SingBoxTuningPreset.CUSTOM, turbo.copy(sbBypassIrDomains = true).detectSingBoxTuningPreset())
@@ -100,7 +100,7 @@ class SingBoxTuningTest {
                 sbBypassIrDomains = true,
                 sbCustomBypassDomains = "digikala.com, shaparak.ir",
                 sbMultiplexEnabled = true,
-                sbConnectTimeoutSec = 15,
+                sbConnectTimeoutSec = 10,
                 sbTcpFastOpen = true,
                 sbLogLevel = "info"
             )
@@ -118,7 +118,7 @@ class SingBoxTuningTest {
         assertTrue(restored.sbBypassIrDomains)
         assertEquals("digikala.com, shaparak.ir", restored.sbCustomBypassDomains)
         assertTrue(restored.sbMultiplexEnabled)
-        assertEquals(15, restored.sbConnectTimeoutSec)
+        assertEquals(10, restored.sbConnectTimeoutSec)
         assertTrue(restored.sbTcpFastOpen)
         assertEquals("info", restored.sbLogLevel)
     }
@@ -166,7 +166,7 @@ class SingBoxTuningTest {
                 chainMode = io.aethervpn.android.core.ChainMode.SINGBOX_ONLY
             )
         )
-        assertTrue(yaml.contains("mtu: 1500"))
+        assertTrue(yaml.contains("mtu: 1280"))
         assertTrue(yaml.contains("tcp-buffer-size: 65536"))
         assertTrue(yaml.contains("task-stack-size: 81920"))
         assertTrue(yaml.contains("connect-timeout: 15000"))

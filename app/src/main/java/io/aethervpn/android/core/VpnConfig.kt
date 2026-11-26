@@ -277,7 +277,7 @@ data class VpnConfig(
     val sbBypassIrDomains: Boolean = false,
     val sbCustomBypassDomains: String = "",
     val sbMultiplexEnabled: Boolean = false,
-    val sbConnectTimeoutSec: Int = 15,
+    val sbConnectTimeoutSec: Int = 10,
     val sbTcpFastOpen: Boolean = false,
     val sbLogLevel: String = "warn"
 ) {
@@ -422,7 +422,7 @@ data class VpnConfig(
                 sbLogLevel == "error" &&
                 sbBlockQuic == SingBoxBlockQuicMode.ALWAYS &&
                 sbDnsStrategy == "ipv4_only" &&
-                sbConnectTimeoutSec == 15 &&
+                sbConnectTimeoutSec == 10 &&
                 !sbTcpFastOpen -> SingBoxTuningPreset.ECO
 
             sbGoMemLimit == "96MiB" &&
@@ -431,7 +431,7 @@ data class VpnConfig(
                 sbLogLevel == "warn" &&
                 sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
                 sbDnsStrategy == "ipv4_only" &&
-                sbConnectTimeoutSec == 15 &&
+                sbConnectTimeoutSec == 10 &&
                 !sbTcpFastOpen -> SingBoxTuningPreset.BALANCED
 
             sbGoMemLimit == "Auto" &&
@@ -440,7 +440,7 @@ data class VpnConfig(
                 sbLogLevel == "warn" &&
                 sbBlockQuic == SingBoxBlockQuicMode.AUTO_TCP_OUTBOUNDS &&
                 sbDnsStrategy == "ipv4_only" &&
-                sbConnectTimeoutSec == 15 &&
+                sbConnectTimeoutSec == 10 &&
                 sbTcpFastOpen -> SingBoxTuningPreset.TURBO
 
             else -> SingBoxTuningPreset.CUSTOM
@@ -461,7 +461,7 @@ data class VpnConfig(
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
-            sbConnectTimeoutSec = 15,
+            sbConnectTimeoutSec = 10,
             sbTcpFastOpen = false,
             sbLogLevel = "error"
         )
@@ -479,7 +479,7 @@ data class VpnConfig(
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
-            sbConnectTimeoutSec = 15,
+            sbConnectTimeoutSec = 10,
             sbTcpFastOpen = false,
             sbLogLevel = "warn"
         )
@@ -497,7 +497,7 @@ data class VpnConfig(
             sbBypassIrDomains = false,
             sbCustomBypassDomains = "",
             sbMultiplexEnabled = false,
-            sbConnectTimeoutSec = 15,
+            sbConnectTimeoutSec = 10,
             sbTcpFastOpen = true,
             sbLogLevel = "warn"
         )
@@ -645,7 +645,7 @@ data class VpnConfig(
         const val PSIPHON_SOCKS_PORT = 1821
         const val SING_BOX_SOCKS_PORT = 1825
         const val DEFAULT_TUN_MTU = 1280
-        const val SING_BOX_ONLY_TUN_MTU = 1500
+        const val SING_BOX_ONLY_TUN_MTU = 1280
         const val TUN_IPV4_ADDRESS = "172.19.0.1"
         const val TUN_IPV4_PREFIX = 30
         const val TUN_IPV6_ADDRESS = "fd00:ae7::1"
@@ -774,7 +774,7 @@ data class VpnConfig(
                 sbBypassIrDomains = o.optBoolean("sbBypassIrDomains", false),
                 sbCustomBypassDomains = o.optString("sbCustomBypassDomains", "").trim(),
                 sbMultiplexEnabled = o.optBoolean("sbMultiplexEnabled", false),
-                sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 15).coerceIn(3, 60),
+                sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
                 sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" }
             )
@@ -844,7 +844,7 @@ data class VpnConfig(
                 sbBypassIrDomains = p.getBoolean("sb_bypass_ir_domains", false),
                 sbCustomBypassDomains = p.getString("sb_custom_bypass_domains", "").orEmpty(),
                 sbMultiplexEnabled = p.getBoolean("sb_multiplex_enabled", false),
-                sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 15).coerceIn(3, 60),
+                sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
                 sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" }
             )

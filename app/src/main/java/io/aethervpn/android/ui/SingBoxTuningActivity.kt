@@ -360,9 +360,9 @@ class SingBoxTuningActivity : AppCompatActivity() {
                 }
             )
             binding.tvSbPresetSummary.text = when (preset) {
-                SingBoxTuningPreset.ECO -> "Eco: 48MiB, 2 cores, GOGC=50, Error log, QUIC=Always, IPv4 Only, 15s timeout."
-                SingBoxTuningPreset.BALANCED -> "Balanced: 96MiB, Auto cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, 15s timeout."
-                SingBoxTuningPreset.TURBO -> "Turbo: Auto mem, Auto cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, TFO=On, 15s timeout."
+                SingBoxTuningPreset.ECO -> "Eco: 48MiB, 2 cores, GOGC=50, Error log, QUIC=Always, IPv4 Only, 10s timeout."
+                SingBoxTuningPreset.BALANCED -> "Balanced: 96MiB, Auto cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, 10s timeout."
+                SingBoxTuningPreset.TURBO -> "Turbo: Auto mem, Auto cores, GOGC=100, Warn log, QUIC=Auto, IPv4 Only, TFO=On, 10s timeout."
                 SingBoxTuningPreset.CUSTOM -> "Custom: ${cfg.sbGoMemLimit} • ${cfg.sbGoMaxProcs} cores • ${cfg.sbDnsStrategy} • ${cfg.sbConnectTimeoutSec}s dial"
             }
         } finally {

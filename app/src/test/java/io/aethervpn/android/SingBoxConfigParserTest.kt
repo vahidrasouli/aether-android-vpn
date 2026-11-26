@@ -242,7 +242,7 @@ class SingBoxConfigParserTest {
             assertFalse(proxyOutbound.has("domain_strategy"))
             assertFalse(proxyOutbound.has("tcp_keep_alive"))
             assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
-            assertEquals("15s", proxyOutbound.getString("connect_timeout"))
+            assertEquals("10s", proxyOutbound.getString("connect_timeout"))
 
             // Lean route rules: hijack-dns (port 53 + protocol dns), udp:443 -> reject; no sniff/ip_is_private/ip_cidr by default
             val route = runtime.getJSONObject("route")
@@ -290,7 +290,7 @@ class SingBoxConfigParserTest {
             val runtime = JSONObject(runtimeStr)
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
             assertEquals("proxy", proxyOutbound.getString("tag"))
-            assertEquals("15s", proxyOutbound.getString("connect_timeout"))
+            assertEquals("10s", proxyOutbound.getString("connect_timeout"))
         }
     }
 
@@ -486,6 +486,17 @@ class SingBoxConfigParserTest {
         val trojanOut = SingBoxConfigParser.parse(trojanUri).getOrThrow().outboundOrFullJson
         assertTrue(trojanOut.getJSONObject("tls").getJSONObject("utls").getBoolean("enabled"))
         assertEquals("chrome", trojanOut.getJSONObject("tls").getJSONObject("utls").getString("fingerprint"))
+    }
+
+    @Test
+    fun omitsTlsAlpnWhenNotPresentInUriIncludingVisionReality() {
+        val visionRealityUri =
+            "vless://11111111-2222-3333-4444-555555555555@198.51.100.10:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=publicKey123&sid=abcd&type=tcp#VisionNoAlpn"
+        val runtime = JSONObject(SingBoxConfigParser.buildRuntimeConfig(visionRealityUri).getOrThrow())
+        val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("xtls-rprx-vision", proxyOutbound.getString("flow"))
+        assertEquals("10s", proxyOutbound.getString("connect_timeout"))
+        assertFalse("tls.alpn must be omitted when not present in URI", proxyOutbound.getJSONObject("tls").has("alpn"))
     }
 
     @Test

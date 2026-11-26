@@ -49,7 +49,7 @@ class HevConfigGeneratorTest {
         val singBoxOnlyYaml = manager.generateYamlConfig(
             VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY, hevMode = HevMode.TCP_ONLY)
         )
-        assertTrue(singBoxOnlyYaml.contains("mtu: 1500"))
+        assertTrue(singBoxOnlyYaml.contains("mtu: 1280"))
         assertTrue(singBoxOnlyYaml.contains("tcp-buffer-size: 65536"))
         assertTrue(singBoxOnlyYaml.contains("task-stack-size: 81920"))
         assertTrue(singBoxOnlyYaml.contains("tcp-read-write-timeout: 300000"))
