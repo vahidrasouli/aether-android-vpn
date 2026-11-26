@@ -4,7 +4,7 @@
     <item
         android:id="@+id/action_singbox_tuning"
         android:icon="@drawable/ic_tune_24"
+        android:iconTint="@color/text_primary"
         android:title="@string/title_singbox_tuning"
-        app:iconTint="@color/text_primary"
         app:showAsAction="always" />
 </menu>
