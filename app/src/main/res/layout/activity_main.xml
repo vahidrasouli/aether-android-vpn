@@ -278,13 +278,131 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
+                <!-- Software Update Entry Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardSoftwareUpdate"
+                    style="@style/Widget.Aether.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:strokeColor="@color/accent_primary_container"
+                    app:strokeWidth="1.5dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="16dp">
+
+                        <ImageView
+                            android:layout_width="36dp"
+                            android:layout_height="36dp"
+                            android:background="@drawable/bg_icon_badge"
+                            android:contentDescription="@null"
+                            android:padding="7dp"
+                            android:src="@drawable/ic_system_update_24"
+                            app:tint="@color/accent_primary" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/title_software_update"
+                                android:textColor="@color/text_primary"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvSoftwareUpdateSummary"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/software_update_entry_subtitle"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvUpdateAvailableBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:background="@drawable/bg_pill_delta"
+                            android:paddingStart="8dp"
+                            android:paddingTop="3dp"
+                            android:paddingEnd="8dp"
+                            android:paddingBottom="3dp"
+                            android:text="NEW"
+                            android:textColor="@color/accent_primary"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:contentDescription="@null"
+                            android:src="@drawable/ic_chevron_right_24"
+                            app:tint="@color/text_secondary" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- SECTION 1: AETHER CORE SETTINGS -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:layout_marginBottom="4dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_engine_lab_24"
+                        app:tint="@color/accent_primary" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Aether Core Settings"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="WARP transport, performance profiles, obfuscation &amp; backup"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11.5sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
                 <!-- Engine & Performance Lab Entry Card -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardEngineLab"
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="8dp"
                     android:clickable="true"
                     android:focusable="true"
                     app:strokeColor="@color/accent_primary_container"
@@ -337,128 +455,6 @@
                             android:contentDescription="@null"
                             android:src="@drawable/ic_chevron_right_24"
                             app:tint="@color/text_secondary" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- Sing-box Profiles Entry Card -->
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/cardSingBox"
-                    style="@style/Widget.Aether.Card"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:clickable="true"
-                    android:focusable="true"
-                    app:strokeColor="@color/singbox_accent"
-                    app:strokeWidth="1dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="16dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <ImageView
-                                android:layout_width="36dp"
-                                android:layout_height="36dp"
-                                android:background="@drawable/bg_icon_badge"
-                                android:contentDescription="@null"
-                                android:padding="7dp"
-                                android:src="@drawable/ic_protocol_24"
-                                app:tint="@color/singbox_accent_light" />
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="12dp"
-                                android:layout_weight="1"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/singbox_entry_title"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="15sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvSingBoxSummary"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="@string/singbox_entry_subtitle"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
-                            </LinearLayout>
-
-                            <com.google.android.material.materialswitch.MaterialSwitch
-                                android:id="@+id/switchSingBoxEnabled"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginEnd="6dp" />
-
-                            <ImageView
-                                android:layout_width="20dp"
-                                android:layout_height="20dp"
-                                android:contentDescription="@null"
-                                android:src="@drawable/ic_chevron_right_24"
-                                app:tint="@color/text_secondary" />
-                        </LinearLayout>
-
-                        <!-- Unified Routing Chain Selector (hidden when Sing-box Master Switch is OFF) -->
-                        <LinearLayout
-                            android:id="@+id/layoutSingBoxChain"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:visibility="gone">
-
-                            <View
-                                android:layout_width="match_parent"
-                                android:layout_height="1dp"
-                                android:layout_marginVertical="12dp"
-                                android:background="@color/divider_line" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="ROUTING CHAIN"
-                                android:textColor="@color/singbox_accent_light"
-                                android:textSize="11sp"
-                                android:textStyle="bold" />
-
-                            <Spinner
-                                android:id="@+id/spinnerChainMode"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:layout_marginTop="4dp" />
-
-                            <TextView
-                                android:id="@+id/tvChainModeDetail"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:fontFamily="monospace"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="11sp" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnSingBoxSpeedCompare"
-                                style="@style/Widget.Aether.Button.Outlined"
-                                android:layout_width="match_parent"
-                                android:layout_height="44dp"
-                                android:layout_marginTop="8dp"
-                                android:text="Speed Check (SOCKS5 vs TUN)"
-                                android:textSize="12sp"
-                                android:visibility="gone" />
-                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -583,12 +579,52 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
+                <!-- SECTION 2: PSIPHON ROUTING SETTINGS -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:layout_marginBottom="4dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_protocol_24"
+                        app:tint="@color/log_tag_psiphon" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Psiphon Routing Settings"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Chaining mode, egress country &amp; circumvention protocol"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11.5sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
                 <!-- Card 3: Psiphon Chain & Country -->
                 <com.google.android.material.card.MaterialCardView
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="8dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -648,12 +684,175 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
+                <!-- SECTION 3: SING-BOX & TUNNEL SETTINGS -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:layout_marginBottom="4dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_tunnel_24"
+                        app:tint="@color/singbox_accent_light" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Sing-box &amp; Tunnel Settings"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Sing-box profiles, routing chain, split tunneling &amp; upstream proxy"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11.5sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Sing-box Profiles Entry Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardSingBox"
+                    style="@style/Widget.Aether.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:strokeColor="@color/singbox_accent"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <ImageView
+                                android:layout_width="36dp"
+                                android:layout_height="36dp"
+                                android:background="@drawable/bg_icon_badge"
+                                android:contentDescription="@null"
+                                android:padding="7dp"
+                                android:src="@drawable/ic_protocol_24"
+                                app:tint="@color/singbox_accent_light" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="12dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/singbox_entry_title"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvSingBoxSummary"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="@string/singbox_entry_subtitle"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/switchSingBoxEnabled"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="6dp" />
+
+                            <ImageView
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right_24"
+                                app:tint="@color/text_secondary" />
+                        </LinearLayout>
+
+                        <!-- Unified Routing Chain Selector (hidden when Sing-box Master Switch is OFF) -->
+                        <LinearLayout
+                            android:id="@+id/layoutSingBoxChain"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:visibility="gone">
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:layout_marginVertical="12dp"
+                                android:background="@color/divider_line" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="ROUTING CHAIN"
+                                android:textColor="@color/singbox_accent_light"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Spinner
+                                android:id="@+id/spinnerChainMode"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginTop="4dp" />
+
+                            <TextView
+                                android:id="@+id/tvChainModeDetail"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnSingBoxSpeedCompare"
+                                style="@style/Widget.Aether.Button.Outlined"
+                                android:layout_width="match_parent"
+                                android:layout_height="44dp"
+                                android:layout_marginTop="8dp"
+                                android:text="Speed Check (SOCKS5 vs TUN)"
+                                android:textSize="12sp"
+                                android:visibility="gone" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
                 <!-- Card 4: Routing, Split Tunneling & Iran Direct -->
                 <com.google.android.material.card.MaterialCardView
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="12dp"
+                    android:layout_marginBottom="12dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1177,7 +1376,7 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Card 7: About & Updates -->
+                <!-- Card 7: Compact About -->
                 <com.google.android.material.card.MaterialCardView
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
@@ -1193,7 +1392,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="@string/title_about_updates"
+                            android:text="ABOUT"
                             android:textColor="@color/accent_primary"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -1227,7 +1426,7 @@
                             android:id="@+id/tvAboutEngines"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
+                            android:layout_marginTop="6dp"
                             android:text="@string/about_engines"
                             android:textColor="@color/text_secondary"
                             android:textSize="12sp" />
@@ -1261,142 +1460,6 @@
                             android:textColor="@color/accent_primary"
                             android:textSize="13sp"
                             android:textStyle="bold" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnCheckUpdates"
-                            style="@style/Widget.Aether.Button.Outlined"
-                            android:layout_width="match_parent"
-                            android:layout_height="48dp"
-                            android:layout_marginTop="10dp"
-                            android:text="@string/action_check_updates" />
-
-                        <TextView
-                            android:id="@+id/tvUpdateStatus"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:text="@string/update_status_idle"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-
-                        <com.google.android.material.card.MaterialCardView
-                            android:id="@+id/layoutUpdateAvailable"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:visibility="gone"
-                            app:cardBackgroundColor="@color/surface_elevated"
-                            app:cardCornerRadius="14dp"
-                            app:cardElevation="0dp"
-                            app:strokeColor="@color/card_border"
-                            app:strokeWidth="1dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:orientation="vertical"
-                                android:padding="14dp">
-
-                                <TextView
-                                    android:id="@+id/tvUpdateVersion"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:fontFamily="monospace"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="14sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvUpdateDeltaPill"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="8dp"
-                                    android:background="@drawable/bg_pill_delta"
-                                    android:paddingStart="10dp"
-                                    android:paddingTop="4dp"
-                                    android:paddingEnd="10dp"
-                                    android:paddingBottom="4dp"
-                                    android:textColor="@color/accent_primary"
-                                    android:textSize="11.5sp"
-                                    android:textStyle="bold"
-                                    android:visibility="gone" />
-
-                                <TextView
-                                    android:id="@+id/tvUpdateSizeComparison"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4dp"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="11.5sp"
-                                    android:visibility="gone" />
-
-                                <TextView
-                                    android:id="@+id/tvUpdateNotes"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="8dp"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="12sp" />
-
-                                <TextView
-                                    android:id="@+id/tvUpdateStageLabel"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="10dp"
-                                    android:textColor="@color/accent_primary"
-                                    android:textSize="12sp"
-                                    android:textStyle="bold"
-                                    android:visibility="gone" />
-
-                                <com.google.android.material.progressindicator.LinearProgressIndicator
-                                    android:id="@+id/progressUpdateDownload"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="6dp"
-                                    android:max="100"
-                                    android:visibility="gone"
-                                    app:indicatorColor="@color/accent_primary"
-                                    app:trackColor="@color/surface_bg"
-                                    app:trackCornerRadius="4dp"
-                                    app:trackThickness="6dp" />
-
-                                <TextView
-                                    android:id="@+id/tvUpdateProgressDetail"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="6dp"
-                                    android:fontFamily="monospace"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="11.5sp"
-                                    android:visibility="gone" />
-
-                                <LinearLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="12dp"
-                                    android:orientation="horizontal">
-
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnDownloadInstallUpdate"
-                                        style="@style/Widget.Aether.Button"
-                                        android:layout_width="0dp"
-                                        android:layout_height="46dp"
-                                        android:layout_weight="1"
-                                        android:text="@string/action_download_install" />
-
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnCancelUpdate"
-                                        style="@style/Widget.Aether.Button.Outlined"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="46dp"
-                                        android:layout_marginStart="8dp"
-                                        android:text="@string/action_cancel_download"
-                                        android:textColor="@color/error_text"
-                                        android:visibility="gone"
-                                        app:strokeColor="@color/error_text" />
-                                </LinearLayout>
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>

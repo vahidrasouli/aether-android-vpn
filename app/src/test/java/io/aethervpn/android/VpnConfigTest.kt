@@ -226,4 +226,48 @@ class VpnConfigTest {
         val bindIdx = argsOnly.indexOf("--bind")
         assertTrue(bindIdx >= 0 && argsOnly[bindIdx + 1] == "127.0.0.1:1821")
     }
+
+    @Test
+    fun settingsPreferenceKeysAndBackupRoundTripRemainCompatible() {
+        val original = VpnConfig(
+            profileLevel = ProfileLevel.ADVANCED,
+            protocol = AetherProtocol.MASQUE_H2,
+            psiphonMode = io.aethervpn.android.core.PsiphonMode.WARP_TO_PSIPHON,
+            psiphonRegion = "DE",
+            bypassIran = true,
+            singBoxEnabled = true,
+            chainMode = io.aethervpn.android.core.ChainMode.SINGBOX_TO_WARP
+        )
+        val json = original.toSafeBackupJson()
+        val restored = VpnConfig.fromBackupJson(json).getOrThrow()
+        assertEquals(original.profileLevel, restored.profileLevel)
+        assertEquals(original.protocol, restored.protocol)
+        assertEquals(original.psiphonMode, restored.psiphonMode)
+        assertEquals(original.psiphonRegion, restored.psiphonRegion)
+        assertEquals(original.bypassIran, restored.bypassIran)
+        assertEquals(original.singBoxEnabled, restored.singBoxEnabled)
+        assertEquals(original.chainMode, restored.chainMode)
+
+        val vpnConfigFile = listOf(
+            File("src/main/java/io/aethervpn/android/core/VpnConfig.kt"),
+            File("app/src/main/java/io/aethervpn/android/core/VpnConfig.kt")
+        ).firstOrNull { it.isFile }
+        assertTrue("VpnConfig.kt not found", vpnConfigFile != null)
+        val source = vpnConfigFile!!.readText()
+        val legacyKeys = listOf(
+            "\"profile_level\"",
+            "\"protocol\"",
+            "\"psiphon_mode\"",
+            "\"psiphon_region\"",
+            "\"psiphon_protocol\"",
+            "\"sing_box_enabled\"",
+            "\"chain_mode\"",
+            "\"bypass_iran\"",
+            "\"upstream_proxy\"",
+            "\"theme_mode\""
+        )
+        legacyKeys.forEach { key ->
+            assertTrue("Missing backward-compatible preference key $key", source.contains(key))
+        }
+    }
 }

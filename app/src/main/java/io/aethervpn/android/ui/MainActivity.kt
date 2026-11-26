@@ -50,7 +50,6 @@ import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfile
 import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.PsiphonProtocol
-import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.ScanMode
 import io.aethervpn.android.core.SplitTunnelMode
 import io.aethervpn.android.core.StructuredUpstreamProxy
@@ -69,7 +68,6 @@ import io.aethervpn.android.core.VpnUiState
 import io.aethervpn.android.core.VpnUiStateMachine
 import io.aethervpn.android.databinding.ActivityMainBinding
 import io.aethervpn.android.vpn.AetherVpnService
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -119,6 +117,9 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var awaitingVpnPermission = false
 
+    @Volatile
+    private var initialLoadCompleted = false
+
     private val statsIntervalsMs = longArrayOf(5_000L, 3_000L, 10_000L)
     private val statsIntervalLabels = listOf(
         "5 seconds (Battery Efficient)",
@@ -147,45 +148,61 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        requestNotificationPermissionIfNeeded()
         setupNavigation()
         setupSpinners()
         setupAutoSaveListeners()
         setupLogRecyclerView()
-        setupAboutAndUpdater()
+        setupAboutAndUpdateEntry()
         bindActions()
 
-        // Purge stale cache directories on version upgrade; otherwise clean up leftover APKs
-        lifecycleScope.launch(Dispatchers.IO) {
-            val prefs = getSharedPreferences(CacheHygiene.PREFS_NAME, MODE_PRIVATE)
-            val purged = CacheHygiene.purgeStaleCacheOnVersionChange(
-                prefs = prefs,
-                currentVersionCode = BuildConfig.VERSION_CODE,
-                cacheDir = cacheDir
-            )
-            if (purged) {
-                DiagnosticsLog.record(
-                    "System",
-                    "Updated to v${BuildConfig.VERSION_NAME} — cleared stale cache"
-                )
-            } else {
-                UpdateManager.cleanupInstalledApks(cacheDir)
-            }
-        }
+        // Defer all disk I/O (SharedPreferences, profile parsing, cache cleanup, update check)
+        // until after the first frame renders so cold-start is instantaneous.
+        window.decorView.post {
+            if (isFinishing || isDestroyed) return@post
+            requestNotificationPermissionIfNeeded()
 
-        // Load configuration & active Sing-box profile asynchronously off the main thread
-        lifecycleScope.launch {
-            val (cfg, activeProfile) = withContext(Dispatchers.IO) {
-                VpnConfig.load(this@MainActivity) to SingBoxProfileRepository.load(filesDir).activeProfile
+            lifecycleScope.launch {
+                val (cfg, activeProfile) = withContext(Dispatchers.IO) {
+                    val prefs = getSharedPreferences(CacheHygiene.PREFS_NAME, MODE_PRIVATE)
+                    val purged = CacheHygiene.purgeStaleCacheOnVersionChange(
+                        prefs = prefs,
+                        currentVersionCode = BuildConfig.VERSION_CODE,
+                        cacheDir = cacheDir
+                    )
+                    if (purged) {
+                        DiagnosticsLog.record(
+                            "System",
+                            "Updated to v${BuildConfig.VERSION_NAME} — cleared stale cache"
+                        )
+                    } else {
+                        UpdateManager.cleanupInstalledApks(cacheDir)
+                    }
+                    VpnConfig.load(this@MainActivity) to SingBoxProfileRepository.load(filesDir).activeProfile
+                }
+                cachedConfig = cfg
+                cachedActiveSingBoxProfile = activeProfile
+                initialLoadCompleted = true
+                loadConfigIntoUi(cfg)
             }
-            cachedConfig = cfg
-            cachedActiveSingBoxProfile = activeProfile
-            loadConfigIntoUi(cfg)
+
+            lifecycleScope.launch(Dispatchers.IO) {
+                val result = UpdateManager.checkForUpdates(BuildConfig.VERSION_NAME)
+                if (result is UpdateCheckResult.UpdateAvailable) {
+                    withContext(Dispatchers.Main) {
+                        if (!isFinishing && !isDestroyed) {
+                            binding.tvUpdateAvailableBadge.visibility = View.VISIBLE
+                            binding.tvSoftwareUpdateSummary.text =
+                                "v${result.release.versionName} available — tap to update"
+                        }
+                    }
+                }
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
+        if (!initialLoadCompleted) return
         lifecycleScope.launch {
             val (cfg, activeProfile) = withContext(Dispatchers.IO) {
                 VpnConfig.load(this@MainActivity) to SingBoxProfileRepository.load(filesDir).activeProfile
@@ -1137,32 +1154,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var pendingUpdateRelease: ReleaseInfo? = null
-    private var pendingInstallApkFile: java.io.File? = null
-    private var activeUpdateDownloadJob: Job? = null
-
-    private fun applyUpdateDownloadButtonStyle(isDownloading: Boolean) {
-        if (isDownloading) {
-            binding.btnDownloadInstallUpdate.isEnabled = false
-            binding.btnDownloadInstallUpdate.text = "Updating…"
-            binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(
-                ContextCompat.getColor(this, R.color.accent_primary_container)
-            )
-            binding.btnDownloadInstallUpdate.strokeWidth = 0
-            binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.accent_primary))
-            binding.btnCancelUpdate.visibility = View.VISIBLE
-        } else {
-            binding.btnDownloadInstallUpdate.isEnabled = true
-            binding.btnDownloadInstallUpdate.backgroundTintList = ColorStateList.valueOf(
-                ContextCompat.getColor(this, R.color.accent_primary)
-            )
-            binding.btnDownloadInstallUpdate.strokeWidth = 0
-            binding.btnDownloadInstallUpdate.setTextColor(ContextCompat.getColor(this, R.color.surface_bg))
-            binding.btnCancelUpdate.visibility = View.GONE
-        }
-    }
-
-    private fun setupAboutAndUpdater() {
+    private fun setupAboutAndUpdateEntry() {
         val versionLabel = "v${BuildConfig.VERSION_NAME}"
         binding.tvAppVersion.text = versionLabel
         binding.tvAboutAppVersion.text = "${getString(R.string.app_name)} • $versionLabel"
@@ -1174,264 +1166,15 @@ class MainActivity : AppCompatActivity() {
                 "Android Version: Android ${Build.VERSION.RELEASE} • " +
                 "SDK Level: API ${Build.VERSION.SDK_INT}"
 
+        binding.cardSoftwareUpdate.setOnClickListener {
+            startActivity(Intent(this, UpdateActivity::class.java))
+        }
+
         binding.tvAboutGithub.setOnClickListener {
             runCatching {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateManager.GITHUB_REPO_URL)))
             }.onFailure {
                 toast("Unable to open browser")
-            }
-        }
-
-        binding.btnCheckUpdates.setOnClickListener {
-            activeUpdateDownloadJob?.cancel()
-            activeUpdateDownloadJob = null
-            applyUpdateDownloadButtonStyle(isDownloading = false)
-            binding.btnCheckUpdates.isEnabled = false
-            binding.tvUpdateStatus.text = "Checking GitHub Releases..."
-            binding.layoutUpdateAvailable.visibility = View.GONE
-
-            uiScope.launch {
-                val result = UpdateManager.checkForUpdates(BuildConfig.VERSION_NAME)
-                binding.btnCheckUpdates.isEnabled = true
-                when (result) {
-                    is UpdateCheckResult.UpdateAvailable -> {
-                        val rel = result.release
-                        pendingUpdateRelease = rel
-                        val delta = rel.deltaManifest
-                        val matchedPatch = delta?.matchedPatch
-                        binding.tvUpdateVersion.text = if (delta != null && delta.toVersionCode > 0) {
-                            "v${BuildConfig.VERSION_NAME} → b${delta.toVersionCode}"
-                        } else {
-                            "v${BuildConfig.VERSION_NAME} → v${rel.versionName}"
-                        }
-
-                        if (delta != null && matchedPatch != null) {
-                            val patchMb = matchedPatch.patchSize / (1024.0 * 1024.0)
-                            val fullMb = if (delta.fullSize > 0L) delta.fullSize / (1024.0 * 1024.0) else 0.0
-                            val savedPct = if (delta.fullSize > 0L) {
-                                (((delta.fullSize - matchedPatch.patchSize) * 100L) / delta.fullSize).toInt().coerceIn(0, 99)
-                            } else {
-                                0
-                            }
-                            binding.tvUpdateDeltaPill.text = String.format(
-                                Locale.US,
-                                "⚡ Delta Update • %.1f MB (%d%% saved)",
-                                patchMb,
-                                savedPct
-                            )
-                            binding.tvUpdateDeltaPill.visibility = View.VISIBLE
-                            if (fullMb > 0.0) {
-                                binding.tvUpdateSizeComparison.text = String.format(
-                                    Locale.US,
-                                    "vs full ~%.1f MB • SHA-256 verified bsdiff patch",
-                                    fullMb
-                                )
-                                binding.tvUpdateSizeComparison.visibility = View.VISIBLE
-                            } else {
-                                binding.tvUpdateSizeComparison.visibility = View.GONE
-                            }
-                            binding.tvUpdateStatus.text = "Delta update ready (${rel.tagName})"
-                        } else {
-                            binding.tvUpdateDeltaPill.visibility = View.GONE
-                            if (delta != null && delta.fullSize > 0L) {
-                                val fullMb = delta.fullSize / (1024.0 * 1024.0)
-                                binding.tvUpdateSizeComparison.text = String.format(
-                                    Locale.US,
-                                    "Full APK • ~%.1f MB • SHA-256 verified",
-                                    fullMb
-                                )
-                                binding.tvUpdateSizeComparison.visibility = View.VISIBLE
-                            } else {
-                                binding.tvUpdateSizeComparison.visibility = View.GONE
-                            }
-                            binding.tvUpdateStatus.text = "New version available!"
-                        }
-
-                        binding.tvUpdateNotes.text = rel.releaseNotes
-                        binding.tvUpdateStageLabel.visibility = View.GONE
-                        binding.progressUpdateDownload.visibility = View.GONE
-                        binding.tvUpdateProgressDetail.visibility = View.GONE
-                        applyUpdateDownloadButtonStyle(isDownloading = false)
-                        val hasPartial = rel.apkDownloadUrl != null && withContext(Dispatchers.IO) {
-                            UpdateManager.getPartialDownloadSize(rel, cacheDir) > 0L
-                        }
-                        binding.btnDownloadInstallUpdate.text = when {
-                            rel.apkDownloadUrl == null -> "Open Release Page"
-                            hasPartial -> getString(R.string.action_resume_download)
-                            else -> getString(R.string.action_download_install)
-                        }
-                        binding.layoutUpdateAvailable.visibility = View.VISIBLE
-                    }
-                    is UpdateCheckResult.UpToDate -> {
-                        pendingUpdateRelease = null
-                        binding.tvUpdateStatus.text = "You are on the latest version (v${result.currentVersion})."
-                    }
-                    is UpdateCheckResult.Unavailable -> {
-                        pendingUpdateRelease = null
-                        binding.tvUpdateStatus.text = result.message
-                    }
-                }
-            }
-        }
-
-        binding.btnCancelUpdate.setOnClickListener {
-            activeUpdateDownloadJob?.cancel()
-            activeUpdateDownloadJob = null
-            val rel = pendingUpdateRelease
-            if (rel != null) {
-                uiScope.launch(Dispatchers.IO) {
-                    UpdateManager.cancelPartialDownloads(rel, cacheDir)
-                }
-            }
-            binding.tvUpdateStageLabel.visibility = View.GONE
-            binding.progressUpdateDownload.visibility = View.GONE
-            binding.progressUpdateDownload.progress = 0
-            binding.tvUpdateProgressDetail.visibility = View.GONE
-            binding.tvUpdateProgressDetail.text = ""
-            binding.tvUpdateStatus.text = "Download cancelled"
-            applyUpdateDownloadButtonStyle(isDownloading = false)
-            binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
-        }
-
-        binding.btnDownloadInstallUpdate.setOnClickListener {
-            if (activeUpdateDownloadJob?.isActive == true) {
-                return@setOnClickListener
-            }
-
-            val rel = pendingUpdateRelease ?: return@setOnClickListener
-            val apkUrl = rel.apkDownloadUrl
-            if (apkUrl.isNullOrBlank()) {
-                runCatching {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(rel.htmlUrl)))
-                }
-                return@setOnClickListener
-            }
-
-            val cachedApk = pendingInstallApkFile
-            if (cachedApk != null && cachedApk.exists()) {
-                installDownloadedApk(cachedApk)
-                return@setOnClickListener
-            }
-
-            activeUpdateDownloadJob = lifecycleScope.launch {
-                val resumingBytes = withContext(Dispatchers.IO) {
-                    UpdateManager.getPartialDownloadSize(rel, cacheDir)
-                }
-
-                applyUpdateDownloadButtonStyle(isDownloading = true)
-                binding.tvUpdateStageLabel.visibility = View.VISIBLE
-                binding.tvUpdateStageLabel.text = if (resumingBytes > 0L) {
-                    "Resuming download..."
-                } else if (rel.deltaManifest?.matchedPatch != null) {
-                    "Downloading patch..."
-                } else {
-                    "Downloading full APK..."
-                }
-                binding.progressUpdateDownload.visibility = View.VISIBLE
-                binding.progressUpdateDownload.isIndeterminate = false
-                if (resumingBytes == 0L) {
-                    binding.progressUpdateDownload.progress = 0
-                }
-                binding.tvUpdateProgressDetail.visibility = View.VISIBLE
-                binding.tvUpdateProgressDetail.text = if (resumingBytes > 0L) {
-                    String.format(Locale.US, "Resuming from %.1f MB…", resumingBytes / (1024.0 * 1024.0))
-                } else {
-                    "0% • Starting download…"
-                }
-                binding.tvUpdateStatus.text = binding.tvUpdateStageLabel.text
-
-                try {
-                    val downloadResult = UpdateManager.downloadUpdate(
-                        release = rel,
-                        baseApkPath = applicationInfo?.sourceDir,
-                        currentVersionCode = BuildConfig.VERSION_CODE,
-                        cacheDir = cacheDir,
-                        onStatus = { statusText ->
-                            lifecycleScope.launch {
-                                if (activeUpdateDownloadJob?.isActive == true) {
-                                    binding.tvUpdateStageLabel.text = statusText
-                                    binding.tvUpdateStatus.text = statusText
-                                    binding.progressUpdateDownload.isIndeterminate =
-                                        statusText.contains("Applying", ignoreCase = true) ||
-                                            statusText.contains("Verifying", ignoreCase = true)
-                                }
-                            }
-                        }
-                    ) { progress ->
-                        lifecycleScope.launch {
-                            if (activeUpdateDownloadJob?.isActive == true) {
-                                binding.progressUpdateDownload.isIndeterminate = false
-                                binding.progressUpdateDownload.progress = progress.percent
-                                binding.tvUpdateProgressDetail.text = progress.formatLabel()
-                            }
-                        }
-                    }
-
-                    applyUpdateDownloadButtonStyle(isDownloading = false)
-                    downloadResult.onSuccess { file ->
-                        binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
-                        pendingInstallApkFile = file
-                        binding.progressUpdateDownload.isIndeterminate = false
-                        binding.progressUpdateDownload.progress = 100
-                        binding.tvUpdateStageLabel.text = "Ready to install"
-                        binding.tvUpdateStatus.text = "Ready to install. Launching installer..."
-                        installDownloadedApk(file)
-                    }.onFailure { err ->
-                        binding.progressUpdateDownload.isIndeterminate = false
-                        val hasPart = withContext(Dispatchers.IO) {
-                            UpdateManager.getPartialDownloadSize(rel, cacheDir) > 0L
-                        }
-                        if (hasPart) {
-                            binding.btnDownloadInstallUpdate.text = getString(R.string.action_resume_download)
-                            binding.tvUpdateStageLabel.text = "Download paused"
-                            binding.tvUpdateStatus.text = "Download paused (${err.message ?: "network error"})"
-                        } else {
-                            binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
-                            binding.tvUpdateStageLabel.visibility = View.GONE
-                            binding.progressUpdateDownload.visibility = View.GONE
-                            binding.tvUpdateProgressDetail.visibility = View.GONE
-                            binding.tvUpdateStatus.text = "Download failed: ${err.message ?: "unknown error"}"
-                        }
-                    }
-                } catch (_: CancellationException) {
-                    UpdateManager.cancelPartialDownloads(rel, cacheDir)
-                    binding.tvUpdateStageLabel.visibility = View.GONE
-                    binding.progressUpdateDownload.visibility = View.GONE
-                    binding.progressUpdateDownload.progress = 0
-                    binding.tvUpdateProgressDetail.visibility = View.GONE
-                    binding.tvUpdateProgressDetail.text = ""
-                    binding.tvUpdateStatus.text = "Download cancelled"
-                    applyUpdateDownloadButtonStyle(isDownloading = false)
-                    binding.btnDownloadInstallUpdate.text = getString(R.string.action_download_install)
-                } finally {
-                    activeUpdateDownloadJob = null
-                }
-            }
-        }
-    }
-
-    private fun installDownloadedApk(apkFile: java.io.File) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-            toast("Please allow installing unknown apps, then tap Download & Update again")
-            val permIntent = Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:$packageName")
-            )
-            runCatching { startActivity(permIntent) }
-            return
-        }
-
-        binding.tvUpdateStageLabel.visibility = View.VISIBLE
-        binding.tvUpdateStageLabel.text = "Preparing installer..."
-        binding.tvUpdateStatus.text = "Preparing system installer..."
-        lifecycleScope.launch {
-            val result = UpdateManager.installApkWithPackageInstaller(this@MainActivity, apkFile)
-            result.onSuccess {
-                binding.tvUpdateStageLabel.text = "Confirm installation"
-                binding.tvUpdateStatus.text = "Confirm the system prompt to install the update."
-            }.onFailure { err ->
-                binding.tvUpdateStageLabel.text = "Install failed"
-                binding.tvUpdateStatus.text = "Unable to launch installer: ${err.message}"
             }
         }
     }

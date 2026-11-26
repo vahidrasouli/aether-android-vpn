@@ -615,4 +615,37 @@ class UpdateManagerTest {
         assertTrue("UpdateInstallReceiver missing from AndroidManifest.xml", foundInstallReceiver)
         assertEquals("io.aethervpn.android.ACTION_INSTALL_STATUS", UpdateManager.ACTION_INSTALL_STATUS)
     }
+
+    @Test
+    fun updateActivityIsRegisteredInManifest() {
+        val manifestFile = listOf(
+            java.io.File("src/main/AndroidManifest.xml"),
+            java.io.File("app/src/main/AndroidManifest.xml")
+        ).firstOrNull { it.isFile }
+        assertNotNull("AndroidManifest.xml not found", manifestFile)
+
+        val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+        }.newDocumentBuilder().parse(manifestFile!!)
+
+        val activities = doc.getElementsByTagName("activity")
+        var foundUpdateActivity = false
+        val androidNs = "http://schemas.android.com/apk/res/android"
+
+        for (i in 0 until activities.length) {
+            val node = activities.item(i) as? org.w3c.dom.Element ?: continue
+            val name = node.getAttributeNS(androidNs, "name")
+            if (name == ".ui.UpdateActivity") {
+                foundUpdateActivity = true
+                assertEquals("UpdateActivity must be exported=false", "false", node.getAttributeNS(androidNs, "exported"))
+                assertEquals(
+                    "UpdateActivity parentActivityName must be .ui.MainActivity",
+                    ".ui.MainActivity",
+                    node.getAttributeNS(androidNs, "parentActivityName")
+                )
+            }
+        }
+
+        assertTrue("UpdateActivity missing from AndroidManifest.xml", foundUpdateActivity)
+    }
 }

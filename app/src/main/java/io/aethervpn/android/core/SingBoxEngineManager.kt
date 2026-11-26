@@ -362,16 +362,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     )
                 )
             }
-            val base = baseResult.getOrNull() ?: return baseResult
-            if (base.speedProbe.isSuccess) {
-                return baseResult
-            }
-            val isolationLogs = runStallIsolationProbes(
-                context = context,
-                rawUriOrJson = rawUriOrJson,
-                timeoutMs = speedProbeTimeoutMs
-            )
-            return Result.success(base.copy(isolationLogs = isolationLogs))
+            return baseResult
         }
 
         private suspend fun runStallIsolationProbes(

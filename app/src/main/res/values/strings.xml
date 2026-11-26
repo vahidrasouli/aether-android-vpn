@@ -52,6 +52,12 @@
     <string name="action_start_tun">Start TUN / HEV</string>
     <string name="action_stop_tun">Stop TUN / HEV</string>
 
+    <string name="title_software_update">Software Update</string>
+    <string name="software_update_entry_subtitle">Check for delta patches &amp; release updates</string>
+    <string name="update_headline_checking">Checking for Updates…</string>
+    <string name="update_headline_available">Update Available</string>
+    <string name="update_headline_uptodate">Up to Date</string>
+    <string name="action_install_update">Install Update</string>
     <string name="title_about_updates">ABOUT &amp; UPDATES</string>
     <string name="about_developer">Developer: Saeed Rasouli</string>
     <string name="about_engines">Engines: Aether Core v2.4.0 • Psiphon Core • HEV Tunnel 2.20.0</string>
