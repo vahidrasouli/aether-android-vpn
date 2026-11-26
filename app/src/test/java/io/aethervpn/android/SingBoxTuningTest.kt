@@ -26,7 +26,7 @@ class SingBoxTuningTest {
         assertEquals("48MiB", cfg.sbGoMemLimit)
         assertEquals("2", cfg.sbGoMaxProcs)
         assertEquals("50", cfg.sbGoGc)
-        assertEquals("https://1.1.1.1/dns-query", cfg.sbRemoteDns)
+        assertEquals("1.1.1.1", cfg.sbRemoteDns)
         assertEquals("1.1.1.1", cfg.sbDirectDns)
         assertEquals("prefer_ipv4", cfg.sbDnsStrategy)
         assertTrue(cfg.sbSniffEnabled)
@@ -143,6 +143,30 @@ class SingBoxTuningTest {
         assertNull(autoEnv["GOMEMLIMIT"])
         assertNull(autoEnv["GOMAXPROCS"])
         assertEquals("50", autoEnv["GOGC"])
+    }
+
+    @Test
+    fun testAllRunnerUsesBoundedConcurrencyAndConservativeEphemeralGoCaps() {
+        val testEnv = SingBoxEngineManager.resolveEphemeralTestGoEnvironment()
+        assertEquals("24MiB", testEnv["GOMEMLIMIT"])
+        assertEquals("1", testEnv["GOMAXPROCS"])
+        assertEquals("25", testEnv["GOGC"])
+        assertEquals(6_000L, SingBoxEngineManager.EPHEMERAL_TEST_TIMEOUT_MS)
+        assertEquals(3, io.aethervpn.android.ui.SingBoxProfilesActivity.TEST_ALL_MAX_CONCURRENCY)
+    }
+
+    @Test
+    fun hevTunnelManagerWritesTelegramSafeTimeoutsForSingBoxOnly() {
+        val mgr = io.aethervpn.android.core.HevTunnelManager(java.io.File(System.getProperty("java.io.tmpdir") ?: "."))
+        val yaml = mgr.generateYamlConfig(
+            VpnConfig(
+                singBoxEnabled = true,
+                singBoxOnly = true,
+                chainMode = io.aethervpn.android.core.ChainMode.SINGBOX_ONLY
+            )
+        )
+        assertTrue(yaml.contains("connect-timeout: 10000"))
+        assertTrue(yaml.contains("tcp-read-write-timeout: 300000"))
     }
 
     @Test

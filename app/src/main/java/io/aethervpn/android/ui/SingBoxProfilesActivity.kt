@@ -37,10 +37,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 class SingBoxProfilesActivity : AppCompatActivity() {
 
@@ -386,43 +394,69 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
         testAllJob = uiScope.launch {
             binding.layoutTestAllProgress.visibility = View.VISIBLE
+            binding.tvTestAllStatus.text = "Testing 0 / ${snapshot.size}…"
             val cfg = withContext(Dispatchers.IO) { VpnConfig.load(this@SingBoxProfilesActivity) }
-            var passed = 0
-            for ((index, profile) in snapshot.withIndex()) {
-                if (!isActive) break
-                binding.tvTestAllStatus.text = "Testing ${index + 1} / ${snapshot.size}: ${profile.name}"
-                testingIds.add(profile.id)
-                testErrors.remove(profile.id)
-                adapter.notifyDataSetChanged()
+            val semaphore = Semaphore(TEST_ALL_MAX_CONCURRENCY)
+            val repoMutex = Mutex()
+            val completedCount = AtomicInteger(0)
+            val passedCount = AtomicInteger(0)
 
-                val result = withContext(Dispatchers.IO) {
-                    SingBoxEngineManager.runEphemeralTraceTest(
-                        context = this@SingBoxProfilesActivity,
-                        config = cfg,
-                        rawUriOrJson = profile.rawUriOrJson
-                    )
+            try {
+                coroutineScope {
+                    snapshot.map { profile ->
+                        async(Dispatchers.IO) {
+                            semaphore.withPermit {
+                                if (!isActive) return@withPermit
+                                withContext(Dispatchers.Main.immediate) {
+                                    testingIds.add(profile.id)
+                                    testErrors.remove(profile.id)
+                                    binding.tvTestAllStatus.text =
+                                        "Testing ${completedCount.get()} / ${snapshot.size} (${testingIds.size} active)…"
+                                    adapter.notifyDataSetChanged()
+                                }
+
+                                val result = SingBoxEngineManager.runEphemeralTraceTest(
+                                    context = this@SingBoxProfilesActivity,
+                                    config = cfg,
+                                    rawUriOrJson = profile.rawUriOrJson,
+                                    timeoutMs = SingBoxEngineManager.EPHEMERAL_TEST_TIMEOUT_MS
+                                )
+
+                                if (result.isSuccess) {
+                                    passedCount.incrementAndGet()
+                                    val v = result.getOrThrow()
+                                    val updated = repoMutex.withLock {
+                                        SingBoxProfileRepository.updateTestResult(
+                                            filesDir = filesDir,
+                                            profileId = profile.id,
+                                            pingMs = v.latencyMs,
+                                            exitIp = v.publicIp,
+                                            country = v.colo
+                                        )
+                                    }
+                                    withContext(Dispatchers.Main.immediate) {
+                                        storeState = updated
+                                    }
+                                }
+
+                                withContext(Dispatchers.Main.immediate) {
+                                    testingIds.remove(profile.id)
+                                    if (result.isFailure) {
+                                        testErrors[profile.id] = result.exceptionOrNull()?.message ?: "Trace test failed"
+                                    }
+                                    val done = completedCount.incrementAndGet()
+                                    binding.tvTestAllStatus.text = "Tested $done / ${snapshot.size}"
+                                    adapter.notifyDataSetChanged()
+                                }
+                            }
+                        }
+                    }.awaitAll()
                 }
-                testingIds.remove(profile.id)
-                if (result.isSuccess) {
-                    passed++
-                    val v = result.getOrThrow()
-                    storeState = withContext(Dispatchers.IO) {
-                        SingBoxProfileRepository.updateTestResult(
-                            filesDir = filesDir,
-                            profileId = profile.id,
-                            pingMs = v.latencyMs,
-                            exitIp = v.publicIp,
-                            country = v.colo
-                        )
-                    }
-                } else {
-                    testErrors[profile.id] = result.exceptionOrNull()?.message ?: "Trace test failed"
+                if (isActive) {
+                    showSnack("Tested ${snapshot.size} profiles (${passedCount.get()} passed)")
                 }
-                adapter.notifyDataSetChanged()
-            }
-            binding.layoutTestAllProgress.visibility = View.GONE
-            if (isActive) {
-                showSnack("Tested ${snapshot.size} profiles ($passed passed)")
+            } finally {
+                binding.layoutTestAllProgress.visibility = View.GONE
             }
         }
     }
@@ -588,5 +622,9 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        internal const val TEST_ALL_MAX_CONCURRENCY = 3
     }
 }

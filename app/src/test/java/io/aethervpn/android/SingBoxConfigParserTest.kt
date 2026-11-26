@@ -196,10 +196,19 @@ class SingBoxConfigParserTest {
 
             val remoteDns = servers.getJSONObject(0)
             assertEquals("dns-remote", remoteDns.getString("tag"))
-            assertEquals("https", remoteDns.getString("type"))
+            assertEquals("udp", remoteDns.getString("type"))
             assertEquals("1.1.1.1", remoteDns.getString("server"))
             assertEquals("proxy", remoteDns.getString("detour"))
             assertFalse(remoteDns.has("address"))
+
+            val dnsRules = dns.getJSONArray("rules")
+            val httpsRule = (0 until dnsRules.length())
+                .map { dnsRules.getJSONObject(it) }
+                .firstOrNull { it.optString("action") == "predefined" }
+            assertTrue("HTTPS/SVCB predefined NOERROR rule must exist in dns.rules", httpsRule != null)
+            assertEquals("NOERROR", httpsRule!!.getString("rcode"))
+            val queryTypes = httpsRule.getJSONArray("query_type")
+            assertEquals(listOf("HTTPS", "SVCB"), (0 until queryTypes.length()).map { queryTypes.getString(it) })
 
             val localDns = servers.getJSONObject(1)
             assertEquals("dns-local", localDns.getString("tag"))
@@ -208,9 +217,14 @@ class SingBoxConfigParserTest {
             assertFalse("dns-local must NOT have detour in sing-box 1.12", localDns.has("detour"))
             assertFalse(localDns.has("address"))
 
+            // Mixed inbound & proxy outbound must NOT force local domain_strategy
+            val mixedInbound = runtime.getJSONArray("inbounds").getJSONObject(0)
+            assertFalse(mixedInbound.has("domain_strategy"))
+
             // Proxy outbound dial timeout field (no invalid tcp_keep_alive fields for sing-box 1.12)
             val proxyOutbound = runtime.getJSONArray("outbounds").getJSONObject(0)
             assertEquals("proxy", proxyOutbound.getString("tag"))
+            assertFalse(proxyOutbound.has("domain_strategy"))
             assertFalse(proxyOutbound.has("tcp_keep_alive"))
             assertFalse(proxyOutbound.has("tcp_keep_alive_interval"))
             assertEquals("10s", proxyOutbound.getString("connect_timeout"))

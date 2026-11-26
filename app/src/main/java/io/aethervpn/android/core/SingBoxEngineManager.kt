@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -161,6 +162,8 @@ class SingBoxEngineManager(private val privateDataDir: File) {
     }
 
     companion object {
+        internal const val EPHEMERAL_TEST_TIMEOUT_MS = 6_000L
+
         private val ANSI_ESCAPE_REGEX = Regex("\\u001B\\[[0-9;]*m")
         private val SINGBOX_PREFIX_REGEX = Regex(
             "^\\s*(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\[\\d+\\]\\s*(?:\\[\\d+\\s+[^\\]]+\\]\\s*)?(.*)$",
@@ -209,6 +212,12 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             return env
         }
 
+        internal fun resolveEphemeralTestGoEnvironment(): Map<String, String> = linkedMapOf(
+            "GOMEMLIMIT" to "24MiB",
+            "GOMAXPROCS" to "1",
+            "GOGC" to "25"
+        )
+
         fun findSingBoxBinary(context: Context): File? {
             val nativeLibDir = File(context.applicationInfo.nativeLibraryDir)
             val candidates = listOf(
@@ -246,7 +255,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             context: Context,
             config: VpnConfig,
             rawUriOrJson: String,
-            timeoutMs: Long = 12_000L
+            timeoutMs: Long = EPHEMERAL_TEST_TIMEOUT_MS
         ): Result<ValidationResult> {
             val binary = findSingBoxBinary(context)
                 ?: return Result.failure(IllegalStateException("libsing-box.so not found in nativeLibraryDir"))
@@ -274,19 +283,22 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             testConfig.writeText(runtimeJsonResult.getOrThrow(), Charsets.UTF_8)
 
             var proc: Process? = null
-            val envMap = resolveGoEnvironment(config)
+            val envMap = resolveEphemeralTestGoEnvironment()
+            val cancelHandle = coroutineContext[Job]?.invokeOnCompletion {
+                runCatching { proc?.destroyForcibly() }
+            }
             return try {
                 val pb = ProcessBuilder(binary.absolutePath, "run", "-c", testConfig.absolutePath)
                     .directory(testDir)
                     .redirectErrorStream(true)
-                pb.environment().apply {
-                    envMap.forEach { (k, v) -> if (v != null) put(k, v) else remove(k) }
-                }
+                pb.environment().putAll(envMap)
                 proc = pb.start()
 
-                val deadline = System.currentTimeMillis() + 8_000L
+                val totalDeadline = System.currentTimeMillis() + timeoutMs
+                val startupBudgetMs = minOf(timeoutMs - 1_500L, 3_500L).coerceAtLeast(1_500L)
+                val startupDeadline = System.currentTimeMillis() + startupBudgetMs
                 var ready = false
-                while (System.currentTimeMillis() < deadline) {
+                while (System.currentTimeMillis() < startupDeadline) {
                     if (!proc.isAlive) {
                         val output = runCatching {
                             stripAnsiCodes(proc.inputStream.bufferedReader().readText()).trim().take(300)
@@ -301,25 +313,27 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                         ready = true
                         break
                     }
-                    delay(100L)
+                    delay(75L)
                 }
 
                 if (!ready) {
                     return Result.failure(IllegalStateException("Timed out waiting for test sing-box listener"))
                 }
 
+                val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, timeoutMs).toInt()
                 TunnelValidator.verifyThroughSocks(
                     socksPort = ephemeralPort,
-                    timeoutMs = timeoutMs.toInt(),
+                    timeoutMs = remainingTimeoutMs,
                     maxAttempts = 1,
                     requireWarpOverride = false
                 )
             } catch (e: Exception) {
                 Result.failure(e)
             } finally {
+                cancelHandle?.dispose()
                 runCatching {
                     proc?.destroy()
-                    if (proc != null && !proc.waitFor(800, TimeUnit.MILLISECONDS)) {
+                    if (proc != null && !proc.waitFor(400, TimeUnit.MILLISECONDS)) {
                         proc.destroyForcibly()
                     }
                 }

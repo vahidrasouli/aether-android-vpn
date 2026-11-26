@@ -263,6 +263,16 @@ object SingBoxConfigParser {
                             put("server", config.sbDirectDns.ifBlank { "1.1.1.1" })
                         })
                     })
+                    put("rules", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("query_type", JSONArray().apply {
+                                put("HTTPS")
+                                put("SVCB")
+                            })
+                            put("action", "predefined")
+                            put("rcode", "NOERROR")
+                        })
+                    })
                     put("final", "dns-remote")
                     put("strategy", config.sbDnsStrategy.ifBlank { "prefer_ipv4" })
                 })
@@ -341,7 +351,7 @@ object SingBoxConfigParser {
     }
 
     private fun buildRemoteDnsServer(rawRemoteDns: String): JSONObject {
-        val trimmed = rawRemoteDns.trim().ifBlank { "https://1.1.1.1/dns-query" }
+        val trimmed = rawRemoteDns.trim().ifBlank { "1.1.1.1" }
         return if (trimmed.startsWith("https://", ignoreCase = true)) {
             val parsedUri = runCatching { URI(trimmed) }.getOrNull()
             val host = parsedUri?.host?.takeIf { it.isNotBlank() } ?: "1.1.1.1"

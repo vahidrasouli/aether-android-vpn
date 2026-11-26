@@ -57,7 +57,7 @@ class HevTunnelManager(private val cacheDir: File) {
             append("  task-stack-size: ").append(config.taskStackSize).append('\n')
             append("  tcp-buffer-size: 65536\n")
             append("  max-session-count: 512\n")
-            append("  connect-timeout: 5000\n")
+            append("  connect-timeout: 10000\n")
             append("  read-write-timeout: 60000\n")
             append("  tcp-read-write-timeout: 300000\n")
             append("  udp-read-write-timeout: ").append(config.udpTimeoutMs).append('\n')

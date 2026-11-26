@@ -77,14 +77,14 @@ class DiagnosticsLogTest {
 
     @Test
     fun testRingBufferCapAndClear() {
-        for (i in 1..150) {
+        for (i in 1..2150) {
             DiagnosticsLog.record("Test", "Event number $i")
         }
 
         val entries = DiagnosticsLog.entries()
-        assertEquals("Ring buffer must be capped at 120 entries", 120, entries.size)
-        assertTrue("Oldest events must have been evicted", entries.first().contains("Event number 31"))
-        assertTrue("Latest event must be present", entries.last().contains("Event number 150"))
+        assertEquals("Ring buffer must be capped at 2000 entries", 2000, entries.size)
+        assertTrue("Oldest events must have been evicted", entries.first().contains("Event number 151"))
+        assertTrue("Latest event must be present", entries.last().contains("Event number 2150"))
 
         DiagnosticsLog.clear()
         assertEquals("No diagnostic events yet.", DiagnosticsLog.snapshot())

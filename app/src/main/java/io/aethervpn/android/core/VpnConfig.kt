@@ -268,7 +268,7 @@ data class VpnConfig(
     val sbGoMemLimit: String = "48MiB",
     val sbGoMaxProcs: String = "2",
     val sbGoGc: String = "50",
-    val sbRemoteDns: String = "https://1.1.1.1/dns-query",
+    val sbRemoteDns: String = "1.1.1.1",
     val sbDirectDns: String = "1.1.1.1",
     val sbDnsStrategy: String = "prefer_ipv4",
     val sbSniffEnabled: Boolean = true,
@@ -394,7 +394,7 @@ data class VpnConfig(
 
     fun detectSingBoxTuningPreset(): SingBoxTuningPreset {
         val baseRoutingAndDnsDefaults =
-            sbRemoteDns == "https://1.1.1.1/dns-query" &&
+            sbRemoteDns == "1.1.1.1" &&
                 sbDirectDns == "1.1.1.1" &&
                 sbSniffEnabled &&
                 sbBypassPrivateIp &&
@@ -440,7 +440,7 @@ data class VpnConfig(
             sbGoMemLimit = "32MiB",
             sbGoMaxProcs = "1",
             sbGoGc = "25",
-            sbRemoteDns = "https://1.1.1.1/dns-query",
+            sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "ipv4_only",
             sbSniffEnabled = true,
@@ -458,7 +458,7 @@ data class VpnConfig(
             sbGoMemLimit = "48MiB",
             sbGoMaxProcs = "2",
             sbGoGc = "50",
-            sbRemoteDns = "https://1.1.1.1/dns-query",
+            sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "prefer_ipv4",
             sbSniffEnabled = true,
@@ -476,7 +476,7 @@ data class VpnConfig(
             sbGoMemLimit = "64MiB",
             sbGoMaxProcs = "4",
             sbGoGc = "100",
-            sbRemoteDns = "https://1.1.1.1/dns-query",
+            sbRemoteDns = "1.1.1.1",
             sbDirectDns = "1.1.1.1",
             sbDnsStrategy = "prefer_ipv4",
             sbSniffEnabled = true,
@@ -749,7 +749,7 @@ data class VpnConfig(
                 sbGoMemLimit = o.optString("sbGoMemLimit", "48MiB").ifBlank { "48MiB" },
                 sbGoMaxProcs = o.optString("sbGoMaxProcs", "2").ifBlank { "2" },
                 sbGoGc = o.optString("sbGoGc", "50").ifBlank { "50" },
-                sbRemoteDns = o.optString("sbRemoteDns", "https://1.1.1.1/dns-query").ifBlank { "https://1.1.1.1/dns-query" },
+                sbRemoteDns = o.optString("sbRemoteDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDirectDns = o.optString("sbDirectDns", "1.1.1.1").ifBlank { "1.1.1.1" },
                 sbDnsStrategy = o.optString("sbDnsStrategy", "prefer_ipv4").ifBlank { "prefer_ipv4" },
                 sbSniffEnabled = o.optBoolean("sbSniffEnabled", true),
@@ -819,7 +819,7 @@ data class VpnConfig(
                 sbGoMemLimit = p.getString("sb_go_mem_limit", "48MiB").orEmpty().ifBlank { "48MiB" },
                 sbGoMaxProcs = p.getString("sb_go_max_procs", "2").orEmpty().ifBlank { "2" },
                 sbGoGc = p.getString("sb_go_gc", "50").orEmpty().ifBlank { "50" },
-                sbRemoteDns = p.getString("sb_remote_dns", "https://1.1.1.1/dns-query").orEmpty().ifBlank { "https://1.1.1.1/dns-query" },
+                sbRemoteDns = p.getString("sb_remote_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDirectDns = p.getString("sb_direct_dns", "1.1.1.1").orEmpty().ifBlank { "1.1.1.1" },
                 sbDnsStrategy = p.getString("sb_dns_strategy", "prefer_ipv4").orEmpty().ifBlank { "prefer_ipv4" },
                 sbSniffEnabled = p.getBoolean("sb_sniff_enabled", true),

@@ -9,14 +9,14 @@ import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Bounded, zero-disk, redacted in-memory diagnostic ring buffer (max 120 entries).
+ * Bounded, zero-disk, redacted in-memory diagnostic ring buffer (max 2000 entries).
  * Automatically scrubs tokens, credentials, and private keys before storing.
  * Collapses consecutive identical or same-pattern lines with a repeat counter badge `(xN)`
  * and rate-limits high-frequency UI flow emissions during error bursts.
  * Emits reactive updates via Kotlin StateFlow<List<String>> for live UI rendering.
  */
 object DiagnosticsLog {
-    private const val MAX_ENTRIES = 120
+    internal const val MAX_ENTRIES = 2000
     private const val UI_BURST_EMIT_INTERVAL_MS = 250L
 
     private val lock = Any()

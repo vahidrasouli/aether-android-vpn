@@ -127,11 +127,11 @@ class SingBoxTuningActivity : AppCompatActivity() {
         binding.chipGroupSbRemoteDns.setOnCheckedStateChangeListener { _, checkedIds ->
             if (isBindingUi) return@setOnCheckedStateChangeListener
             val remote = when (checkedIds.firstOrNull()) {
+                R.id.chipSbRemoteDnsCfDoh -> "https://1.1.1.1/dns-query"
                 R.id.chipSbRemoteDnsGoogleDoh -> "https://8.8.8.8/dns-query"
-                R.id.chipSbRemoteDnsCfUdp -> "1.1.1.1"
                 R.id.chipSbRemoteDnsGoogleUdp -> "8.8.8.8"
                 R.id.chipSbRemoteDnsQuad9Udp -> "9.9.9.9"
-                else -> "https://1.1.1.1/dns-query"
+                else -> "1.1.1.1"
             }
             updateConfig { it.copy(sbRemoteDns = remote) }
         }
@@ -278,11 +278,11 @@ class SingBoxTuningActivity : AppCompatActivity() {
 
             binding.chipGroupSbRemoteDns.check(
                 when (cfg.sbRemoteDns) {
+                    "https://1.1.1.1/dns-query" -> R.id.chipSbRemoteDnsCfDoh
                     "https://8.8.8.8/dns-query" -> R.id.chipSbRemoteDnsGoogleDoh
-                    "1.1.1.1" -> R.id.chipSbRemoteDnsCfUdp
                     "8.8.8.8" -> R.id.chipSbRemoteDnsGoogleUdp
                     "9.9.9.9" -> R.id.chipSbRemoteDnsQuad9Udp
-                    else -> R.id.chipSbRemoteDnsCfDoh
+                    else -> R.id.chipSbRemoteDnsCfUdp
                 }
             )
             binding.chipGroupSbDirectDns.check(
