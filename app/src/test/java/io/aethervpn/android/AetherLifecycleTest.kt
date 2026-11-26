@@ -3,6 +3,9 @@ package io.aethervpn.android
 import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.TunnelSnapshot
 import io.aethervpn.android.core.VpnStateStore
+import io.aethervpn.android.core.VpnUiAction
+import io.aethervpn.android.core.VpnUiState
+import io.aethervpn.android.core.VpnUiStateMachine
 import io.aethervpn.android.vpn.AetherVpnService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -92,5 +95,81 @@ class AetherLifecycleTest {
         assertEquals(8_000L, expectedDelays[3])
         assertEquals(16_000L, expectedDelays[4])
         assertEquals(30_000L, expectedDelays[5])
+    }
+
+    @Test
+    fun verifyUiStateMachineRejectsDuplicateConnectAndSupportsCancel() {
+        val sm = VpnUiStateMachine()
+        assertEquals(VpnUiState.DISCONNECTED, sm.current)
+
+        assertTrue(sm.tryStartConnect())
+        assertEquals(VpnUiState.CONNECTING, sm.current)
+
+        // Duplicate Connect trigger while CONNECTING must be blocked
+        assertFalse(sm.tryStartConnect())
+        assertEquals(VpnUiState.CONNECTING, sm.current)
+
+        // Intermediate service phases must keep CONNECTING (never revert to Connect)
+        val intermediatePhases = listOf(
+            TunnelPhase.STARTING_CORE,
+            TunnelPhase.CORE_CONNECTED,
+            TunnelPhase.SOCKS5_READY,
+            TunnelPhase.STARTING_HEV,
+            TunnelPhase.TUN_ACTIVE,
+            TunnelPhase.RECONNECTING,
+            TunnelPhase.WAITING_FOR_INTERNET
+        )
+        intermediatePhases.forEach { phase ->
+            assertEquals(VpnUiState.CONNECTING, sm.onServiceSnapshot(TunnelSnapshot(phase = phase)))
+        }
+
+        // Tapping primary button while CONNECTING cancels cleanly -> DISCONNECTING
+        assertEquals(VpnUiAction.CANCEL_CONNECT, sm.onPrimaryButtonTap())
+        assertEquals(VpnUiState.DISCONNECTING, sm.current)
+
+        // Tapping again while DISCONNECTING is ignored
+        assertEquals(VpnUiAction.IGNORED, sm.onPrimaryButtonTap())
+        assertEquals(VpnUiState.DISCONNECTING, sm.current)
+
+        // Even a late VPN_CONNECTED emission during DISCONNECTING stays DISCONNECTING
+        assertEquals(
+            VpnUiState.DISCONNECTING,
+            sm.onServiceSnapshot(TunnelSnapshot(phase = TunnelPhase.VPN_CONNECTED))
+        )
+
+        // Reverts to DISCONNECTED only when service emits STOPPED
+        assertEquals(
+            VpnUiState.DISCONNECTED,
+            sm.onServiceSnapshot(TunnelSnapshot(phase = TunnelPhase.STOPPED))
+        )
+    }
+
+    @Test
+    fun verifyUiStateMachineConnectToConnectedToDisconnectAndErrorFlows() {
+        val sm = VpnUiStateMachine()
+
+        assertEquals(VpnUiAction.START_CONNECT, sm.onPrimaryButtonTap())
+        assertEquals(VpnUiState.CONNECTING, sm.current)
+
+        assertEquals(
+            VpnUiState.CONNECTED,
+            sm.onServiceSnapshot(TunnelSnapshot(phase = TunnelPhase.VPN_CONNECTED))
+        )
+
+        assertEquals(VpnUiAction.DISCONNECT, sm.onPrimaryButtonTap())
+        assertEquals(VpnUiState.DISCONNECTING, sm.current)
+
+        assertEquals(
+            VpnUiState.DISCONNECTED,
+            sm.onServiceSnapshot(TunnelSnapshot(phase = TunnelPhase.STOPPED))
+        )
+
+        // Error during CONNECTING reverts cleanly to DISCONNECTED
+        assertTrue(sm.tryStartConnect())
+        assertEquals(VpnUiState.CONNECTING, sm.current)
+        assertEquals(
+            VpnUiState.DISCONNECTED,
+            sm.onServiceSnapshot(TunnelSnapshot(phase = TunnelPhase.ERROR, errorMessage = "Handshake failed"))
+        )
     }
 }

@@ -1,5 +1,10 @@
 package io.aethervpn.android.core
 
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Build
 import io.aethervpn.android.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -8,6 +13,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -785,5 +791,73 @@ object UpdateManager {
         val slashIdx = header.lastIndexOf('/')
         if (slashIdx < 0 || slashIdx + 1 >= header.length) return null
         return header.substring(slashIdx + 1).trim().toLongOrNull()?.takeIf { it > 0L }
+    }
+
+    const val ACTION_INSTALL_STATUS = "io.aethervpn.android.ACTION_INSTALL_STATUS"
+    private const val INSTALL_SESSION_REQUEST_CODE = 4201
+
+    /**
+     * Streams a verified APK file into an Android [PackageInstaller.Session] and commits it
+     * with a status [PendingIntent] targeting [UpdateInstallReceiver], so the user only sees
+     * the single mandatory system confirmation prompt.
+     */
+    suspend fun installApkWithPackageInstaller(
+        context: Context,
+        apkFile: File
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!apkFile.exists() || !apkFile.isFile || apkFile.length() <= 0L) {
+            return@withContext Result.failure(IllegalArgumentException("APK file is missing or empty"))
+        }
+
+        val packageInstaller = context.packageManager.packageInstaller
+        var session: PackageInstaller.Session? = null
+        try {
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            ).apply {
+                setAppPackageName(context.packageName)
+                setSize(apkFile.length())
+            }
+            val sessionId = packageInstaller.createSession(params)
+            session = packageInstaller.openSession(sessionId)
+
+            val apkBytes = apkFile.length()
+            session.openWrite("aether-update.apk", 0L, apkBytes).use { out ->
+                FileInputStream(apkFile).use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        out.write(buffer, 0, read)
+                    }
+                }
+                session.fsync(out)
+            }
+
+            val statusIntent = Intent(context, UpdateInstallReceiver::class.java).apply {
+                action = ACTION_INSTALL_STATUS
+            }
+            val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+            val statusPendingIntent = PendingIntent.getBroadcast(
+                context,
+                INSTALL_SESSION_REQUEST_CODE,
+                statusIntent,
+                pendingFlags
+            )
+
+            session.commit(statusPendingIntent.intentSender)
+            session.close()
+            session = null
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            runCatching { session?.abandon() }
+            runCatching { session?.close() }
+            throw e
+        } catch (e: Exception) {
+            runCatching { session?.abandon() }
+            runCatching { session?.close() }
+            Result.failure(e)
+        }
     }
 }

@@ -25,7 +25,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -64,6 +63,9 @@ import io.aethervpn.android.core.UpstreamProxyProtocol
 import io.aethervpn.android.core.UpstreamProxyTester
 import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.core.VpnStateStore
+import io.aethervpn.android.core.VpnUiAction
+import io.aethervpn.android.core.VpnUiState
+import io.aethervpn.android.core.VpnUiStateMachine
 import io.aethervpn.android.databinding.ActivityMainBinding
 import io.aethervpn.android.vpn.AetherVpnService
 import kotlinx.coroutines.CancellationException
@@ -111,6 +113,10 @@ class MainActivity : AppCompatActivity() {
     private var cachedActiveSingBoxProfile: SingBoxProfile? = null
 
     private var activeSnackbar: Snackbar? = null
+    private val vpnUiStateMachine = VpnUiStateMachine()
+
+    @Volatile
+    private var awaitingVpnPermission = false
 
     private val statsIntervalsMs = longArrayOf(5_000L, 3_000L, 10_000L)
     private val statsIntervalLabels = listOf(
@@ -122,7 +128,9 @@ class MainActivity : AppCompatActivity() {
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        awaitingVpnPermission = false
         if (result.resultCode == RESULT_OK) {
+            vpnUiStateMachine.tryStartConnect()
             startVpnService()
         } else {
             VpnStateStore.reportError(getString(R.string.error_vpn_permission_denied))
@@ -196,6 +204,9 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         stateJob = uiScope.launch {
             VpnStateStore.state.collectLatest { snapshot ->
+                if (!awaitingVpnPermission) {
+                    vpnUiStateMachine.onServiceSnapshot(snapshot)
+                }
                 renderHomeState(snapshot)
                 updateStatsLoop(snapshot)
             }
@@ -741,11 +752,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnToggleVpn.setOnClickListener {
-            val phase = VpnStateStore.state.value.phase
-            if (phase == TunnelPhase.VPN_CONNECTED || phase.isWorking) {
-                stopVpnService()
-            } else {
-                requestVpnAndConnect()
+            when (vpnUiStateMachine.onPrimaryButtonTap()) {
+                VpnUiAction.START_CONNECT -> {
+                    renderHomeState(VpnStateStore.state.value)
+                    requestVpnAndConnect()
+                }
+                VpnUiAction.CANCEL_CONNECT,
+                VpnUiAction.DISCONNECT -> {
+                    renderHomeState(VpnStateStore.state.value)
+                    stopVpnService()
+                }
+                VpnUiAction.IGNORED -> Unit
             }
         }
 
@@ -902,40 +919,66 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderHomeState(snapshot: TunnelSnapshot) {
-        val statusText = when (snapshot.phase) {
-            TunnelPhase.STOPPED -> getString(R.string.status_disconnected)
-            TunnelPhase.WAITING_FOR_INTERNET -> "Waiting for Internet"
-            TunnelPhase.STARTING_CORE -> getString(R.string.status_connecting)
-            TunnelPhase.CORE_CONNECTED -> "Core Running"
-            TunnelPhase.SOCKS5_READY -> "SOCKS5 Ready"
-            TunnelPhase.STARTING_HEV -> "Starting TUN / HEV"
-            TunnelPhase.TUN_ACTIVE -> "TUN Active"
-            TunnelPhase.VPN_CONNECTED -> getString(R.string.status_connected)
-            TunnelPhase.RECONNECTING -> getString(R.string.status_reconnecting)
-            TunnelPhase.ERROR -> getString(R.string.status_error)
+        val uiState = vpnUiStateMachine.current
+        val statusText = when (uiState) {
+            VpnUiState.CONNECTING -> when (snapshot.phase) {
+                TunnelPhase.WAITING_FOR_INTERNET -> "Waiting for Internet"
+                TunnelPhase.CORE_CONNECTED -> "Connecting… (Core Running)"
+                TunnelPhase.SOCKS5_READY -> "Connecting… (SOCKS5 Ready)"
+                TunnelPhase.STARTING_HEV -> "Connecting… (Starting TUN)"
+                TunnelPhase.TUN_ACTIVE -> "Connecting… (Verifying)"
+                TunnelPhase.RECONNECTING -> getString(R.string.status_reconnecting)
+                else -> getString(R.string.status_connecting_badge)
+            }
+            VpnUiState.CONNECTED -> getString(R.string.status_connected)
+            VpnUiState.DISCONNECTING -> getString(R.string.status_disconnecting)
+            VpnUiState.DISCONNECTED -> if (snapshot.phase == TunnelPhase.ERROR) {
+                getString(R.string.status_error)
+            } else {
+                getString(R.string.status_disconnected)
+            }
         }
         binding.tvStatus.text = statusText
         binding.tvProtocol.text = "Protocol: ${snapshot.protocolLabel}"
         binding.tvGateway.text = "Gateway: ${snapshot.gatewayLabel.ifBlank { "Auto (WARP)" }}"
 
+        val showSpinner = uiState == VpnUiState.CONNECTING || uiState == VpnUiState.DISCONNECTING
+        binding.progressConnecting.visibility = if (showSpinner) View.VISIBLE else View.GONE
+        binding.viewStatusDot.visibility = if (showSpinner) View.GONE else View.VISIBLE
+
         val dotColor = when {
-            snapshot.phase == TunnelPhase.VPN_CONNECTED -> R.color.accent_primary
+            uiState == VpnUiState.CONNECTED -> R.color.accent_primary
             snapshot.phase == TunnelPhase.ERROR -> R.color.error_text
-            snapshot.phase.isWorking || snapshot.phase == TunnelPhase.WAITING_FOR_INTERNET -> R.color.warning_text
             else -> R.color.text_secondary
         }
         binding.viewStatusDot.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, dotColor))
 
-        val isActive = snapshot.phase == TunnelPhase.VPN_CONNECTED ||
-            snapshot.phase.isWorking
-
-        binding.btnToggleVpn.text = if (isActive) {
-            getString(R.string.action_disconnect)
-        } else {
-            getString(R.string.action_connect)
+        when (uiState) {
+            VpnUiState.DISCONNECTED -> {
+                binding.btnToggleVpn.isEnabled = true
+                binding.btnToggleVpn.text = getString(R.string.action_connect)
+                binding.btnToggleVpn.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, R.color.accent_primary))
+            }
+            VpnUiState.CONNECTING -> {
+                binding.btnToggleVpn.isEnabled = true
+                binding.btnToggleVpn.text = getString(R.string.action_cancel)
+                binding.btnToggleVpn.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, R.color.error_text))
+            }
+            VpnUiState.CONNECTED -> {
+                binding.btnToggleVpn.isEnabled = true
+                binding.btnToggleVpn.text = getString(R.string.action_disconnect)
+                binding.btnToggleVpn.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, R.color.error_text))
+            }
+            VpnUiState.DISCONNECTING -> {
+                binding.btnToggleVpn.isEnabled = false
+                binding.btnToggleVpn.text = getString(R.string.status_disconnecting)
+                binding.btnToggleVpn.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, R.color.text_secondary))
+            }
         }
-        val btnBg = if (isActive) R.color.error_text else R.color.accent_primary
-        binding.btnToggleVpn.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, btnBg))
 
         binding.tvPublicIp.text = if (snapshot.verifiedPublicIp != null) {
             val colo = snapshot.colo?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
@@ -1018,6 +1061,7 @@ class MainActivity : AppCompatActivity() {
     private fun requestVpnAndConnect() {
         val prepareIntent = VpnService.prepare(this)
         if (prepareIntent != null) {
+            awaitingVpnPermission = true
             vpnPermissionLauncher.launch(prepareIntent)
         } else {
             startVpnService()
@@ -1340,7 +1384,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun installDownloadedApk(apkFile: java.io.File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-            toast("Please allow installing unknown apps, then tap Download & Install again")
+            toast("Please allow installing unknown apps, then tap Download & Update again")
             val permIntent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:$packageName")
@@ -1349,19 +1393,18 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val apkUri = FileProvider.getUriForFile(
-            this,
-            "${BuildConfig.APPLICATION_ID}.fileprovider",
-            apkFile
-        )
-        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(apkUri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching {
-            startActivity(installIntent)
-        }.onFailure { err ->
-            binding.tvUpdateStatus.text = "Unable to launch installer: ${err.message}"
+        binding.tvUpdateStageLabel.visibility = View.VISIBLE
+        binding.tvUpdateStageLabel.text = "Preparing installer..."
+        binding.tvUpdateStatus.text = "Preparing system installer..."
+        lifecycleScope.launch {
+            val result = UpdateManager.installApkWithPackageInstaller(this@MainActivity, apkFile)
+            result.onSuccess {
+                binding.tvUpdateStageLabel.text = "Confirm installation"
+                binding.tvUpdateStatus.text = "Confirm the system prompt to install the update."
+            }.onFailure { err ->
+                binding.tvUpdateStageLabel.text = "Install failed"
+                binding.tvUpdateStatus.text = "Unable to launch installer: ${err.message}"
+            }
         }
     }
 

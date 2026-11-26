@@ -99,6 +99,14 @@
                                 android:layout_height="10dp"
                                 android:background="@drawable/bg_status_dot" />
 
+                            <ProgressBar
+                                android:id="@+id/progressConnecting"
+                                style="?android:attr/progressBarStyleSmall"
+                                android:layout_width="18dp"
+                                android:layout_height="18dp"
+                                android:indeterminateTint="@color/warning_text"
+                                android:visibility="gone" />
+
                             <TextView
                                 android:id="@+id/tvStatus"
                                 android:layout_width="0dp"

@@ -200,6 +200,9 @@ class AetherVpnService : VpnService() {
             ACTION_DISCONNECT -> {
                 userRequestedStop = true
                 DiagnosticsLog.record("System", "User requested disconnect")
+                VpnStateStore.update(
+                    VpnStateStore.state.value.copy(phase = TunnelPhase.DISCONNECTING)
+                )
                 activeJob?.cancel()
                 reconnectJob?.cancel()
                 activeJob = serviceScope.launch {
@@ -250,6 +253,12 @@ class AetherVpnService : VpnService() {
 
             ACTION_CONNECT, null -> {
                 userRequestedStop = false
+                VpnStateStore.update(
+                    VpnStateStore.state.value.copy(
+                        phase = TunnelPhase.STARTING_CORE,
+                        errorMessage = null
+                    )
+                )
                 startForegroundCompat(
                     getString(R.string.app_name),
                     getString(R.string.status_connecting)

@@ -569,4 +569,50 @@ class UpdateManagerTest {
             tempCacheDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun myPackageReplacedReceiverIsRegisteredAndExportedSafelyInManifest() {
+        val manifestFile = listOf(
+            java.io.File("src/main/AndroidManifest.xml"),
+            java.io.File("app/src/main/AndroidManifest.xml")
+        ).firstOrNull { it.isFile }
+        assertNotNull("AndroidManifest.xml not found", manifestFile)
+
+        val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+        }.newDocumentBuilder().parse(manifestFile!!)
+
+        val receivers = doc.getElementsByTagName("receiver")
+        var foundReplacedReceiver = false
+        var foundInstallReceiver = false
+        val androidNs = "http://schemas.android.com/apk/res/android"
+
+        for (i in 0 until receivers.length()) {
+            val node = receivers.item(i) as? org.w3c.dom.Element ?: continue
+            val name = node.getAttributeNS(androidNs, "name")
+            val exported = node.getAttributeNS(androidNs, "exported")
+
+            if (name == ".core.PackageReplacedReceiver") {
+                foundReplacedReceiver = true
+                assertEquals("PackageReplacedReceiver must be exported=false", "false", exported)
+                val actions = node.getElementsByTagName("action")
+                var hasMyPackageReplaced = false
+                for (j in 0 until actions.length()) {
+                    val actionEl = actions.item(j) as? org.w3c.dom.Element ?: continue
+                    if (actionEl.getAttributeNS(androidNs, "name") == "android.intent.action.MY_PACKAGE_REPLACED") {
+                        hasMyPackageReplaced = true
+                        break
+                    }
+                }
+                assertTrue("PackageReplacedReceiver must declare MY_PACKAGE_REPLACED action", hasMyPackageReplaced)
+            } else if (name == ".core.UpdateInstallReceiver") {
+                foundInstallReceiver = true
+                assertEquals("UpdateInstallReceiver must be exported=false", "false", exported)
+            }
+        }
+
+        assertTrue("PackageReplacedReceiver missing from AndroidManifest.xml", foundReplacedReceiver)
+        assertTrue("UpdateInstallReceiver missing from AndroidManifest.xml", foundInstallReceiver)
+        assertEquals("io.aethervpn.android.ACTION_INSTALL_STATUS", UpdateManager.ACTION_INSTALL_STATUS)
+    }
 }
