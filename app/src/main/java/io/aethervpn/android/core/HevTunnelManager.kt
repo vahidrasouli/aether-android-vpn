@@ -16,7 +16,13 @@ class HevTunnelManager(private val cacheDir: File) {
 
     private var activeConfigFile: File? = null
 
-    fun generateYamlConfig(config: VpnConfig): String {
+    fun generateYamlConfig(
+        config: VpnConfig,
+        tunIpv4: String = VpnConfig.TUN_IPV4_ADDRESS,
+        socksPort: Int = config.effectiveSocksPort,
+        mapDnsAddress: String = config.effectiveMapDnsAddress,
+        forceMapDns: Boolean = false
+    ): String {
         val ipv6Line = if (config.ipv6Enabled) {
             "  ipv6: '${VpnConfig.TUN_IPV6_ADDRESS}'\n"
         } else {
@@ -25,11 +31,11 @@ class HevTunnelManager(private val cacheDir: File) {
         return buildString {
             append("tunnel:\n")
             append("  mtu: ").append(config.effectiveTunMtu).append('\n')
-            append("  ipv4: '").append(VpnConfig.TUN_IPV4_ADDRESS).append("'\n")
+            append("  ipv4: '").append(tunIpv4).append("'\n")
             append(ipv6Line)
             append("\n")
             append("socks5:\n")
-            append("  port: ").append(config.effectiveSocksPort).append('\n')
+            append("  port: ").append(socksPort).append('\n')
             append("  address: '").append(VpnConfig.LOOPBACK_HOST).append("'\n")
             // hev-socks5-tunnel defaults `udp` to 'tcp' (proprietary 0x05 UDP-in-TCP) when omitted.
             // Psiphon's SOCKS5 server rejects 0x05 ("not 0x01 or 0x03"), so when Psiphon is final
@@ -39,13 +45,13 @@ class HevTunnelManager(private val cacheDir: File) {
             } else {
                 config.psiphonMode == PsiphonMode.WARP_TO_PSIPHON || config.psiphonMode == PsiphonMode.PSIPHON_ONLY
             }
-            if (config.enableUdp || isPsiphonOrSingBoxEgress) {
+            if (!forceMapDns && (config.enableUdp || isPsiphonOrSingBoxEgress)) {
                 append("  udp: 'udp'\n")
             }
             append("\n")
-            if (config.useMapDns) {
+            if (forceMapDns || config.useMapDns) {
                 append("mapdns:\n")
-                append("  address: ").append(config.effectiveMapDnsAddress).append('\n')
+                append("  address: ").append(mapDnsAddress).append('\n')
                 append("  port: 53\n")
                 append("  network: ").append(config.effectiveMapDnsNetwork).append('\n')
                 append("  netmask: ").append(config.effectiveMapDnsNetmask).append('\n')
@@ -66,7 +72,14 @@ class HevTunnelManager(private val cacheDir: File) {
         }
     }
 
-    fun start(config: VpnConfig, tunFd: Int): Result<Unit> {
+    fun start(
+        config: VpnConfig,
+        tunFd: Int,
+        tunIpv4: String = VpnConfig.TUN_IPV4_ADDRESS,
+        socksPort: Int = config.effectiveSocksPort,
+        mapDnsAddress: String = config.effectiveMapDnsAddress,
+        forceMapDns: Boolean = false
+    ): Result<Unit> {
         if (!TProxyService.ensureLoaded()) {
             val errDetails = TProxyService.loadError?.message
                 ?: "Native library libhev-socks5-tunnel.so initialization failed"
@@ -77,7 +90,10 @@ class HevTunnelManager(private val cacheDir: File) {
         stop()
 
         val yamlFile = File(cacheDir, "hev-tunnel.yml")
-        yamlFile.writeText(generateYamlConfig(config), Charsets.UTF_8)
+        yamlFile.writeText(
+            generateYamlConfig(config, tunIpv4, socksPort, mapDnsAddress, forceMapDns),
+            Charsets.UTF_8
+        )
         activeConfigFile = yamlFile
 
         val started = TProxyService.TProxyStartService(yamlFile.absolutePath, tunFd)

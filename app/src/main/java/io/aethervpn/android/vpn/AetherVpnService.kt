@@ -22,6 +22,12 @@ import io.aethervpn.android.core.IdentityRepository
 import io.aethervpn.android.core.PsiphonMode
 import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfileRepository
+import io.aethervpn.android.core.SoarConnectionMode
+import io.aethervpn.android.core.SoarEngineManager
+import io.aethervpn.android.core.SoarPhase
+import io.aethervpn.android.core.SoarProfileStore
+import io.aethervpn.android.core.SoarRuntimeState
+import io.aethervpn.android.core.SoarStateStore
 import io.aethervpn.android.core.SocketProtectorCallback
 import io.aethervpn.android.core.SplitTunnelMode
 import io.aethervpn.android.core.SplitTunnelPlanner
@@ -68,6 +74,8 @@ class AetherVpnService : VpnService() {
         const val ACTION_STOP_CORE = "io.aethervpn.android.ACTION_STOP_CORE"
         const val ACTION_START_TUN = "io.aethervpn.android.ACTION_START_TUN"
         const val ACTION_STOP_TUN = "io.aethervpn.android.ACTION_STOP_TUN"
+        const val ACTION_START_SOAR_VPN = "io.aethervpn.android.ACTION_START_SOAR_VPN"
+        const val ACTION_STOP_SOAR_VPN = "io.aethervpn.android.ACTION_STOP_SOAR_VPN"
 
         @Volatile
         private var instanceRef: WeakReference<AetherVpnService>? = null
@@ -155,6 +163,20 @@ class AetherVpnService : VpnService() {
             val intent = Intent(context, AetherVpnService::class.java).apply { action = ACTION_STOP_TUN }
             context.startService(intent)
         }
+
+        fun startSoarVpn(context: android.content.Context) {
+            val intent = Intent(context, AetherVpnService::class.java).apply { action = ACTION_START_SOAR_VPN }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun stopSoarVpn(context: android.content.Context) {
+            val intent = Intent(context, AetherVpnService::class.java).apply { action = ACTION_STOP_SOAR_VPN }
+            context.startService(intent)
+        }
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -162,6 +184,7 @@ class AetherVpnService : VpnService() {
 
     private lateinit var engineManager: AetherEngineManager
     private lateinit var singBoxManager: SingBoxEngineManager
+    private lateinit var soarManager: SoarEngineManager
     private lateinit var hevManager: HevTunnelManager
 
     private var tunInterface: ParcelFileDescriptor? = null
@@ -192,6 +215,7 @@ class AetherVpnService : VpnService() {
         NotificationHelper.ensureChannel(this)
         engineManager = AetherEngineManager(filesDir)
         singBoxManager = SingBoxEngineManager(filesDir)
+        soarManager = SoarEngineManager(filesDir)
         hevManager = HevTunnelManager(cacheDir)
     }
 
@@ -247,6 +271,39 @@ class AetherVpnService : VpnService() {
                 activeJob?.cancel()
                 activeJob = serviceScope.launch {
                     stopTunStandalone()
+                }
+                return START_NOT_STICKY
+            }
+
+            ACTION_START_SOAR_VPN -> {
+                userRequestedStop = false
+                SoarStateStore.update(
+                    SoarRuntimeState(
+                        phase = SoarPhase.STARTING,
+                        mode = SoarConnectionMode.VPN_FULL_DEVICE
+                    )
+                )
+                startForegroundCompat("Soar DNS Tunnel VPN", "Starting TUN + Soar…")
+                activeJob?.cancel()
+                reconnectJob?.cancel()
+                activeJob = serviceScope.launch {
+                    connectSoarVpnPipeline()
+                }
+                return START_STICKY
+            }
+
+            ACTION_STOP_SOAR_VPN -> {
+                userRequestedStop = true
+                SoarStateStore.update(
+                    SoarStateStore.state.value.copy(phase = SoarPhase.DISCONNECTING)
+                )
+                activeJob?.cancel()
+                reconnectJob?.cancel()
+                activeJob = serviceScope.launch {
+                    teardownAll(clearError = true)
+                    SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
+                    stopForegroundCompat()
+                    stopSelf()
                 }
                 return START_NOT_STICKY
             }
@@ -1135,6 +1192,129 @@ class AetherVpnService : VpnService() {
         return builder.establish()
     }
 
+    private suspend fun connectSoarVpnPipeline() {
+        val profile = SoarProfileStore.load(filesDir).activeProfile
+        if (profile == null) {
+            SoarStateStore.reportError("No active Soar profile selected", SoarConnectionMode.VPN_FULL_DEVICE)
+            teardownAll(clearError = false)
+            stopForegroundCompat()
+            stopSelf()
+            return
+        }
+
+        val config = VpnConfig.load(this)
+        lifecycleMutex.withLock {
+            hevManager.stop()
+            closeTun()
+            stopEnginesInReverseOrder()
+
+            SoarStateStore.update(
+                SoarRuntimeState(
+                    phase = SoarPhase.STARTING,
+                    mode = SoarConnectionMode.VPN_FULL_DEVICE,
+                    profileName = profile.name
+                )
+            )
+            VpnStateStore.update(
+                TunnelSnapshot(
+                    phase = TunnelPhase.STARTING_CORE,
+                    protocolLabel = "Soar DNS Tunnel",
+                    gatewayLabel = profile.domain
+                )
+            )
+
+            val soarResult = soarManager.start(
+                context = this@AetherVpnService,
+                profile = profile,
+                mode = SoarConnectionMode.VPN_FULL_DEVICE
+            )
+            if (soarResult.isFailure) {
+                val msg = soarResult.exceptionOrNull()?.message ?: "Soar failed to start"
+                SoarStateStore.reportError(msg, SoarConnectionMode.VPN_FULL_DEVICE)
+                VpnStateStore.reportError(msg, "Soar DNS Tunnel")
+                stopForegroundCompat()
+                stopSelf()
+                return
+            }
+            isCoreRunning = true
+
+            val pfd = establishSoarTun(config) ?: run {
+                val msg = "Soar TUN interface establish() returned null"
+                soarManager.stop()
+                isCoreRunning = false
+                SoarStateStore.reportError(msg, SoarConnectionMode.VPN_FULL_DEVICE)
+                VpnStateStore.reportError(msg, "Soar DNS Tunnel")
+                stopForegroundCompat()
+                stopSelf()
+                return
+            }
+            tunInterface = pfd
+
+            val hevResult = hevManager.start(
+                config = config,
+                tunFd = pfd.fd,
+                tunIpv4 = SoarEngineManager.TUN_IPV4_ADDRESS,
+                socksPort = SoarEngineManager.DEFAULT_LISTEN_PORT,
+                mapDnsAddress = SoarEngineManager.TUN_MAPDNS_ADDRESS,
+                forceMapDns = true
+            )
+            if (hevResult.isFailure) {
+                val msg = hevResult.exceptionOrNull()?.message ?: "HEV tunnel failed for Soar"
+                closeTun()
+                soarManager.stop()
+                isCoreRunning = false
+                SoarStateStore.reportError(msg, SoarConnectionMode.VPN_FULL_DEVICE)
+                VpnStateStore.reportError(msg, "Soar DNS Tunnel")
+                stopForegroundCompat()
+                stopSelf()
+                return
+            }
+
+            isTunRunning = true
+            val listenAddr = "${SoarEngineManager.DEFAULT_LISTEN_HOST}:${SoarEngineManager.DEFAULT_LISTEN_PORT}"
+            SoarStateStore.update(
+                SoarRuntimeState(
+                    phase = SoarPhase.CONNECTED,
+                    mode = SoarConnectionMode.VPN_FULL_DEVICE,
+                    profileName = profile.name,
+                    listenAddress = listenAddr
+                )
+            )
+            VpnStateStore.update(
+                TunnelSnapshot(
+                    phase = TunnelPhase.VPN_CONNECTED,
+                    protocolLabel = "Soar DNS (${profile.soarSettings.transport.uppercase()})",
+                    gatewayLabel = profile.domain,
+                    connectedSinceMs = System.currentTimeMillis(),
+                    coreActive = true,
+                    tunActive = true
+                )
+            )
+            startForegroundCompat(
+                "Soar VPN Active",
+                "TUN (${SoarEngineManager.TUN_IPV4_ADDRESS}) -> Soar ($listenAddr)"
+            )
+        }
+    }
+
+    private fun establishSoarTun(config: VpnConfig): ParcelFileDescriptor? {
+        val builder = Builder()
+            .setSession("Aether Soar VPN")
+            .setMtu(config.effectiveTunMtu)
+            .addAddress(SoarEngineManager.TUN_IPV4_ADDRESS, SoarEngineManager.TUN_IPV4_PREFIX)
+            .addRoute("0.0.0.0", 0)
+            .addDnsServer(SoarEngineManager.TUN_MAPDNS_ADDRESS)
+            .setBlocking(false)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setMetered(false)
+        }
+
+        // Excludes selfPackageName (io.aethervpn.android) so libsoar.so UDP/TCP:53 bypasses TUN
+        applyPerAppRouting(builder, config)
+        return builder.establish()
+    }
+
     private fun applyPerAppRouting(builder: Builder, config: VpnConfig) {
         val plan = SplitTunnelPlanner.plan(
             mode = config.splitTunnelMode,
@@ -1325,11 +1505,15 @@ class AetherVpnService : VpnService() {
             runCatching { setUnderlyingNetworks(null) }
             if (clearError) {
                 VpnStateStore.resetDisconnected()
+                if (SoarStateStore.state.value.mode == SoarConnectionMode.VPN_FULL_DEVICE) {
+                    SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
+                }
             }
         }
     }
 
     private fun stopEnginesInReverseOrder() {
+        soarManager.stop()
         if (lastSingBoxStartedFirst) {
             // Sing-box was upstream, Aether was downstream -> stop downstream Aether first
             engineManager.stop()

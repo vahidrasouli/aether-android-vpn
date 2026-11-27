@@ -97,6 +97,17 @@ class MainActivity : AppCompatActivity() {
     private var logsJob: Job? = null
     private var debounceSaveJob: Job? = null
     private var currentTabId: Int = R.id.nav_home
+    private lateinit var soarTabController: SoarTabController
+
+    private val soarVpnPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            AetherVpnService.startSoarVpn(this)
+        } else {
+            Toast.makeText(this, R.string.error_vpn_permission_denied, Toast.LENGTH_SHORT).show()
+        }
+    }
     private var diagnosticsExpanded = false
 
     @Volatile
@@ -149,6 +160,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setupNavigation()
+        soarTabController = SoarTabController(this, binding) { prepIntent ->
+            soarVpnPermissionLauncher.launch(prepIntent)
+        }
+        soarTabController.init()
         setupSpinners()
         setupAutoSaveListeners()
         setupLogRecyclerView()
@@ -263,10 +278,13 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             currentTabId = item.itemId
             binding.sectionHome.visibility = if (currentTabId == R.id.nav_home) View.VISIBLE else View.GONE
+            binding.sectionSoar.visibility = if (currentTabId == R.id.nav_soar) View.VISIBLE else View.GONE
             binding.sectionSettings.visibility = if (currentTabId == R.id.nav_settings) View.VISIBLE else View.GONE
             binding.sectionLogs.visibility = if (currentTabId == R.id.nav_logs) View.VISIBLE else View.GONE
 
-            if (currentTabId == R.id.nav_logs) {
+            if (currentTabId == R.id.nav_soar) {
+                soarTabController.reloadStore()
+            } else if (currentTabId == R.id.nav_logs) {
                 refreshIdentityAndDiagnostics()
                 if (userAutoScrollEnabled && logAdapter.itemCount > 0) {
                     binding.rvLogs.post {

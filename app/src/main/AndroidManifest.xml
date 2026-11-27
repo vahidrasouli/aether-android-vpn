@@ -76,6 +76,15 @@
                 android:value="vpn_tunnel" />
         </service>
 
+        <service
+            android:name=".vpn.SoarProxyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="soar_socks5_proxy" />
+        </service>
+
         <receiver
             android:name=".core.UpdateInstallReceiver"
             android:exported="false" />

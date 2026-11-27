@@ -5,8 +5,11 @@
     <string name="notification_channel_desc">Persistent foreground status while the VPN tunnel is active</string>
 
     <string name="nav_home">Home</string>
+    <string name="nav_soar">Soar</string>
     <string name="nav_settings">Settings</string>
     <string name="nav_logs">Logs</string>
+    <string name="soar_notification_title">Soar DNS Tunnel</string>
+    <string name="action_stop">Stop</string>
 
     <string name="status_disconnected">Disconnected</string>
     <string name="status_connecting">Connecting to WARP…</string>

@@ -129,6 +129,17 @@ jobs:
           SINGBOX_VERSION: "${{ env.SINGBOX_VERSION }}"
         run: bash scripts/build-singbox.sh
 
+      - name: Cache compiled ARM64 libsoar.so
+        id: cache-soar
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/jniLibs/arm64-v8a/libsoar.so
+          key: soar-${{ hashFiles('scripts/build-soar.sh', 'soar-wrapper/main.go', 'soar-wrapper/go.mod') }}-go-1.26.3-arm64-v1
+
+      - name: Build ARM64 soar DNS tunnel wrapper (Go layer)
+        if: steps.cache-soar.outputs.cache-hit != 'true'
+        run: bash scripts/build-soar.sh
+
       - name: Fail-fast smoke test Psiphon TLS initialization
         run: |
           echo "[*] Running host-native ConsoleClient -version smoke test to verify psiphon-tls init..."
@@ -150,11 +161,13 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
           test -s app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so
           test -s app/src/main/jniLibs/arm64-v8a/libsing-box.so
+          test -s app/src/main/jniLibs/arm64-v8a/libsoar.so
           file app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libc++_shared.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libsing-box.so | grep -E -i -q "aarch64"
+          file app/src/main/jniLibs/arm64-v8a/libsoar.so | grep -E -i -q "aarch64"
           echo "ARM64 shared libraries verified successfully."
 
       - name: Verify 16KB ELF alignment and DT_NEEDED dependency resolution
@@ -174,7 +187,7 @@ jobs:
 
           echo "=== 2. Verifying DT_NEEDED dependencies for all packaged shared libraries ==="
           ALLOWED_SYSTEM_LIBS="libc.so libm.so libdl.so liblog.so libz.so libandroid.so libjnigraphics.so libEGL.so libGLESv2.so libOpenSLES.so libmediandk.so"
-          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so libpsiphon-tunnel-core.so libsing-box.so"
+          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so libpsiphon-tunnel-core.so libsing-box.so libsoar.so"
           for so in app/src/main/jniLibs/arm64-v8a/*.so; do
             echo "Checking dependencies of $(basename "$so")..."
             NEEDED=$(readelf -d "$so" 2>/dev/null | grep "(NEEDED)" | sed -E 's/.*\[(.*)\]/\1/' || true)
@@ -260,6 +273,7 @@ jobs:
           unzip -l "$APK" | grep "lib/arm64-v8a/libc++_shared.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libpsiphon-tunnel-core.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libsing-box.so"
+          unzip -l "$APK" | grep "lib/arm64-v8a/libsoar.so"
           if unzip -l "$APK" | grep -E "lib/(armeabi|x86|x86_64)/"; then
             echo "ERROR: Unwanted ABIs packaged into APK"
             exit 1
@@ -298,6 +312,17 @@ jobs:
                   print("ERROR: libsing-box.so invalid ELF header")
                   sys.exit(1)
               print(f"SUCCESS: libsing-box.so inside APK verified (size={sb_info.file_size} bytes, ELFCLASS64, EM_AARCH64).")
+
+              soar_info = z.getinfo('lib/arm64-v8a/libsoar.so')
+              if soar_info.file_size == 0:
+                  print("ERROR: libsoar.so inside APK is empty!")
+                  sys.exit(1)
+              soar_raw = z.read('lib/arm64-v8a/libsoar.so')
+              soar_hdr = soar_raw[:64]
+              if soar_hdr[:4] != b'\x7fELF' or soar_hdr[4] != 2 or int.from_bytes(soar_hdr[18:20], 'little') != 0xb7:
+                  print("ERROR: libsoar.so invalid ELF header")
+                  sys.exit(1)
+              print(f"SUCCESS: libsoar.so inside APK verified (size={soar_info.file_size} bytes, ELFCLASS64, EM_AARCH64).")
           EOF
 
           echo "APK ARM64-v8a packaging verified successfully."
