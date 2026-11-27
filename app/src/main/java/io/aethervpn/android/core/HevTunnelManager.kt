@@ -21,6 +21,8 @@ class HevTunnelManager(private val cacheDir: File) {
         tunIpv4: String = VpnConfig.TUN_IPV4_ADDRESS,
         socksPort: Int = config.effectiveSocksPort,
         mapDnsAddress: String = config.effectiveMapDnsAddress,
+        mapDnsNetwork: String = config.effectiveMapDnsNetwork,
+        mapDnsNetmask: String = config.effectiveMapDnsNetmask,
         forceMapDns: Boolean = false
     ): String {
         val ipv6Line = if (config.ipv6Enabled) {
@@ -53,8 +55,8 @@ class HevTunnelManager(private val cacheDir: File) {
                 append("mapdns:\n")
                 append("  address: ").append(mapDnsAddress).append('\n')
                 append("  port: 53\n")
-                append("  network: ").append(config.effectiveMapDnsNetwork).append('\n')
-                append("  netmask: ").append(config.effectiveMapDnsNetmask).append('\n')
+                append("  network: ").append(mapDnsNetwork).append('\n')
+                append("  netmask: ").append(mapDnsNetmask).append('\n')
                 append("  cache-size: 10000\n")
                 append("\n")
             }
@@ -78,6 +80,8 @@ class HevTunnelManager(private val cacheDir: File) {
         tunIpv4: String = VpnConfig.TUN_IPV4_ADDRESS,
         socksPort: Int = config.effectiveSocksPort,
         mapDnsAddress: String = config.effectiveMapDnsAddress,
+        mapDnsNetwork: String = config.effectiveMapDnsNetwork,
+        mapDnsNetmask: String = config.effectiveMapDnsNetmask,
         forceMapDns: Boolean = false
     ): Result<Unit> {
         if (!TProxyService.ensureLoaded()) {
@@ -91,7 +95,7 @@ class HevTunnelManager(private val cacheDir: File) {
 
         val yamlFile = File(cacheDir, "hev-tunnel.yml")
         yamlFile.writeText(
-            generateYamlConfig(config, tunIpv4, socksPort, mapDnsAddress, forceMapDns),
+            generateYamlConfig(config, tunIpv4, socksPort, mapDnsAddress, mapDnsNetwork, mapDnsNetmask, forceMapDns),
             Charsets.UTF_8
         )
         activeConfigFile = yamlFile

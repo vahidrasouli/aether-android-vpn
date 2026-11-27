@@ -26,6 +26,7 @@ import io.aethervpn.android.core.SoarConnectionMode
 import io.aethervpn.android.core.SoarEngineManager
 import io.aethervpn.android.core.SoarPhase
 import io.aethervpn.android.core.SoarProfileStore
+import io.aethervpn.android.core.SoarResolverPackStore
 import io.aethervpn.android.core.SoarRuntimeState
 import io.aethervpn.android.core.SoarStateStore
 import io.aethervpn.android.core.SocketProtectorCallback
@@ -179,6 +180,27 @@ class AetherVpnService : VpnService() {
         fun stopSoarVpn(context: android.content.Context) {
             val intent = Intent(context, AetherVpnService::class.java).apply { action = ACTION_STOP_SOAR_VPN }
             context.startService(intent)
+        }
+
+        internal fun soarDisallowedPackages(config: VpnConfig, selfPackageName: String): Set<String> {
+            val out = linkedSetOf(selfPackageName)
+            if (config.splitTunnelMode == SplitTunnelMode.BYPASS_SELECTED) {
+                config.selectedPackages.map { it.trim() }.filter { it.isNotEmpty() }.forEach { out.add(it) }
+            }
+            config.proxyBypassApps.map { it.trim() }.filter { it.isNotEmpty() }.forEach { out.add(it) }
+            return out
+        }
+
+        internal fun generateSoarHevYaml(hevManager: HevTunnelManager, config: VpnConfig): String {
+            return hevManager.generateYamlConfig(
+                config = config,
+                tunIpv4 = SoarEngineManager.TUN_IPV4_ADDRESS,
+                socksPort = SoarEngineManager.DEFAULT_LISTEN_PORT,
+                mapDnsAddress = SoarEngineManager.TUN_MAPDNS_ADDRESS,
+                mapDnsNetwork = SoarEngineManager.TUN_MAPDNS_NETWORK,
+                mapDnsNetmask = SoarEngineManager.TUN_MAPDNS_NETMASK,
+                forceMapDns = true
+            )
         }
 
         /**
@@ -1260,10 +1282,12 @@ class AetherVpnService : VpnService() {
                 )
             )
 
+            val activePack = SoarResolverPackStore.load(filesDir).activePack
             val soarResult = soarManager.start(
                 context = this@AetherVpnService,
                 profile = profile,
-                mode = SoarConnectionMode.VPN_FULL_DEVICE
+                mode = SoarConnectionMode.VPN_FULL_DEVICE,
+                activePack = activePack
             )
             if (soarResult.isFailure) {
                 val msg = soarResult.exceptionOrNull()?.message ?: "Soar failed to start"
@@ -1287,12 +1311,18 @@ class AetherVpnService : VpnService() {
             }
             tunInterface = pfd
 
+            DiagnosticsLog.record(
+                "Tunnel",
+                "Soar HEV mapdns: ${SoarEngineManager.TUN_MAPDNS_ADDRESS}:53 (${SoarEngineManager.TUN_MAPDNS_NETWORK}/${SoarEngineManager.TUN_MAPDNS_NETMASK}) -> 127.0.0.1:${SoarEngineManager.DEFAULT_LISTEN_PORT}"
+            )
             val hevResult = hevManager.start(
                 config = config,
                 tunFd = pfd.fd,
                 tunIpv4 = SoarEngineManager.TUN_IPV4_ADDRESS,
                 socksPort = SoarEngineManager.DEFAULT_LISTEN_PORT,
                 mapDnsAddress = SoarEngineManager.TUN_MAPDNS_ADDRESS,
+                mapDnsNetwork = SoarEngineManager.TUN_MAPDNS_NETWORK,
+                mapDnsNetmask = SoarEngineManager.TUN_MAPDNS_NETMASK,
                 forceMapDns = true
             )
             if (hevResult.isFailure) {
@@ -1347,8 +1377,18 @@ class AetherVpnService : VpnService() {
             builder.setMetered(false)
         }
 
-        // Excludes selfPackageName (io.aethervpn.android) so libsoar.so UDP/TCP:53 bypasses TUN
-        applyPerAppRouting(builder, config)
+        // Explicitly disallow selfPackageName (io.aethervpn.android) so libsoar.so's outbound
+        // UDP/TCP port 53 traffic to DNS resolvers bypasses TUN and avoids any routing loop.
+        soarDisallowedPackages(config, packageName).forEach { pkg ->
+            val res = runCatching { builder.addDisallowedApplication(pkg) }
+            if (res.isFailure && pkg == packageName) {
+                DiagnosticsLog.record("Tunnel", "Warning: could not exclude $pkg: ${res.exceptionOrNull()?.message}")
+            }
+        }
+        DiagnosticsLog.record(
+            "Tunnel",
+            "Soar TUN bypass: addDisallowedApplication($packageName) applied"
+        )
         return builder.establish()
     }
 

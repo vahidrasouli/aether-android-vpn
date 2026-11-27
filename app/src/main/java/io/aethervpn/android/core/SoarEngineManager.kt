@@ -79,6 +79,7 @@ class SoarEngineManager(private val privateDataDir: File) {
         context: Context,
         profile: SoarProfile,
         mode: SoarConnectionMode,
+        activePack: ResolverPack? = null,
         listenHost: String = DEFAULT_LISTEN_HOST,
         listenPort: Int = DEFAULT_LISTEN_PORT,
         readinessTimeoutMs: Long = 10_000L
@@ -96,12 +97,18 @@ class SoarEngineManager(private val privateDataDir: File) {
 
         val stateDir = File(privateDataDir, "soar").apply { mkdirs() }
         val configFile = File(stateDir, "soar-config.json")
-        configFile.writeText(buildRuntimeConfigJson(profile), Charsets.UTF_8)
+        configFile.writeText(buildRuntimeConfigJson(profile, activePack), Charsets.UTF_8)
         activeConfigFile = configFile
 
         val listenAddr = "$listenHost:$listenPort"
         val args = buildCommandArgs(binary.absolutePath, configFile.absolutePath, listenAddr)
         DiagnosticsLog.record("Chain", buildChainLog(mode, profile, listenHost, listenPort))
+        if (activePack != null && activePack.resolvers.isNotEmpty()) {
+            DiagnosticsLog.record(
+                "Soar",
+                "Injecting Resolver Pack '${activePack.name}' (${activePack.resolvers.size} resolvers)"
+            )
+        }
         DiagnosticsLog.record("Soar", "Launching libsoar.so on $listenAddr (domain=${profile.domain})")
 
         val pb = ProcessBuilder(args)
@@ -184,7 +191,9 @@ class SoarEngineManager(private val privateDataDir: File) {
         const val DEFAULT_LISTEN_PORT = 1829
         const val TUN_IPV4_ADDRESS = "172.19.0.1"
         const val TUN_IPV4_PREFIX = 30
-        const val TUN_MAPDNS_ADDRESS = "172.19.0.2"
+        const val TUN_MAPDNS_ADDRESS = "198.18.0.2"
+        const val TUN_MAPDNS_NETWORK = "198.18.0.0"
+        const val TUN_MAPDNS_NETMASK = "255.254.0.0"
 
         fun findSoarBinary(context: Context): File? {
             val nativeDir = context.applicationInfo.nativeLibraryDir ?: return null
@@ -192,13 +201,18 @@ class SoarEngineManager(private val privateDataDir: File) {
             return if (candidate.exists() && candidate.canExecute()) candidate else null
         }
 
-        fun buildRuntimeConfigJson(profile: SoarProfile): String {
+        fun buildRuntimeConfigJson(profile: SoarProfile, activePack: ResolverPack? = null): String {
             val s = profile.soarSettings.normalized()
+            val effectiveResolvers = if (activePack != null && activePack.resolvers.isNotEmpty()) {
+                activePack.resolvers
+            } else {
+                profile.resolvers
+            }
             return JSONObject().apply {
                 put("domain", profile.domain.trim())
                 put("public_key", profile.publicKey.trim())
                 put("resolvers", JSONArray().apply {
-                    profile.resolvers.forEach { put(it) }
+                    effectiveResolvers.forEach { put(it) }
                 })
                 put("transport", s.transport)
                 put("discovery", s.discovery)
@@ -246,7 +260,7 @@ class SoarEngineManager(private val privateDataDir: File) {
                 SoarConnectionMode.PROXY_ONLY ->
                     "Local SOCKS5 ($listenHost:$listenPort) -> Soar -> DNS (${s.transport}, $countryLabel)"
                 SoarConnectionMode.VPN_FULL_DEVICE ->
-                    "TUN ($TUN_IPV4_ADDRESS) -> HEV -> Soar ($listenHost:$listenPort) -> DNS (${s.transport}, $countryLabel)"
+                    "TUN ($TUN_IPV4_ADDRESS, mapdns=$TUN_MAPDNS_ADDRESS) -> HEV -> Soar ($listenHost:$listenPort) -> DNS (${s.transport}, $countryLabel)"
             }
         }
 

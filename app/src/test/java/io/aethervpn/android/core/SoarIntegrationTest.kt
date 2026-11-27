@@ -1,12 +1,23 @@
 package io.aethervpn.android.core
 
+import io.aethervpn.android.vpn.AetherVpnService
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
+import java.util.concurrent.atomic.AtomicInteger
 
 class SoarIntegrationTest {
 
@@ -155,7 +166,7 @@ class SoarIntegrationTest {
 
         val vpnChain = SoarEngineManager.buildChainLog(SoarConnectionMode.VPN_FULL_DEVICE, profile)
         assertEquals(
-            "TUN (172.19.0.1) -> HEV -> Soar (127.0.0.1:1829) -> DNS (tcp, IR)",
+            "TUN (172.19.0.1, mapdns=198.18.0.2) -> HEV -> Soar (127.0.0.1:1829) -> DNS (tcp, IR)",
             vpnChain
         )
 
@@ -184,5 +195,185 @@ class SoarIntegrationTest {
         assertEquals(1, afterDelete.profiles.size)
         assertEquals(p2.id, afterDelete.activeProfile?.id)
         assertFalse(afterDelete.profiles.any { it.id == p1.id })
+    }
+
+    @Test
+    fun `SoarResolverPackStore supports CRUD and auto-extraction from soar import`() {
+        val dir = tempFolder.newFolder("soar_packs")
+        val imported = sampleProfile()
+
+        val afterExtract = SoarResolverPackStore.extractDefaultPackFromProfile(dir, imported)
+        assertEquals(1, afterExtract.packs.size)
+        val defaultPack = afterExtract.packs.first()
+        assertEquals("WhiteDNS Public Default", defaultPack.name)
+        assertEquals(listOf("8.8.8.8:53", "1.1.1.1:53"), defaultPack.resolvers)
+        assertEquals(defaultPack.id, afterExtract.activePackId)
+
+        // Importing a profile without resolvers is a no-op
+        val emptyProfile = imported.copy(id = "empty", name = "Empty", resolvers = emptyList())
+        val afterEmpty = SoarResolverPackStore.extractDefaultPackFromProfile(dir, emptyProfile)
+        assertEquals(1, afterEmpty.packs.size)
+
+        // Upsert, rename, export, and delete
+        val customPack = ResolverPack(id = "pack-2", name = "Resolver 1", resolvers = listOf("9.9.9.9", "4.2.2.4"))
+        var state = SoarResolverPackStore.upsertPack(dir, customPack, setActive = true)
+        assertEquals(2, state.packs.size)
+        assertEquals("pack-2", state.activePack?.id)
+
+        state = SoarResolverPackStore.renamePack(dir, "pack-2", "Iran Clean DNS")
+        assertEquals("Iran Clean DNS", state.activePack?.name)
+        assertEquals("9.9.9.9\n4.2.2.4", SoarResolverPackStore.exportPackToText(state.activePack!!))
+
+        state = SoarResolverPackStore.deletePack(dir, "pack-2")
+        assertEquals(1, state.packs.size)
+        assertNull(state.activePackId)
+    }
+
+    @Test
+    fun `SoarEngineManager injects active ResolverPack into runtime JSON config`() {
+        val profile = sampleProfile()
+        val pack = ResolverPack(
+            id = "clean-pack",
+            name = "Clean 3",
+            resolvers = listOf("9.9.9.9", "149.112.112.112", "4.2.2.1")
+        )
+
+        val jsonWithPack = JSONObject(SoarEngineManager.buildRuntimeConfigJson(profile, pack))
+        val arr = jsonWithPack.getJSONArray("resolvers")
+        assertEquals(3, arr.length())
+        assertEquals("9.9.9.9", arr.getString(0))
+        assertEquals("149.112.112.112", arr.getString(1))
+        assertEquals("4.2.2.1", arr.getString(2))
+
+        val jsonWithoutPack = JSONObject(SoarEngineManager.buildRuntimeConfigJson(profile, null))
+        val fallbackArr = jsonWithoutPack.getJSONArray("resolvers")
+        assertEquals(2, fallbackArr.length())
+        assertEquals("8.8.8.8:53", fallbackArr.getString(0))
+    }
+
+    @Test
+    fun `SoarResolverScanner parses txt lines, clamps concurrency, and validates DNS responses`() {
+        val rawTxt = """
+            # Comment line
+            // Another comment
+            
+            8.8.8.8
+            1.1.1.1:53 # inline comment
+            999.1.1.1
+            not-an-ip
+            8.8.8.8
+            9.9.9.9, 4.2.2.4
+        """.trimIndent()
+
+        val parsed = SoarResolverScanner.parseResolverStream(
+            ByteArrayInputStream(rawTxt.toByteArray(Charsets.UTF_8))
+        )
+        assertEquals(listOf("8.8.8.8", "1.1.1.1", "9.9.9.9", "4.2.2.4"), parsed)
+
+        assertEquals(1, SoarResolverScanner.clampConcurrency(0))
+        assertEquals(25, SoarResolverScanner.clampConcurrency(25))
+        assertEquals(100, SoarResolverScanner.clampConcurrency(500))
+
+        // DNS packet builder + NOERROR vs NXDOMAIN response validation
+        val txId = 0x1234
+        val query = SoarResolverScanner.buildDnsQueryPacket(txId, "p1.t.example.org")
+        assertTrue(query.size > 12)
+        assertEquals(0x12.toByte(), query[0])
+        assertEquals(0x34.toByte(), query[1])
+
+        // Valid NOERROR response
+        val validResp = byteArrayOf(
+            0x12, 0x34, // txId
+            0x81.toByte(), 0x80.toByte(), // QR=1, RCODE=0
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        )
+        assertTrue(SoarResolverScanner.isValidDnsZoneResponse(validResp, validResp.size, txId))
+
+        // NXDOMAIN (RCODE=3) rejected
+        val nxDomainResp = validResp.copyOf().apply { this[3] = 0x83.toByte() }
+        assertFalse(SoarResolverScanner.isValidDnsZoneResponse(nxDomainResp, nxDomainResp.size, txId))
+
+        // Wrong TXID rejected
+        assertFalse(SoarResolverScanner.isValidDnsZoneResponse(validResp, validResp.size, 0x9999))
+    }
+
+    @Test
+    fun `SoarResolverScanner pause and resume transitions are lossless`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val firstBatchGate = CompletableDeferred<Unit>()
+            val resumeBatchGate = CompletableDeferred<Unit>()
+            val calls = AtomicInteger(0)
+
+            val scanner = SoarResolverScanner(
+                scope = scope,
+                probeFn = { ip, _, _ ->
+                    val n = calls.incrementAndGet()
+                    if (n == 2) firstBatchGate.complete(Unit)
+                    if (n > 2) resumeBatchGate.await()
+                    ip == "1.1.1.1" || ip == "8.8.8.8" || ip == "9.9.9.9"
+                }
+            )
+
+            val ips = listOf("1.1.1.1", "2.2.2.2", "8.8.8.8", "4.4.4.4", "9.9.9.9")
+            scanner.start(ips, targetDomain = "t.example.org", concurrency = 1)
+
+            firstBatchGate.await()
+            scanner.pause()
+            delay(50)
+
+            val pausedState = scanner.state.value
+            assertEquals(ScannerStatus.PAUSED, pausedState.status)
+            assertTrue(pausedState.healthyCount >= 1)
+            assertTrue(pausedState.scannedCount < ips.size)
+
+            resumeBatchGate.complete(Unit)
+            scanner.resume()
+
+            var attempts = 0
+            while (scanner.state.value.status != ScannerStatus.COMPLETED && attempts < 40) {
+                delay(25)
+                attempts++
+            }
+
+            val finalState = scanner.state.value
+            assertEquals(ScannerStatus.COMPLETED, finalState.status)
+            assertEquals(5, finalState.totalCount)
+            assertEquals(5, finalState.scannedCount)
+            assertEquals(3, finalState.healthyCount)
+            assertEquals(2, finalState.rejectedCount)
+            assertEquals(100, finalState.progressPercent)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `AetherVpnService Soar VPN mode disallows self package and enables HEV mapdns`() {
+        val selfPkg = "io.aethervpn.android"
+        val configs = listOf(
+            VpnConfig(splitTunnelMode = SplitTunnelMode.ALL_APPS),
+            VpnConfig(splitTunnelMode = SplitTunnelMode.ONLY_SELECTED, selectedPackages = setOf("com.whatsapp")),
+            VpnConfig(splitTunnelMode = SplitTunnelMode.BYPASS_SELECTED, selectedPackages = setOf("com.example.bank"))
+        )
+        for (cfg in configs) {
+            val disallowed = AetherVpnService.soarDisallowedPackages(cfg, selfPkg)
+            assertTrue("Self package must always be disallowed in Soar VPN mode", selfPkg in disallowed)
+        }
+        assertTrue(
+            "com.example.bank" in AetherVpnService.soarDisallowedPackages(configs[2], selfPkg)
+        )
+
+        val hevManager = HevTunnelManager(tempFolder.newFolder("hev_soar"))
+        val yaml = AetherVpnService.generateSoarHevYaml(
+            hevManager,
+            VpnConfig(mapDnsEnabled = false, customDns = "8.8.8.8")
+        )
+        assertTrue(yaml.contains("port: 1829"))
+        assertTrue(yaml.contains("address: '127.0.0.1'"))
+        assertTrue("Soar VPN must force mapdns enabled", yaml.contains("mapdns:"))
+        assertTrue(yaml.contains("address: 198.18.0.2"))
+        assertTrue(yaml.contains("network: 198.18.0.0"))
+        assertTrue(yaml.contains("netmask: 255.254.0.0"))
     }
 }

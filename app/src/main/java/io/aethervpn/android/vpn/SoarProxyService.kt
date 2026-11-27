@@ -15,6 +15,7 @@ import io.aethervpn.android.core.SoarConnectionMode
 import io.aethervpn.android.core.SoarEngineManager
 import io.aethervpn.android.core.SoarPhase
 import io.aethervpn.android.core.SoarProfileStore
+import io.aethervpn.android.core.SoarResolverPackStore
 import io.aethervpn.android.core.SoarRuntimeState
 import io.aethervpn.android.core.SoarStateStore
 import io.aethervpn.android.ui.MainActivity
@@ -84,10 +85,12 @@ class SoarProxyService : Service() {
             )
         )
 
+        val activePack = SoarResolverPackStore.load(filesDir).activePack
         val result = soarEngine.start(
             context = this@SoarProxyService,
             profile = profile,
-            mode = SoarConnectionMode.PROXY_ONLY
+            mode = SoarConnectionMode.PROXY_ONLY,
+            activePack = activePack
         )
         if (result.isFailure) {
             val msg = result.exceptionOrNull()?.message ?: "Failed to start Soar proxy"
