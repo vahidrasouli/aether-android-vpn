@@ -15,9 +15,7 @@ import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
@@ -40,6 +38,7 @@ import io.aethervpn.android.databinding.DialogSoarProfileBinding
 import io.aethervpn.android.databinding.ItemSoarProfileBinding
 import io.aethervpn.android.vpn.AetherVpnService
 import io.aethervpn.android.vpn.SoarProxyService
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class SoarTabController(
@@ -154,10 +153,8 @@ class SoarTabController(
 
     private fun observeRuntimeState() {
         activity.lifecycleScope.launch {
-            activity.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                SoarStateStore.state.collect { state ->
-                    renderRuntimeState(state)
-                }
+            SoarStateStore.state.collectLatest { state ->
+                renderRuntimeState(state)
             }
         }
     }
