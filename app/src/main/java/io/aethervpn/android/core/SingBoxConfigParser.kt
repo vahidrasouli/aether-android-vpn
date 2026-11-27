@@ -177,6 +177,8 @@ object SingBoxConfigParser {
         upstreamSocksPort: Int? = null,
         config: VpnConfig = VpnConfig()
     ): Result<String> = runCatching {
+        val effectiveUpstreamSocksPort = upstreamSocksPort
+            ?: if (config.isByeDpiActive) VpnConfig.BYEDPI_SOCKS_PORT else null
         val parsed = parse(rawUriOrJson).getOrThrow()
         val root = if (parsed.isFullConfig) {
             JSONObject(parsed.outboundOrFullJson.toString()).apply {
@@ -198,7 +200,7 @@ object SingBoxConfigParser {
                 optJSONObject("route")?.put("auto_detect_interface", false)
                 optJSONObject("dns")?.put("strategy", "ipv4_only")
 
-                if (upstreamSocksPort != null) {
+                if (effectiveUpstreamSocksPort != null) {
                     val existingOutbounds = optJSONArray("outbounds") ?: JSONArray()
                     val finalTag = optJSONObject("route")?.optString("final")?.takeIf { it.isNotBlank() }
                     val newOutbounds = JSONArray()
@@ -227,7 +229,7 @@ object SingBoxConfigParser {
                             }
                         }
                     }
-                    newOutbounds.put(buildUpstreamSocksOutbound(upstreamSocksPort))
+                    newOutbounds.put(buildUpstreamSocksOutbound(effectiveUpstreamSocksPort))
                     put("outbounds", newOutbounds)
                 } else if (config.sbTlsFragment) {
                     val existingOutbounds = optJSONArray("outbounds")
@@ -248,7 +250,7 @@ object SingBoxConfigParser {
                 if (config.sbTcpFastOpen) {
                     put("tcp_fast_open", true)
                 }
-                if (upstreamSocksPort != null) {
+                if (effectiveUpstreamSocksPort != null) {
                     put("detour", UPSTREAM_SOCKS_TAG)
                 }
                 if (optString("type").equals("shadowsocks", ignoreCase = true) && has("method")) {
@@ -310,8 +312,8 @@ object SingBoxConfigParser {
                 })
                 put("outbounds", JSONArray().apply {
                     put(outbound)
-                    if (upstreamSocksPort != null) {
-                        put(buildUpstreamSocksOutbound(upstreamSocksPort))
+                    if (effectiveUpstreamSocksPort != null) {
+                        put(buildUpstreamSocksOutbound(effectiveUpstreamSocksPort))
                     }
                     put(JSONObject().apply {
                         put("type", "direct")

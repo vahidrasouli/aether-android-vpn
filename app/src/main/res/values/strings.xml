@@ -87,6 +87,9 @@
     <string name="singbox_entry_subtitle">Manage VLESS, VMess, Trojan, SS, HY2, WireGuard &amp; JSON profiles</string>
     <string name="sb_tls_fragment_title">TLS Fragment (DPI Bypass)</string>
     <string name="sb_tls_fragment_subtitle">Split TLS ClientHello packets to bypass ISP throttling on VLESS/Trojan TLS configs</string>
+    <string name="sb_byedpi_title">ByeDPI (TCP DPI Bypass)</string>
+    <string name="sb_byedpi_subtitle">Route Sing-box Direct connections through local ByeDPI proxy</string>
+    <string name="sb_byedpi_preset_label">ByeDPI Preset</string>
     <string name="action_add_profile">Add Profile</string>
     <string name="action_paste_clipboard">Paste</string>
     <string name="action_import_sub">Import Sub</string>
