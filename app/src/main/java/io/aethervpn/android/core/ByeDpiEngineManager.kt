@@ -19,12 +19,13 @@ import java.util.concurrent.TimeUnit
  */
 enum class ByeDpiPreset(
     val label: String,
+    val shortTag: String,
     val strategyArgs: List<String>
 ) {
-    AUTO("Auto (Test All 3)", emptyList()),
-    BALANCED("Balanced: Split + TLSRec", listOf("-s1", "-r1+s", "-a1")),
-    AGGRESSIVE("Aggressive: Disorder + TLSRec", listOf("-d1", "-r1+s", "-a1")),
-    OOB_DISORDER("OOB + Disorder", listOf("-o1", "-d1", "-r1+s"));
+    AUTO("Auto (Test All 3)", "Auto", emptyList()),
+    BALANCED("Balanced: Split + TLSRec", "Balanced", listOf("-s1", "-r1+s", "-a1")),
+    AGGRESSIVE("Aggressive: Disorder + TLSRec", "Aggressive", listOf("-d1", "-r1+s", "-a1")),
+    OOB_DISORDER("OOB + Disorder", "OOB+Disorder", listOf("-o1", "-d1", "-r1+s"));
 
     companion object {
         val CONCRETE_PRESETS: List<ByeDpiPreset> = listOf(BALANCED, AGGRESSIVE, OOB_DISORDER)
@@ -144,6 +145,7 @@ class ByeDpiEngineManager(private val privateDataDir: File) {
     companion object {
         const val TAG = "ByeDPI"
         const val DEFAULT_PORT = 1827
+        const val SPEED_TEST_PORT = 1828
 
         /**
          * Resolves [ByeDpiPreset.AUTO] to [lastWinningPreset] if it is a concrete preset,

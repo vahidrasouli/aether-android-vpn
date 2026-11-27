@@ -664,6 +664,7 @@ data class VpnConfig(
         const val PSIPHON_SOCKS_PORT = 1821
         const val SING_BOX_SOCKS_PORT = 1825
         const val BYEDPI_SOCKS_PORT = ByeDpiEngineManager.DEFAULT_PORT
+        const val BYEDPI_SPEED_TEST_PORT = ByeDpiEngineManager.SPEED_TEST_PORT
         const val DEFAULT_TUN_MTU = 1280
         const val SING_BOX_ONLY_TUN_MTU = 1500
         const val TUN_IPV4_ADDRESS = "172.19.0.1"

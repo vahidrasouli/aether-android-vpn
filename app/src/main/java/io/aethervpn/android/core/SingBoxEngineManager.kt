@@ -32,7 +32,8 @@ data class SpeedProbeProgress(
     val bytesRead: Long,
     val totalBytes: Long,
     val percent: Int,
-    val kbPerSec: Long
+    val kbPerSec: Long,
+    val activePreset: ByeDpiPreset? = null
 )
 
 class SpeedProbeStalledException(
@@ -49,10 +50,17 @@ data class SpeedCompareResult(
     val throughTun: Result<SpeedProbeResult>
 )
 
+data class ByeDpiPresetBenchmark(
+    val preset: ByeDpiPreset,
+    val speedProbe: Result<SpeedProbeResult>
+)
+
 data class EphemeralTestWithSpeedResult(
     val validation: ValidationResult,
     val speedProbe: Result<SpeedProbeResult>,
-    val isolationLogs: List<String> = emptyList()
+    val isolationLogs: List<String> = emptyList(),
+    val byeDpiPresetUsed: ByeDpiPreset? = null,
+    val byeDpiBenchmarks: List<ByeDpiPresetBenchmark> = emptyList()
 )
 
 /**
@@ -335,12 +343,55 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         }
 
         /**
-         * Runs an isolated ephemeral sing-box trace test followed by a 256KB direct SOCKS5
+         * Builds the ephemeral speed-test sing-box runtime JSON, routing outbound traffic
+         * through the isolated temporary ByeDPI port ([ByeDpiEngineManager.SPEED_TEST_PORT])
+         * when `sb_byedpi_enabled` is true, or omitting the detour when false.
+         */
+        fun buildSpeedTestRuntimeConfig(
+            rawUriOrJson: String,
+            listenPort: Int,
+            config: VpnConfig = VpnConfig()
+        ): Result<String> {
+            val upstreamSocksPort = if (config.sbByeDpiEnabled) ByeDpiEngineManager.SPEED_TEST_PORT else null
+            return SingBoxConfigParser.buildRuntimeConfig(
+                rawUriOrJson = rawUriOrJson,
+                listenPort = listenPort,
+                upstreamSocksPort = upstreamSocksPort,
+                config = config
+            )
+        }
+
+        internal fun selectAutoBenchmarkWinner(
+            benchmarks: List<ByeDpiPresetBenchmark>
+        ): ByeDpiPresetBenchmark? {
+            return benchmarks
+                .filter { it.speedProbe.isSuccess }
+                .maxByOrNull { it.speedProbe.getOrThrow().kbPerSec }
+        }
+
+        internal fun formatAutoBenchmarkSummary(benchmarks: List<ByeDpiPresetBenchmark>): String {
+            val parts = benchmarks.joinToString(" | ") { item ->
+                val label = item.preset.shortTag
+                item.speedProbe.fold(
+                    onSuccess = { probe -> "$label: ${formatSpeedRate(probe.kbPerSec)}" },
+                    onFailure = { err ->
+                        when (err) {
+                            is SpeedProbeStalledException ->
+                                "$label: ${err.percentReached}% (${formatSpeedRate(err.partialKbPerSec)})"
+                            is java.net.SocketTimeoutException -> "$label: timeout"
+                            else -> "$label: failed"
+                        }
+                    }
+                )
+            }
+            return "[SpeedTest] $parts"
+        }
+
+        /**
+         * Runs an isolated ephemeral sing-box trace test followed by a direct SOCKS5
          * throughput probe while VpnService is OFF (A/B isolation vs. VPN ON).
-         * If the normal 256KB probe stalls/fails, runs a 3-way isolation diagnostic:
-         * 1. Bare-bones proxy config (no DNS, no sniff, no route rules, debug log)
-         * 2. Last 5 sing-box debug lines if bare-bones also stalls
-         * 3. Local sing-box direct-outbound probe (no remote proxy)
+         * When `sb_byedpi_enabled == true`, routes through a temporary ByeDPI instance
+         * on port 1828 (or benchmarks all 3 concrete presets sequentially in `AUTO` mode).
          */
         suspend fun runEphemeralTraceAndSpeedTest(
             context: Context,
@@ -350,11 +401,146 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             speedProbeTimeoutMs: Int = 25_000,
             onSpeedProgress: ((SpeedProbeProgress) -> Unit)? = null
         ): Result<EphemeralTestWithSpeedResult> {
-            val baseResult = withEphemeralSingBox(
+            if (!config.sbByeDpiEnabled) {
+                return runSingleTraceAndSpeedTest(
+                    context = context,
+                    config = config,
+                    rawUriOrJson = rawUriOrJson,
+                    traceTimeoutMs = traceTimeoutMs,
+                    speedProbeTimeoutMs = speedProbeTimeoutMs,
+                    upstreamSocksPort = null,
+                    byeDpiPresetUsed = null,
+                    onSpeedProgress = onSpeedProgress
+                )
+            }
+
+            if (config.sbByeDpiPreset != ByeDpiPreset.AUTO) {
+                val preset = config.sbByeDpiPreset
+                val tempByeDpi = ByeDpiEngineManager(context.filesDir)
+                return try {
+                    val startRes = tempByeDpi.start(
+                        context = context,
+                        preset = preset,
+                        listenPort = ByeDpiEngineManager.SPEED_TEST_PORT
+                    )
+                    if (startRes.isFailure) {
+                        Result.failure(
+                            startRes.exceptionOrNull()
+                                ?: IllegalStateException("Failed to start ByeDPI (${preset.shortTag})")
+                        )
+                    } else {
+                        runSingleTraceAndSpeedTest(
+                            context = context,
+                            config = config,
+                            rawUriOrJson = rawUriOrJson,
+                            traceTimeoutMs = traceTimeoutMs,
+                            speedProbeTimeoutMs = speedProbeTimeoutMs,
+                            upstreamSocksPort = ByeDpiEngineManager.SPEED_TEST_PORT,
+                            byeDpiPresetUsed = preset,
+                            onSpeedProgress = { progress ->
+                                onSpeedProgress?.invoke(progress.copy(activePreset = preset))
+                            }
+                        )
+                    }
+                } finally {
+                    tempByeDpi.stop()
+                }
+            }
+
+            val presets = ByeDpiPreset.CONCRETE_PRESETS
+            val benchmarks = mutableListOf<ByeDpiPresetBenchmark>()
+            var winnerValidation: ValidationResult? = null
+            var fallbackValidation: ValidationResult? = null
+            var lastFailure: Throwable? = null
+            val tempByeDpi = ByeDpiEngineManager(context.filesDir)
+
+            presets.forEachIndexed { index, preset ->
+                val singleResult = try {
+                    val startRes = tempByeDpi.start(
+                        context = context,
+                        preset = preset,
+                        listenPort = ByeDpiEngineManager.SPEED_TEST_PORT
+                    )
+                    if (startRes.isFailure) {
+                        Result.failure(
+                            startRes.exceptionOrNull()
+                                ?: IllegalStateException("Failed to start ByeDPI (${preset.shortTag})")
+                        )
+                    } else {
+                        runSingleTraceAndSpeedTest(
+                            context = context,
+                            config = config,
+                            rawUriOrJson = rawUriOrJson,
+                            traceTimeoutMs = traceTimeoutMs,
+                            speedProbeTimeoutMs = speedProbeTimeoutMs,
+                            upstreamSocksPort = ByeDpiEngineManager.SPEED_TEST_PORT,
+                            byeDpiPresetUsed = preset,
+                            onSpeedProgress = { progress ->
+                                val overallPercent = ((index * 100 + progress.percent) / presets.size).coerceIn(0, 100)
+                                onSpeedProgress?.invoke(
+                                    progress.copy(
+                                        percent = overallPercent,
+                                        activePreset = preset
+                                    )
+                                )
+                            }
+                        )
+                    }
+                } finally {
+                    tempByeDpi.stop()
+                }
+
+                if (singleResult.isSuccess) {
+                    val res = singleResult.getOrThrow()
+                    if (fallbackValidation == null) {
+                        fallbackValidation = res.validation
+                    }
+                    benchmarks += ByeDpiPresetBenchmark(preset = preset, speedProbe = res.speedProbe)
+                    if (res.speedProbe.isSuccess && selectAutoBenchmarkWinner(benchmarks)?.preset == preset) {
+                        winnerValidation = res.validation
+                    }
+                } else {
+                    val err = singleResult.exceptionOrNull() ?: IllegalStateException("Trace test failed")
+                    lastFailure = err
+                    benchmarks += ByeDpiPresetBenchmark(preset = preset, speedProbe = Result.failure(err))
+                }
+            }
+
+            DiagnosticsLog.record("SingBox", formatAutoBenchmarkSummary(benchmarks))
+
+            val winner = selectAutoBenchmarkWinner(benchmarks)
+            val effectiveValidation = winnerValidation ?: fallbackValidation
+                ?: return Result.failure(lastFailure ?: IllegalStateException("All ByeDPI presets failed"))
+            val effectiveSpeedProbe = winner?.speedProbe
+                ?: benchmarks.lastOrNull()?.speedProbe
+                ?: Result.failure(lastFailure ?: IllegalStateException("All ByeDPI speed probes failed"))
+
+            return Result.success(
+                EphemeralTestWithSpeedResult(
+                    validation = effectiveValidation,
+                    speedProbe = effectiveSpeedProbe,
+                    byeDpiPresetUsed = winner?.preset,
+                    byeDpiBenchmarks = benchmarks
+                )
+            )
+        }
+
+        private suspend fun runSingleTraceAndSpeedTest(
+            context: Context,
+            config: VpnConfig,
+            rawUriOrJson: String,
+            traceTimeoutMs: Long,
+            speedProbeTimeoutMs: Int,
+            upstreamSocksPort: Int?,
+            byeDpiPresetUsed: ByeDpiPreset?,
+            onSpeedProgress: ((SpeedProbeProgress) -> Unit)?
+        ): Result<EphemeralTestWithSpeedResult> {
+            return withEphemeralSingBox(
                 context = context,
                 config = config,
                 rawUriOrJson = rawUriOrJson,
-                timeoutMs = traceTimeoutMs
+                timeoutMs = traceTimeoutMs,
+                upstreamSocksPort = upstreamSocksPort
             ) { ephemeralPort, totalDeadline ->
                 val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, traceTimeoutMs).toInt()
                 val validationResult = TunnelValidator.verifyThroughSocks(
@@ -377,11 +563,11 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 Result.success(
                     EphemeralTestWithSpeedResult(
                         validation = validationResult.getOrThrow(),
-                        speedProbe = speedResult
+                        speedProbe = speedResult,
+                        byeDpiPresetUsed = byeDpiPresetUsed
                     )
                 )
             }
-            return baseResult
         }
 
         private suspend fun runStallIsolationProbes(
@@ -476,15 +662,24 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             config: VpnConfig,
             rawUriOrJson: String,
             timeoutMs: Long,
+            upstreamSocksPort: Int? = null,
             block: suspend (ephemeralPort: Int, totalDeadline: Long) -> Result<T>
         ): Result<T> = withEphemeralSingBoxJson(
             context = context,
             configJsonProvider = { ephemeralPort ->
-                SingBoxConfigParser.buildRuntimeConfig(
-                    rawUriOrJson = rawUriOrJson,
-                    listenPort = ephemeralPort,
-                    config = config
-                ).getOrThrow()
+                if (upstreamSocksPort != null || config.sbByeDpiEnabled) {
+                    buildSpeedTestRuntimeConfig(
+                        rawUriOrJson = rawUriOrJson,
+                        listenPort = ephemeralPort,
+                        config = if (upstreamSocksPort != null) config else config.copy(sbByeDpiEnabled = false)
+                    ).getOrThrow()
+                } else {
+                    SingBoxConfigParser.buildRuntimeConfig(
+                        rawUriOrJson = rawUriOrJson,
+                        listenPort = ephemeralPort,
+                        config = config
+                    ).getOrThrow()
+                }
             },
             timeoutMs = timeoutMs
         ) { ephemeralPort, totalDeadline, _ ->

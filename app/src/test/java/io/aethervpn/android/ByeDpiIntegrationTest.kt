@@ -3,8 +3,10 @@ package io.aethervpn.android.core
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.SocketTimeoutException
 
 class ByeDpiIntegrationTest {
 
@@ -152,5 +154,102 @@ class ByeDpiIntegrationTest {
         assertTrue(restored.sbByeDpiEnabled)
         assertEquals(ByeDpiPreset.OOB_DISORDER, restored.sbByeDpiPreset)
         assertEquals(ByeDpiPreset.AGGRESSIVE, restored.sbByeDpiLastWinner)
+    }
+
+    @Test
+    fun speedTestConfigBuilderInjectsIsolatedPort1828WhenEnabledAndOmitsWhenDisabled() {
+        val enabledCfg = VpnConfig(
+            singBoxEnabled = true,
+            chainMode = ChainMode.SINGBOX_ONLY,
+            sbByeDpiEnabled = true,
+            sbByeDpiPreset = ByeDpiPreset.AUTO
+        )
+        val enabledJson = SingBoxEngineManager.buildSpeedTestRuntimeConfig(
+            rawUriOrJson = sampleVlessUri,
+            listenPort = 18990,
+            config = enabledCfg
+        ).getOrThrow()
+        val enabledOutbounds = JSONObject(enabledJson).getJSONArray("outbounds")
+        val proxyOb = (0 until enabledOutbounds.length())
+            .map { enabledOutbounds.getJSONObject(it) }
+            .first { it.getString("tag") == "proxy" }
+        assertEquals("upstream-socks", proxyOb.getString("detour"))
+
+        val socksOb = (0 until enabledOutbounds.length())
+            .map { enabledOutbounds.getJSONObject(it) }
+            .first { it.getString("tag") == "upstream-socks" }
+        assertEquals("127.0.0.1", socksOb.getString("server"))
+        assertEquals(1828, socksOb.getInt("server_port"))
+
+        val disabledCfg = enabledCfg.copy(sbByeDpiEnabled = false)
+        val disabledJson = SingBoxEngineManager.buildSpeedTestRuntimeConfig(
+            rawUriOrJson = sampleVlessUri,
+            listenPort = 18991,
+            config = disabledCfg
+        ).getOrThrow()
+        val disabledOutbounds = JSONObject(disabledJson).getJSONArray("outbounds")
+        val disabledTags = (0 until disabledOutbounds.length()).map {
+            disabledOutbounds.getJSONObject(it).getString("tag")
+        }
+        assertFalse(disabledTags.contains("upstream-socks"))
+    }
+
+    @Test
+    fun autoBenchmarkWinnerSelectionPicksFastestAndHandlesPartialFailures() {
+        val allSuccess = listOf(
+            ByeDpiPresetBenchmark(
+                preset = ByeDpiPreset.BALANCED,
+                speedProbe = Result.success(SpeedProbeResult(bytesDownloaded = 262_144, elapsedMs = 1400, kbPerSec = 180))
+            ),
+            ByeDpiPresetBenchmark(
+                preset = ByeDpiPreset.AGGRESSIVE,
+                speedProbe = Result.success(SpeedProbeResult(bytesDownloaded = 262_144, elapsedMs = 400, kbPerSec = 640))
+            ),
+            ByeDpiPresetBenchmark(
+                preset = ByeDpiPreset.OOB_DISORDER,
+                speedProbe = Result.success(SpeedProbeResult(bytesDownloaded = 262_144, elapsedMs = 620, kbPerSec = 410))
+            )
+        )
+        val winner = SingBoxEngineManager.selectAutoBenchmarkWinner(allSuccess)
+        assertEquals(ByeDpiPreset.AGGRESSIVE, winner?.preset)
+        assertEquals(
+            "[SpeedTest] Balanced: 180 KB/s | Aggressive: 640 KB/s | OOB+Disorder: 410 KB/s",
+            SingBoxEngineManager.formatAutoBenchmarkSummary(allSuccess)
+        )
+
+        val partialFailure = listOf(
+            ByeDpiPresetBenchmark(
+                preset = ByeDpiPreset.BALANCED,
+                speedProbe = Result.failure(SocketTimeoutException("Read timed out"))
+            ),
+            ByeDpiPresetBenchmark(
+                preset = ByeDpiPreset.AGGRESSIVE,
+                speedProbe = Result.failure(
+                    SpeedProbeStalledException(
+                        message = "Incomplete download",
+                        bytesDownloaded = 65_536,
+                        totalBytes = 262_144,
+                        percentReached = 25,
+                        partialKbPerSec = 50
+                    )
+                )
+            ),
+            ByeDpiPresetBenchmark(
+                preset = ByeDpiPreset.OOB_DISORDER,
+                speedProbe = Result.success(SpeedProbeResult(bytesDownloaded = 262_144, elapsedMs = 700, kbPerSec = 365))
+            )
+        )
+        val partialWinner = SingBoxEngineManager.selectAutoBenchmarkWinner(partialFailure)
+        assertEquals(ByeDpiPreset.OOB_DISORDER, partialWinner?.preset)
+        assertEquals(
+            "[SpeedTest] Balanced: timeout | Aggressive: 25% (50 KB/s) | OOB+Disorder: 365 KB/s",
+            SingBoxEngineManager.formatAutoBenchmarkSummary(partialFailure)
+        )
+
+        val allFailed = listOf(
+            ByeDpiPresetBenchmark(ByeDpiPreset.BALANCED, Result.failure(SocketTimeoutException("timeout"))),
+            ByeDpiPresetBenchmark(ByeDpiPreset.AGGRESSIVE, Result.failure(IllegalStateException("EOF")))
+        )
+        assertNull(SingBoxEngineManager.selectAutoBenchmarkWinner(allFailed))
     }
 }
