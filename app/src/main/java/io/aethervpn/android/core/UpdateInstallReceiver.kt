@@ -19,6 +19,7 @@ class UpdateInstallReceiver : BroadcastReceiver() {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                UpdateInstallStateStore.onInstallStatus(PackageInstaller.STATUS_PENDING_USER_ACTION)
                 val confirmIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
                 } else {
@@ -31,17 +32,20 @@ class UpdateInstallReceiver : BroadcastReceiver() {
                         context.startActivity(confirmIntent)
                     }.onFailure { err ->
                         DiagnosticsLog.record("Updater", "Failed to launch install confirmation: ${err.message}")
+                        UpdateInstallStateStore.onInstallStatus(PackageInstaller.STATUS_FAILURE, err.message)
                     }
                 }
             }
 
             PackageInstaller.STATUS_SUCCESS -> {
+                UpdateInstallStateStore.onInstallStatus(PackageInstaller.STATUS_SUCCESS)
                 DiagnosticsLog.record("Updater", "PackageInstaller update committed successfully")
                 UpdateManager.cleanupInstalledApks(context.cacheDir)
             }
 
             else -> {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status=$status"
+                UpdateInstallStateStore.onInstallStatus(status, msg)
                 DiagnosticsLog.record("Updater", "PackageInstaller failed ($status): $msg")
             }
         }

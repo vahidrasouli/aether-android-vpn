@@ -29,6 +29,19 @@ object DiagnosticsLog {
     private var repeatCount: Int = 0
     private var lastUiEmitMs: Long = 0L
 
+    @Volatile
+    private var networkOffline: Boolean = false
+
+    private val SUPPRESSED_ENGINE_TAGS = setOf(
+        "Aether", "SingBox", "Psiphon", "Soar", "Tunnel", "HEV"
+    )
+    private val NETWORK_ERROR_KEYWORDS = listOf(
+        "timeout", "timed out", "i/o timeout", "connection refused",
+        "connection reset", "broken pipe", "network is unreachable",
+        "no route to host", "eof", "socket", "dial", "unreachable",
+        "failed to connect", "stream error", "dns"
+    )
+
     private val secretPatterns = listOf(
         Regex("(?i)(private_key|secret|password|token|client_secret)\\s*[:=]\\s*[^\\s,;\"']+"),
         Regex("://[^:@\\s]+:[^@\\s]+@")
@@ -65,6 +78,49 @@ object DiagnosticsLog {
         listeners.remove(listener)
     }
 
+    fun onNetworkLost() {
+        val shouldLog = synchronized(lock) {
+            if (networkOffline) {
+                false
+            } else {
+                networkOffline = true
+                true
+            }
+        }
+        if (shouldLog) {
+            record("Network", "Internet connection lost — waiting for network…")
+        }
+    }
+
+    fun onNetworkRestored() {
+        val shouldLog = synchronized(lock) {
+            if (!networkOffline) {
+                false
+            } else {
+                networkOffline = false
+                true
+            }
+        }
+        if (shouldLog) {
+            record("Network", "Internet restored")
+        }
+    }
+
+    fun resetNetworkState() {
+        synchronized(lock) {
+            networkOffline = false
+        }
+    }
+
+    internal fun isNetworkOffline(): Boolean = networkOffline
+
+    internal fun shouldSuppressDuringNetworkDrop(tag: String, cleanMessage: String): Boolean {
+        if (!networkOffline) return false
+        if (tag !in SUPPRESSED_ENGINE_TAGS) return false
+        val lower = cleanMessage.lowercase(Locale.US)
+        return NETWORK_ERROR_KEYWORDS.any { lower.contains(it) }
+    }
+
     internal fun normalizePattern(tag: String, cleanMessage: String): String {
         var norm = cleanMessage
         norm = isoTimestampRegex.replace(norm, "<ts>")
@@ -99,6 +155,9 @@ object DiagnosticsLog {
         var shouldNotifyListeners = true
 
         synchronized(lock) {
+            if (shouldSuppressDuringNetworkDrop(tag, clean)) {
+                return
+            }
             if (ring.isNotEmpty() && lastPattern == pattern && lastTag == tag) {
                 repeatCount++
                 val baseMsg = lastCleanMessage ?: clean
@@ -146,6 +205,7 @@ object DiagnosticsLog {
         lastTag = null
         repeatCount = 0
         lastUiEmitMs = 0L
+        networkOffline = false
         _logsFlow.value = emptyList()
     }
 

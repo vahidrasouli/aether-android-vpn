@@ -14,6 +14,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -212,6 +215,75 @@ sealed interface UpdateCheckResult {
     data class UpdateAvailable(val release: ReleaseInfo) : UpdateCheckResult
     data class UpToDate(val currentVersion: String) : UpdateCheckResult
     data class Unavailable(val message: String) : UpdateCheckResult
+}
+
+enum class UpdateInstallPhase {
+    IDLE,
+    INSTALLING,
+    FAILED,
+    SUCCEEDED
+}
+
+data class UpdateInstallSnapshot(
+    val phase: UpdateInstallPhase = UpdateInstallPhase.IDLE,
+    val statusMessage: String? = null,
+    val awaitingUserConfirmation: Boolean = false
+) {
+    val isInstallLocked: Boolean get() = phase == UpdateInstallPhase.INSTALLING
+}
+
+object UpdateInstallStateStore {
+    private val _state = MutableStateFlow(UpdateInstallSnapshot())
+    val state: StateFlow<UpdateInstallSnapshot> = _state.asStateFlow()
+
+    fun beginInstalling(message: String = "Installing update…") {
+        _state.value = UpdateInstallSnapshot(
+            phase = UpdateInstallPhase.INSTALLING,
+            statusMessage = message,
+            awaitingUserConfirmation = false
+        )
+    }
+
+    fun onInstallStatus(status: Int, statusMessage: String? = null) {
+        when (status) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                _state.value = _state.value.copy(
+                    phase = UpdateInstallPhase.INSTALLING,
+                    statusMessage = "Confirm the system prompt to finish installing…",
+                    awaitingUserConfirmation = true
+                )
+            }
+
+            PackageInstaller.STATUS_SUCCESS -> {
+                _state.value = UpdateInstallSnapshot(
+                    phase = UpdateInstallPhase.SUCCEEDED,
+                    statusMessage = "Update installed",
+                    awaitingUserConfirmation = false
+                )
+            }
+
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                _state.value = UpdateInstallSnapshot(
+                    phase = UpdateInstallPhase.FAILED,
+                    statusMessage = "Installation cancelled. Tap Install Update to retry.",
+                    awaitingUserConfirmation = false
+                )
+            }
+
+            else -> {
+                val detail = statusMessage?.takeIf { it.isNotBlank() } ?: "status=$status"
+                _state.value = UpdateInstallSnapshot(
+                    phase = UpdateInstallPhase.FAILED,
+                    statusMessage = "Installation failed ($detail). Tap Install Update to retry.",
+                    awaitingUserConfirmation = false
+                )
+            }
+        }
+    }
+
+    fun reset() {
+        _state.value = UpdateInstallSnapshot()
+    }
 }
 
 object UpdateManager {

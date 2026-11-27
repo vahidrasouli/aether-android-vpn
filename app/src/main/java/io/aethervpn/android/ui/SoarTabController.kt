@@ -38,8 +38,10 @@ import io.aethervpn.android.databinding.DialogSoarProfileBinding
 import io.aethervpn.android.databinding.ItemSoarProfileBinding
 import io.aethervpn.android.vpn.AetherVpnService
 import io.aethervpn.android.vpn.SoarProxyService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SoarTabController(
     private val activity: AppCompatActivity,
@@ -54,26 +56,31 @@ class SoarTabController(
         binding.rvSoarProfiles.layoutManager = LinearLayoutManager(activity)
         binding.rvSoarProfiles.adapter = adapter
 
-        reloadStore()
         bindListeners()
         observeRuntimeState()
     }
 
     fun reloadStore() {
-        storeState = SoarProfileStore.load(activity.filesDir)
-        isBindingModeToggle = true
-        val checkedId = if (storeState.connectionMode == SoarConnectionMode.VPN_FULL_DEVICE) {
-            R.id.btnSoarModeVpn
-        } else {
-            R.id.btnSoarModeProxy
-        }
-        binding.toggleSoarMode.check(checkedId)
-        isBindingModeToggle = false
+        activity.lifecycleScope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                SoarProfileStore.load(activity.filesDir)
+            }
+            if (activity.isFinishing || activity.isDestroyed) return@launch
+            storeState = loaded
+            isBindingModeToggle = true
+            val checkedId = if (storeState.connectionMode == SoarConnectionMode.VPN_FULL_DEVICE) {
+                R.id.btnSoarModeVpn
+            } else {
+                R.id.btnSoarModeProxy
+            }
+            binding.toggleSoarMode.check(checkedId)
+            isBindingModeToggle = false
 
-        adapter.submitList(storeState.profiles.toList())
-        binding.tvSoarEmpty.visibility = if (storeState.profiles.isEmpty()) View.VISIBLE else View.GONE
-        binding.rvSoarProfiles.visibility = if (storeState.profiles.isEmpty()) View.GONE else View.VISIBLE
-        renderRuntimeState(SoarStateStore.state.value)
+            adapter.submitList(storeState.profiles.toList())
+            binding.tvSoarEmpty.visibility = if (storeState.profiles.isEmpty()) View.VISIBLE else View.GONE
+            binding.rvSoarProfiles.visibility = if (storeState.profiles.isEmpty()) View.GONE else View.VISIBLE
+            renderRuntimeState(SoarStateStore.state.value)
+        }
     }
 
     private fun bindListeners() {

@@ -48,8 +48,12 @@ class SoarProxyService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 startJob?.cancel()
+                startJob = null
+                SoarStateStore.resetStopped(SoarConnectionMode.PROXY_ONLY)
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 serviceScope.launch {
-                    stopInternal()
+                    soarEngine.stop()
+                    stopSelf()
                 }
             }
             ACTION_START, null -> {

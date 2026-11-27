@@ -145,7 +145,7 @@ class SoarEngineManager(private val privateDataDir: File) {
         if (proc != null) {
             runCatching {
                 proc.destroy()
-                if (!proc.waitFor(1500, TimeUnit.MILLISECONDS)) {
+                if (!proc.waitFor(STOP_GRACE_MS, TimeUnit.MILLISECONDS)) {
                     proc.destroyForcibly()
                 }
             }
@@ -179,6 +179,7 @@ class SoarEngineManager(private val privateDataDir: File) {
     }
 
     companion object {
+        internal const val STOP_GRACE_MS = 150L
         const val DEFAULT_LISTEN_HOST = "127.0.0.1"
         const val DEFAULT_LISTEN_PORT = 1829
         const val TUN_IPV4_ADDRESS = "172.19.0.1"

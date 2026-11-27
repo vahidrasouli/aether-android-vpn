@@ -43,7 +43,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -177,6 +180,31 @@ class AetherVpnService : VpnService() {
             val intent = Intent(context, AetherVpnService::class.java).apply { action = ACTION_STOP_SOAR_VPN }
             context.startService(intent)
         }
+
+        /**
+         * Executes an instant, non-blocking disconnect sequence:
+         * 1. Cancels all active connect/reconnect/speed-test coroutines immediately.
+         * 2. Closes the TUN ParcelFileDescriptor first so device traffic stops routing immediately.
+         * 3. Resets UI/notification state to Disconnected without waiting on engine shutdown.
+         * 4. Signals termination across all engine managers in parallel.
+         */
+        internal suspend fun performInstantDisconnect(
+            jobsToCancel: List<Job?>,
+            closeTunFirst: () -> Unit,
+            onImmediateStateReset: () -> Unit,
+            engineStoppers: List<() -> Unit>
+        ) {
+            jobsToCancel.forEach { it?.cancel() }
+            runCatching { closeTunFirst() }
+            runCatching { onImmediateStateReset() }
+            coroutineScope {
+                engineStoppers.map { stopFn ->
+                    async(Dispatchers.IO) {
+                        runCatching { stopFn() }
+                    }
+                }.awaitAll()
+            }
+        }
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -224,14 +252,20 @@ class AetherVpnService : VpnService() {
             ACTION_DISCONNECT -> {
                 userRequestedStop = true
                 DiagnosticsLog.record("System", "User requested disconnect")
-                VpnStateStore.update(
-                    VpnStateStore.state.value.copy(phase = TunnelPhase.DISCONNECTING)
-                )
-                activeJob?.cancel()
-                reconnectJob?.cancel()
+                val pendingJobs = listOf(activeJob, reconnectJob)
+                activeJob = null
+                reconnectJob = null
+                pendingJobs.forEach { it?.cancel() }
+                closeTun()
+                stopUpstreamWatchdog()
+                unregisterNetworkCallback()
+                VpnStateStore.resetDisconnected()
+                if (SoarStateStore.state.value.mode == SoarConnectionMode.VPN_FULL_DEVICE) {
+                    SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
+                }
+                stopForegroundCompat()
                 activeJob = serviceScope.launch {
                     teardownAll(clearError = true)
-                    stopForegroundCompat()
                     stopSelf()
                 }
                 return START_NOT_STICKY
@@ -294,15 +328,18 @@ class AetherVpnService : VpnService() {
 
             ACTION_STOP_SOAR_VPN -> {
                 userRequestedStop = true
-                SoarStateStore.update(
-                    SoarStateStore.state.value.copy(phase = SoarPhase.DISCONNECTING)
-                )
-                activeJob?.cancel()
-                reconnectJob?.cancel()
+                val pendingJobs = listOf(activeJob, reconnectJob)
+                activeJob = null
+                reconnectJob = null
+                pendingJobs.forEach { it?.cancel() }
+                closeTun()
+                stopUpstreamWatchdog()
+                unregisterNetworkCallback()
+                SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
+                VpnStateStore.resetDisconnected()
+                stopForegroundCompat()
                 activeJob = serviceScope.launch {
                     teardownAll(clearError = true)
-                    SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
-                    stopForegroundCompat()
                     stopSelf()
                 }
                 return START_NOT_STICKY
@@ -1387,6 +1424,9 @@ class AetherVpnService : VpnService() {
                 }
                 val recoveringFromLoss = networkLostDuringSession
                 networkLostDuringSession = false
+                if (recoveringFromLoss) {
+                    DiagnosticsLog.onNetworkRestored()
+                }
                 if ((recoveringFromLoss || netId != activeNetworkId) && !userRequestedStop) {
                     activeNetworkId = netId
                     // Battery-first check: avoid tearing down a healthy tunnel on transient network events
@@ -1433,7 +1473,7 @@ class AetherVpnService : VpnService() {
                     activeNetworkId = -1L
                     networkLostDuringSession = true
                     runCatching { setUnderlyingNetworks(null) }
-                    DiagnosticsLog.record("System", "Underlying network lost; awaiting new network")
+                    DiagnosticsLog.onNetworkLost()
                     VpnStateStore.update(
                         VpnStateStore.state.value.copy(phase = TunnelPhase.WAITING_FOR_INTERNET)
                     )
@@ -1454,6 +1494,7 @@ class AetherVpnService : VpnService() {
         networkCallback = null
         activeNetworkId = -1L
         networkLostDuringSession = false
+        DiagnosticsLog.resetNetworkState()
         val cm = getSystemService(ConnectivityManager::class.java)
         runCatching { cm?.unregisterNetworkCallback(cb) }
     }
@@ -1492,24 +1533,29 @@ class AetherVpnService : VpnService() {
     }
 
     private suspend fun teardownAll(clearError: Boolean) {
-        lifecycleMutex.withLock {
-            reconnectJob?.cancel()
-            stopUpstreamWatchdog()
-            unregisterNetworkCallback()
-            hevManager.stop()
-            closeTun()
-            stopUpstreamWatchdog()
-            stopEnginesInReverseOrder()
-            isCoreRunning = false
-            isTunRunning = false
-            runCatching { setUnderlyingNetworks(null) }
-            if (clearError) {
-                VpnStateStore.resetDisconnected()
-                if (SoarStateStore.state.value.mode == SoarConnectionMode.VPN_FULL_DEVICE) {
-                    SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
+        performInstantDisconnect(
+            jobsToCancel = listOf(reconnectJob),
+            closeTunFirst = { closeTun() },
+            onImmediateStateReset = {
+                stopUpstreamWatchdog()
+                unregisterNetworkCallback()
+                runCatching { setUnderlyingNetworks(null) }
+                if (clearError) {
+                    VpnStateStore.resetDisconnected()
+                    if (SoarStateStore.state.value.mode == SoarConnectionMode.VPN_FULL_DEVICE) {
+                        SoarStateStore.resetStopped(SoarConnectionMode.VPN_FULL_DEVICE)
+                    }
                 }
-            }
-        }
+            },
+            engineStoppers = listOf(
+                { hevManager.stop() },
+                { engineManager.stop() },
+                { singBoxManager.stop() },
+                { soarManager.stop() }
+            )
+        )
+        isCoreRunning = false
+        isTunRunning = false
     }
 
     private fun stopEnginesInReverseOrder() {

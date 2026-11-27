@@ -85,7 +85,7 @@ object LogFormatter {
                 tag.equals("Psiphon", ignoreCase = true) -> colorTagPsiphon
                 tag.equals("SingBox", ignoreCase = true) -> colorTagSingBox
                 tag.equals("Tunnel", ignoreCase = true) || tag.equals("VPN", ignoreCase = true) -> colorTagTunnel
-                tag.equals("System", ignoreCase = true) || tag.equals("Net", ignoreCase = true) -> colorTagSystem
+                tag.equals("System", ignoreCase = true) || tag.equals("Net", ignoreCase = true) || tag.equals("Network", ignoreCase = true) -> colorTagSystem
                 tag.contains("Native", ignoreCase = true) || tag.contains("JNI", ignoreCase = true) -> colorTagAether
                 else -> colorTagOther
             }

@@ -173,7 +173,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         if (proc != null) {
             runCatching {
                 proc.destroy()
-                if (!proc.waitFor(1500, TimeUnit.MILLISECONDS)) {
+                if (!proc.waitFor(STOP_GRACE_MS, TimeUnit.MILLISECONDS)) {
                     proc.destroyForcibly()
                 }
             }
@@ -206,6 +206,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
     }
 
     companion object {
+        internal const val STOP_GRACE_MS = 150L
         internal const val EPHEMERAL_TEST_TIMEOUT_MS = 6_000L
 
         private val ANSI_ESCAPE_REGEX = Regex("\\u001B\\[[0-9;]*m")

@@ -12,6 +12,10 @@ import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.ui.MainActivity
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 /**
  * Automatically relaunches [MainActivity] cleanly after the app updates itself
  * (`android.intent.action.MY_PACKAGE_REPLACED`), with a safe fallback notification
@@ -22,7 +26,10 @@ class PackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
 
-        UpdateManager.cleanupInstalledApks(context.cacheDir)
+        val appCacheDir = context.applicationContext.cacheDir
+        CoroutineScope(Dispatchers.IO).launch {
+            UpdateManager.cleanupInstalledApks(appCacheDir)
+        }
         DiagnosticsLog.record("Updater", "App updated to v${BuildConfig.VERSION_NAME}; relaunching MainActivity")
 
         val launchIntent = buildRelaunchIntent(context)

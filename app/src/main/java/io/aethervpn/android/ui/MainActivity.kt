@@ -96,6 +96,7 @@ class MainActivity : AppCompatActivity() {
     private var statsJob: Job? = null
     private var logsJob: Job? = null
     private var debounceSaveJob: Job? = null
+    private var speedCompareJob: Job? = null
     private var currentTabId: Int = R.id.nav_home
     private lateinit var soarTabController: SoarTabController
 
@@ -198,6 +199,7 @@ class MainActivity : AppCompatActivity() {
                 cachedActiveSingBoxProfile = activeProfile
                 initialLoadCompleted = true
                 loadConfigIntoUi(cfg)
+                soarTabController.reloadStore()
             }
 
             lifecycleScope.launch(Dispatchers.IO) {
@@ -785,7 +787,8 @@ class MainActivity : AppCompatActivity() {
             }
             binding.btnSingBoxSpeedCompare.isEnabled = false
             binding.btnSingBoxSpeedCompare.text = "Running Speed Check..."
-            uiScope.launch {
+            speedCompareJob?.cancel()
+            speedCompareJob = uiScope.launch {
                 val result = withContext(Dispatchers.IO) {
                     SingBoxEngineManager.runSocksVsTunSpeedCompare(socksPort = cfg.effectiveSocksPort)
                 }
@@ -824,6 +827,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 VpnUiAction.CANCEL_CONNECT,
                 VpnUiAction.DISCONNECT -> {
+                    speedCompareJob?.cancel()
+                    speedCompareJob = null
+                    VpnStateStore.resetDisconnected()
+                    vpnUiStateMachine.onServiceSnapshot(VpnStateStore.state.value)
                     renderHomeState(VpnStateStore.state.value)
                     stopVpnService()
                 }

@@ -220,4 +220,29 @@ class DiagnosticsLogTest {
         assertEquals("Repeated SingBox connection refused errors must collapse into 1 line", 1, entries.size)
         assertTrue("Collapsed entry must end with (x3): ${entries[0]}", entries[0].endsWith("(x3)"))
     }
+
+    @Test
+    fun testNetworkDropSuppressesEngineSocketFloodsUntilRestored() {
+        DiagnosticsLog.onNetworkLost()
+        DiagnosticsLog.onNetworkLost() // duplicate drop event must not emit a second banner
+
+        DiagnosticsLog.record("Aether", "dial udp 162.159.198.1:443: network is unreachable")
+        DiagnosticsLog.record("SingBox", "ERROR[0012] connection: i/o timeout")
+        DiagnosticsLog.record("Psiphon", "socket read failed: connection reset by peer")
+        DiagnosticsLog.record("Soar", "DNS query timed out")
+        DiagnosticsLog.record("HEV", "SOCKS5 connect refused")
+
+        val duringOutage = DiagnosticsLog.entries()
+        assertEquals("Engine socket/timeout floods must be suppressed while offline", 1, duringOutage.size)
+        assertTrue(duringOutage[0].contains("[Network] Internet connection lost"))
+
+        DiagnosticsLog.onNetworkRestored()
+        DiagnosticsLog.onNetworkRestored() // duplicate restore event must not emit twice
+        DiagnosticsLog.record("Aether", "Connected to WARP gateway")
+
+        val afterRestore = DiagnosticsLog.entries()
+        assertEquals(3, afterRestore.size)
+        assertTrue(afterRestore[1].contains("[Network] Internet restored"))
+        assertTrue(afterRestore[2].contains("[Aether] Connected to WARP gateway"))
+    }
 }

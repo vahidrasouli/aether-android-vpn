@@ -172,4 +172,45 @@ class AetherLifecycleTest {
             sm.onServiceSnapshot(TunnelSnapshot(phase = TunnelPhase.ERROR, errorMessage = "Handshake failed"))
         )
     }
+
+    @Test
+    fun verifyInstantDisconnectCancelsJobsClosesTunFirstAndStopsAllEnginesInParallel() =
+        kotlinx.coroutines.runBlocking {
+            val events = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val activeConnectJob = kotlinx.coroutines.Job()
+            val reconnectJob = kotlinx.coroutines.Job()
+            val speedTestJob = kotlinx.coroutines.Job()
+            val engineStopCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+            AetherVpnService.performInstantDisconnect(
+                jobsToCancel = listOf(activeConnectJob, reconnectJob, speedTestJob),
+                closeTunFirst = { events.add("tun_closed") },
+                onImmediateStateReset = { events.add("state_disconnected") },
+                engineStoppers = listOf(
+                    {
+                        engineStopCount.incrementAndGet()
+                        events.add("stop_hev")
+                    },
+                    {
+                        engineStopCount.incrementAndGet()
+                        events.add("stop_aether_psiphon")
+                    },
+                    {
+                        engineStopCount.incrementAndGet()
+                        events.add("stop_singbox")
+                    },
+                    {
+                        engineStopCount.incrementAndGet()
+                        events.add("stop_soar")
+                    }
+                )
+            )
+
+            assertTrue("Active connect job must be cancelled", activeConnectJob.isCancelled)
+            assertTrue("Reconnect job must be cancelled", reconnectJob.isCancelled)
+            assertTrue("Speed test job must be cancelled", speedTestJob.isCancelled)
+            assertEquals("tun_closed", events.firstOrNull())
+            assertEquals("state_disconnected", events.getOrNull(1))
+            assertEquals("All 4 engine managers must be signaled to stop", 4, engineStopCount.get())
+        }
 }

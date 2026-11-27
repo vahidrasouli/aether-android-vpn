@@ -61,6 +61,8 @@
     <string name="update_headline_available">Update Available</string>
     <string name="update_headline_uptodate">Up to Date</string>
     <string name="action_install_update">Install Update</string>
+    <string name="action_installing">Installing…</string>
+    <string name="update_stage_installing">Installing update…</string>
     <string name="title_about_updates">ABOUT &amp; UPDATES</string>
     <string name="about_developer">Developer: Saeed Rasouli</string>
     <string name="about_engines">Engines: Aether Core v2.4.0 • Psiphon Core • HEV Tunnel 2.20.0</string>

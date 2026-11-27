@@ -945,4 +945,33 @@ class UpdateManagerTest {
             tempCacheDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun installStateStoreLocksDuringInstallingAndUnlocksOnFailureAborted() {
+        val store = io.aethervpn.android.core.UpdateInstallStateStore
+        store.reset()
+        assertEquals(io.aethervpn.android.core.UpdateInstallPhase.IDLE, store.state.value.phase)
+        assertFalse(store.state.value.isInstallLocked)
+
+        store.beginInstalling("Installing update…")
+        assertEquals(io.aethervpn.android.core.UpdateInstallPhase.INSTALLING, store.state.value.phase)
+        assertTrue("Install button must be locked during INSTALLING", store.state.value.isInstallLocked)
+
+        store.onInstallStatus(android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION)
+        assertEquals(io.aethervpn.android.core.UpdateInstallPhase.INSTALLING, store.state.value.phase)
+        assertTrue("Install button must remain locked while awaiting user confirmation", store.state.value.isInstallLocked)
+        assertTrue(store.state.value.awaitingUserConfirmation)
+
+        store.onInstallStatus(android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED)
+        assertEquals(io.aethervpn.android.core.UpdateInstallPhase.FAILED, store.state.value.phase)
+        assertFalse("Install button must unlock on STATUS_FAILURE_ABORTED", store.state.value.isInstallLocked)
+
+        store.beginInstalling()
+        assertTrue(store.state.value.isInstallLocked)
+        store.onInstallStatus(android.content.pm.PackageInstaller.STATUS_FAILURE, "Invalid APK")
+        assertEquals(io.aethervpn.android.core.UpdateInstallPhase.FAILED, store.state.value.phase)
+        assertFalse("Install button must unlock on STATUS_FAILURE", store.state.value.isInstallLocked)
+
+        store.reset()
+    }
 }

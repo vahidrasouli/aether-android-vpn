@@ -1,6 +1,7 @@
 package io.aethervpn.android.ui
 
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
@@ -15,12 +16,16 @@ import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.UpdateCheckResult
+import io.aethervpn.android.core.UpdateInstallPhase
+import io.aethervpn.android.core.UpdateInstallSnapshot
+import io.aethervpn.android.core.UpdateInstallStateStore
 import io.aethervpn.android.core.UpdateManager
 import io.aethervpn.android.databinding.ActivityUpdateBinding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -65,9 +70,19 @@ class UpdateActivity : AppCompatActivity() {
             cancelActiveDownload()
         }
 
+        if (!UpdateInstallStateStore.state.value.isInstallLocked) {
+            UpdateInstallStateStore.reset()
+        }
+
+        lifecycleScope.launch {
+            UpdateInstallStateStore.state.collectLatest { installState ->
+                renderInstallState(installState)
+            }
+        }
+
         // Start update check after the first frame renders so navigation feels instant.
         window.decorView.post {
-            if (!isFinishing && !isDestroyed) {
+            if (!isFinishing && !isDestroyed && !UpdateInstallStateStore.state.value.isInstallLocked) {
                 checkForUpdates()
             }
         }
@@ -79,7 +94,12 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun onPrimaryActionClicked() {
-        if (isChecking || activeUpdateDownloadJob?.isActive == true) return
+        if (isChecking ||
+            activeUpdateDownloadJob?.isActive == true ||
+            UpdateInstallStateStore.state.value.isInstallLocked
+        ) {
+            return
+        }
 
         val cachedApk = pendingInstallApkFile
         if (cachedApk != null && cachedApk.exists()) {
@@ -378,6 +398,8 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun installDownloadedApk(apkFile: File) {
+        if (UpdateInstallStateStore.state.value.isInstallLocked) return
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
             toast("Please allow installing unknown apps, then tap Install Update")
             val permIntent = Intent(
@@ -388,17 +410,68 @@ class UpdateActivity : AppCompatActivity() {
             return
         }
 
-        binding.tvUpdateStageLabel.visibility = View.VISIBLE
-        binding.tvUpdateStageLabel.text = "Installing..."
-        binding.tvUpdateStatus.text = "Preparing system installer..."
+        UpdateInstallStateStore.beginInstalling(getString(R.string.update_stage_installing))
         lifecycleScope.launch {
             val result = UpdateManager.installApkWithPackageInstaller(this@UpdateActivity, apkFile)
-            result.onSuccess {
-                binding.tvUpdateStageLabel.text = "Confirm installation"
-                binding.tvUpdateStatus.text = "Confirm the system prompt to install the update."
-            }.onFailure { err ->
+            result.onFailure { err ->
+                UpdateInstallStateStore.onInstallStatus(
+                    PackageInstaller.STATUS_FAILURE,
+                    err.message
+                )
+            }
+        }
+    }
+
+    private fun renderInstallState(installState: UpdateInstallSnapshot) {
+        when (installState.phase) {
+            UpdateInstallPhase.IDLE -> Unit
+
+            UpdateInstallPhase.INSTALLING -> {
+                binding.btnCancelUpdate.visibility = View.GONE
+                binding.tvUpdateStageLabel.visibility = View.VISIBLE
+                binding.tvUpdateStageLabel.text = getString(R.string.update_stage_installing)
+                binding.tvUpdateStatus.text =
+                    installState.statusMessage ?: getString(R.string.update_stage_installing)
+                binding.progressUpdateDownload.visibility = View.VISIBLE
+                binding.progressUpdateDownload.isIndeterminate = true
+                applyPrimaryButtonStyle(
+                    enabled = false,
+                    label = getString(R.string.action_installing),
+                    activeStyle = true
+                )
+            }
+
+            UpdateInstallPhase.FAILED -> {
+                binding.progressUpdateDownload.isIndeterminate = false
+                binding.progressUpdateDownload.visibility = View.GONE
+                binding.tvUpdateStageLabel.visibility = View.VISIBLE
                 binding.tvUpdateStageLabel.text = "Install failed"
-                binding.tvUpdateStatus.text = "Unable to launch installer: ${err.message}"
+                binding.tvUpdateStatus.text =
+                    installState.statusMessage ?: "Installation failed. Tap Install Update to retry."
+                val cachedApk = pendingInstallApkFile
+                val retryLabel = when {
+                    cachedApk != null && cachedApk.exists() -> getString(R.string.action_install_update)
+                    pendingUpdateRelease != null -> getString(R.string.action_download_install)
+                    else -> getString(R.string.action_check_updates)
+                }
+                applyPrimaryButtonStyle(
+                    enabled = true,
+                    label = retryLabel,
+                    activeStyle = false
+                )
+            }
+
+            UpdateInstallPhase.SUCCEEDED -> {
+                binding.progressUpdateDownload.isIndeterminate = false
+                binding.progressUpdateDownload.visibility = View.GONE
+                binding.tvUpdateStageLabel.visibility = View.VISIBLE
+                binding.tvUpdateStageLabel.text = "Update installed"
+                binding.tvUpdateStatus.text = installState.statusMessage ?: "Update installed"
+                applyPrimaryButtonStyle(
+                    enabled = false,
+                    label = "Installed",
+                    activeStyle = false
+                )
             }
         }
     }
