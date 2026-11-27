@@ -467,6 +467,218 @@ object SingBoxConfigParser {
         return "$proto ($details)"
     }
 
+    /**
+     * Formats a sleek, human-readable protocol + transport + security badge for profile cards,
+     * e.g. `VLESS • WS + TLS`, `VLESS • TCP + Reality`, `VMess • WS + TLS`,
+     * `Trojan • gRPC + TLS`, `SS • TCP`.
+     */
+    fun formatRichProtocolBadge(rawUriOrJson: String, fallbackProtocol: String = "RAW"): String {
+        val parsed = parse(rawUriOrJson).getOrNull()
+            ?: return fallbackProtocol.trim().ifBlank { "RAW" }
+        val target = if (parsed.isFullConfig) {
+            val outbounds = parsed.outboundOrFullJson.optJSONArray("outbounds")
+            var chosen: JSONObject? = null
+            if (outbounds != null) {
+                for (i in 0 until outbounds.length()) {
+                    val ob = outbounds.optJSONObject(i) ?: continue
+                    val t = ob.optString("type").lowercase()
+                    if (ob.optString("tag") == "proxy" || (t.isNotBlank() && t !in SYSTEM_OUTBOUND_TYPES && ob.optString("tag") != UPSTREAM_SOCKS_TAG)) {
+                        chosen = ob
+                        break
+                    }
+                }
+            }
+            chosen ?: return parsed.protocol
+        } else {
+            parsed.outboundOrFullJson
+        }
+
+        val rawProto = target.optString("type", parsed.protocol).lowercase().ifBlank { parsed.protocol.lowercase() }
+        val protoLabel = when (rawProto) {
+            "vless" -> "VLESS"
+            "vmess" -> "VMess"
+            "trojan" -> "Trojan"
+            "shadowsocks", "ss" -> "SS"
+            "hysteria2", "hy2" -> "HY2"
+            "hysteria" -> "HY"
+            "wireguard", "wg" -> "WG"
+            "tuic" -> "TUIC"
+            "socks", "socks5" -> "SOCKS5"
+            "http" -> "HTTP"
+            "ssh" -> "SSH"
+            else -> parsed.protocol.ifBlank { rawProto.uppercase() }
+        }
+
+        val transportType = target.optJSONObject("transport")?.optString("type")?.trim()?.lowercase().orEmpty()
+        val transportLabel = when {
+            transportType == "ws" -> "WS"
+            transportType == "grpc" -> "gRPC"
+            transportType == "httpupgrade" -> "HTTPUpgrade"
+            transportType == "http" || transportType == "h2" -> "H2"
+            transportType == "quic" -> "QUIC"
+            transportType.isNotBlank() -> transportType.uppercase()
+            rawProto in setOf("hysteria", "hysteria2", "tuic", "wireguard") -> "UDP"
+            else -> "TCP"
+        }
+
+        val tlsObj = target.optJSONObject("tls")
+        val tlsLabel = if (tlsObj?.optBoolean("enabled", false) == true) {
+            val isReality = tlsObj.optJSONObject("reality")?.optBoolean("enabled", false) == true
+            if (isReality) "Reality" else "TLS"
+        } else {
+            null
+        }
+
+        return if (tlsLabel != null) {
+            "$protoLabel • $transportLabel + $tlsLabel"
+        } else {
+            "$protoLabel • $transportLabel"
+        }
+    }
+
+    /**
+     * Generates the exact pretty-printed (2-space indented) Sing-box runtime JSON
+     * reflecting the current [VpnConfig] (DNS, TLS Fragment, multiplex, etc.).
+     */
+    fun exportPrettyRuntimeConfig(
+        rawUriOrJson: String,
+        config: VpnConfig = VpnConfig()
+    ): Result<String> = buildRuntimeConfig(
+        rawUriOrJson = rawUriOrJson,
+        config = config
+    )
+
+    private val KNOWN_COUNTRY_CODES = setOf(
+        "AE", "AR", "AT", "AU", "BE", "BG", "BR", "CA", "CH", "CL", "CN", "CZ",
+        "DE", "DK", "EE", "ES", "FI", "FR", "GB", "GR", "HK", "HU", "ID", "IE",
+        "IL", "IN", "IR", "IS", "IT", "JP", "KR", "KZ", "LT", "LU", "LV", "MD",
+        "MX", "MY", "NL", "NO", "NZ", "PH", "PL", "PT", "RO", "RS", "RU", "SA",
+        "SE", "SG", "SK", "TH", "TR", "TW", "UA", "UK", "US", "VN", "ZA"
+    )
+
+    private val COUNTRY_NAME_TO_CODE = listOf(
+        "germany" to "DE",
+        "frankfurt" to "DE",
+        "netherlands" to "NL",
+        "amsterdam" to "NL",
+        "holland" to "NL",
+        "united states" to "US",
+        "america" to "US",
+        "usa" to "US",
+        "united kingdom" to "GB",
+        "london" to "GB",
+        "britain" to "GB",
+        "singapore" to "SG",
+        "japan" to "JP",
+        "tokyo" to "JP",
+        "france" to "FR",
+        "paris" to "FR",
+        "finland" to "FI",
+        "helsinki" to "FI",
+        "canada" to "CA",
+        "toronto" to "CA",
+        "turkey" to "TR",
+        "istanbul" to "TR",
+        "sweden" to "SE",
+        "stockholm" to "SE",
+        "switzerland" to "CH",
+        "zurich" to "CH",
+        "poland" to "PL",
+        "hong kong" to "HK",
+        "korea" to "KR",
+        "seoul" to "KR",
+        "australia" to "AU",
+        "sydney" to "AU",
+        "india" to "IN",
+        "dubai" to "AE",
+        "emirates" to "AE",
+        "uae" to "AE",
+        "austria" to "AT",
+        "vienna" to "AT",
+        "italy" to "IT",
+        "spain" to "ES",
+        "norway" to "NO",
+        "romania" to "RO",
+        "russia" to "RU",
+        "iran" to "IR"
+    )
+
+    fun countryCodeToFlagEmoji(rawCode: String): String {
+        val normalized = rawCode.trim().uppercase()
+        val iso = if (normalized == "UK") "GB" else normalized
+        if (iso.length != 2 || iso[0] !in 'A'..'Z' || iso[1] !in 'A'..'Z') return ""
+        val first = Character.toChars(0x1F1E6 + (iso[0].code - 'A'.code))
+        val second = Character.toChars(0x1F1E6 + (iso[1].code - 'A'.code))
+        return String(first) + String(second)
+    }
+
+    /**
+     * Extracts a compact country badge (e.g. `🇩🇪 DE`) from [lastCountry],
+     * [name] flag emojis / country tags / city names, or server host ccTLD.
+     */
+    fun extractCountryBadge(
+        name: String,
+        lastCountry: String? = null,
+        serverPreview: String = ""
+    ): String? {
+        // 1. Live trace colo/country if 2-letter ISO
+        val traced = lastCountry?.trim()?.uppercase()
+        if (traced != null && traced.length == 2 && traced in KNOWN_COUNTRY_CODES) {
+            val iso = if (traced == "UK") "GB" else traced
+            val flag = countryCodeToFlagEmoji(iso)
+            return if (flag.isNotEmpty()) "$flag $iso" else iso
+        }
+
+        // 2. Regional indicator flag emoji in profile name
+        var i = 0
+        while (i < name.length) {
+            val cp1 = Character.codePointAt(name, i)
+            val c1Len = Character.charCount(cp1)
+            if (cp1 in 0x1F1E6..0x1F1FF && i + c1Len < name.length) {
+                val cp2 = Character.codePointAt(name, i + c1Len)
+                if (cp2 in 0x1F1E6..0x1F1FF) {
+                    val ch1 = ('A'.code + (cp1 - 0x1F1E6)).toChar()
+                    val ch2 = ('A'.code + (cp2 - 0x1F1E6)).toChar()
+                    val iso = "$ch1$ch2"
+                    val flag = countryCodeToFlagEmoji(iso)
+                    return if (flag.isNotEmpty()) "$flag $iso" else iso
+                }
+            }
+            i += c1Len
+        }
+
+        // 3. Country/city keyword in name
+        val lowerName = name.lowercase()
+        for ((keyword, code) in COUNTRY_NAME_TO_CODE) {
+            if (lowerName.contains(keyword)) {
+                val flag = countryCodeToFlagEmoji(code)
+                return if (flag.isNotEmpty()) "$flag $code" else code
+            }
+        }
+
+        // 4. Delimited 2-letter ISO code in name (e.g. [DE], (US), DE-01, FR 1)
+        val tokenRegex = Regex("(?:^|[\\s\\[\\(\\-_|•])([A-Z]{2})(?=$|[\\s\\]\\)\\-_:|•0-9])")
+        for (match in tokenRegex.findAll(name.uppercase())) {
+            val code = match.groupValues[1]
+            if (code in KNOWN_COUNTRY_CODES) {
+                val iso = if (code == "UK") "GB" else code
+                val flag = countryCodeToFlagEmoji(iso)
+                return if (flag.isNotEmpty()) "$flag $iso" else iso
+            }
+        }
+
+        // 5. Server host ccTLD (skip generic TLDs)
+        val host = serverPreview.substringBeforeLast(":").trim().lowercase()
+        val tld = host.substringAfterLast(".", "").uppercase()
+        if (tld.length == 2 && tld in KNOWN_COUNTRY_CODES) {
+            val iso = if (tld == "UK") "GB" else tld
+            val flag = countryCodeToFlagEmoji(iso)
+            return if (flag.isNotEmpty()) "$flag $iso" else iso
+        }
+
+        return null
+    }
+
     fun summarizeRuntimeConfig(runtimeJson: String): String {
         return runCatching {
             val root = JSONObject(runtimeJson)

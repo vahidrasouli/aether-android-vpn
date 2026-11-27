@@ -5,7 +5,7 @@
     style="@style/Widget.Aether.Card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="5dp"
+    android:layout_marginBottom="4dp"
     android:clickable="true"
     android:focusable="true"
     app:cardCornerRadius="12dp"
@@ -16,9 +16,9 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingHorizontal="10dp"
-        android:paddingVertical="7dp">
+        android:paddingVertical="6dp">
 
-        <!-- Line 1: Radio + Protocol Pill + Profile Name + Right Ping/Country or Error -->
+        <!-- Line 1: Radio + Profile Name + Country Badge + Color-coded Ping Pill or Error -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -27,129 +27,197 @@
 
             <RadioButton
                 android:id="@+id/radioActiveProfile"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:buttonTint="@color/accent_primary"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
                 android:padding="0dp"
-                android:scaleX="0.85"
-                android:scaleY="0.85" />
-
-            <TextView
-                android:id="@+id/tvProtocolBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:background="@drawable/bg_pill_chain"
-                android:letterSpacing="0.03"
-                android:paddingHorizontal="5dp"
-                android:paddingVertical="1.5dp"
-                android:text="VLESS"
-                android:textColor="@color/singbox_accent_light"
-                android:textSize="9.5sp"
-                android:textStyle="bold" />
+                android:scaleX="0.82"
+                android:scaleY="0.82" />
 
             <TextView
                 android:id="@+id/tvProfileName"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
                 android:layout_weight="1"
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="Profile Name"
                 android:textColor="@color/text_primary"
-                android:textSize="13sp"
+                android:textSize="12.5sp"
                 android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCountryBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="5dp"
+                android:background="@drawable/bg_pill_status"
+                android:maxLines="1"
+                android:paddingHorizontal="5dp"
+                android:paddingVertical="1dp"
+                android:text="🇩🇪 DE"
+                android:textColor="@color/text_primary"
+                android:textSize="9.5sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/tvProfilePingBadge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:background="@drawable/bg_pill_status"
                 android:fontFamily="monospace"
                 android:maxLines="1"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="1dp"
                 android:text="--"
                 android:textColor="@color/text_secondary"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold" />
 
             <ImageView
                 android:id="@+id/ivProfileTestError"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
+                android:layout_marginStart="4dp"
                 android:contentDescription="@string/action_test"
                 android:src="@drawable/ic_error_24"
                 android:visibility="gone"
                 app:tint="@color/error_text" />
         </LinearLayout>
 
-        <!-- Line 2: Server/IP preview + Compact action icons -->
+        <!-- Line 2: Rich Protocol Badge + Server/IP preview + Speed + Google Play Progress Ring + Actions -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
+            android:layout_marginTop="4dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvProtocolBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="26dp"
+                android:background="@drawable/bg_pill_chain"
+                android:letterSpacing="0.02"
+                android:maxLines="1"
+                android:paddingHorizontal="5dp"
+                android:paddingVertical="1dp"
+                android:text="VLESS • WS + TLS"
+                android:textColor="@color/singbox_accent_light"
+                android:textSize="9sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvServerPreview"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="28dp"
-                android:layout_marginEnd="6dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="4dp"
                 android:layout_weight="1"
                 android:ellipsize="end"
                 android:fontFamily="monospace"
                 android:maxLines="1"
                 android:text="198.51.100.10:443"
                 android:textColor="@color/text_secondary"
-                android:textSize="10.5sp" />
+                android:textSize="10sp" />
 
-            <ImageButton
-                android:id="@+id/btnTestProfile"
-                android:layout_width="26dp"
-                android:layout_height="24dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/action_test"
-                android:padding="3dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_play_arrow_24"
-                app:tint="@color/accent_primary" />
+            <TextView
+                android:id="@+id/tvSpeedResult"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="620 KB/s"
+                android:textColor="@color/accent_primary"
+                android:textSize="9.5sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <!-- Google Play-style Circular Progress Ring + Test Button -->
+            <FrameLayout
+                android:id="@+id/layoutTestProgress"
+                android:layout_width="30dp"
+                android:layout_height="30dp">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/progressTestRing"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="center"
+                    android:indeterminate="false"
+                    android:max="100"
+                    android:progress="0"
+                    android:visibility="invisible"
+                    app:indicatorColor="@color/accent_primary"
+                    app:indicatorSize="26dp"
+                    app:trackColor="@color/card_border"
+                    app:trackCornerRadius="2dp"
+                    app:trackThickness="2.2dp" />
+
+                <ImageButton
+                    android:id="@+id/btnTestProfile"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_test"
+                    android:padding="2dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_play_arrow_24"
+                    app:tint="@color/accent_primary" />
+
+                <TextView
+                    android:id="@+id/tvTestRingPercent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:fontFamily="monospace"
+                    android:text="48%"
+                    android:textColor="@color/text_primary"
+                    android:textSize="7.5sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+            </FrameLayout>
 
             <ImageButton
                 android:id="@+id/btnEditProfile"
-                android:layout_width="26dp"
+                android:layout_width="24dp"
                 android:layout_height="24dp"
                 android:layout_marginStart="2dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_edit_profile"
-                android:padding="3dp"
+                android:padding="2.5dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_edit_24"
                 app:tint="@color/text_secondary" />
 
             <ImageButton
                 android:id="@+id/btnDeleteProfile"
-                android:layout_width="26dp"
+                android:layout_width="24dp"
                 android:layout_height="24dp"
                 android:layout_marginStart="2dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_delete"
-                android:padding="3dp"
+                android:padding="2.5dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_delete_24"
                 app:tint="@color/error_text" />
 
             <ImageButton
                 android:id="@+id/btnMoreProfile"
-                android:layout_width="26dp"
+                android:layout_width="24dp"
                 android:layout_height="24dp"
                 android:layout_marginStart="2dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_more_options"
-                android:padding="3dp"
+                android:padding="2.5dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_more_vert_24"
                 app:tint="@color/text_secondary" />

@@ -280,7 +280,8 @@ data class VpnConfig(
     val sbConnectTimeoutSec: Int = 10,
     val sbTcpFastOpen: Boolean = false,
     val sbTlsFragment: Boolean = false,
-    val sbLogLevel: String = "warn"
+    val sbLogLevel: String = "warn",
+    val sbSpeedTestUrl: String = DEFAULT_SB_SPEED_TEST_URL
 ) {
     val isSingBoxOnlyActive: Boolean
         get() = singBoxEnabled && chainMode == ChainMode.SINGBOX_ONLY
@@ -506,7 +507,13 @@ data class VpnConfig(
         SingBoxTuningPreset.CUSTOM -> this
     }
 
-    fun resetSingBoxTuningDefaults(): VpnConfig = applySingBoxTuningPreset(SingBoxTuningPreset.BALANCED)
+    fun resetSingBoxTuningDefaults(): VpnConfig =
+        applySingBoxTuningPreset(SingBoxTuningPreset.BALANCED).copy(
+            sbSpeedTestUrl = DEFAULT_SB_SPEED_TEST_URL
+        )
+
+    fun effectiveSbSpeedTestUrl(): String =
+        sbSpeedTestUrl.trim().ifBlank { DEFAULT_SB_SPEED_TEST_URL }
 
     val hasExitLocationPolicy: Boolean
         get() = exitLocation.isNotBlank() &&
@@ -625,6 +632,7 @@ data class VpnConfig(
             put("sbTcpFastOpen", sbTcpFastOpen)
             put("sbTlsFragment", sbTlsFragment)
             put("sbLogLevel", sbLogLevel)
+            put("sbSpeedTestUrl", effectiveSbSpeedTestUrl())
         }.toString(2)
     }
 
@@ -658,6 +666,7 @@ data class VpnConfig(
         const val SING_BOX_MAPDNS_ADDRESS = "198.18.0.2"
         const val SING_BOX_MAPDNS_NETWORK = "198.18.0.0"
         const val SING_BOX_MAPDNS_NETMASK = "255.254.0.0"
+        const val DEFAULT_SB_SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=1048576"
         const val DNS_IPV4_PRIMARY = "1.1.1.1"
         const val DNS_IPV4_SECONDARY = "1.0.0.1"
         const val DNS_IPV6_PRIMARY = "2606:4700:4700::1111"
@@ -779,7 +788,10 @@ data class VpnConfig(
                 sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
                 sbTlsFragment = o.optBoolean("sbTlsFragment", false),
-                sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" }
+                sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" },
+                sbSpeedTestUrl = o.optString("sbSpeedTestUrl", DEFAULT_SB_SPEED_TEST_URL)
+                    .trim()
+                    .ifBlank { DEFAULT_SB_SPEED_TEST_URL }
             )
         }
 
@@ -850,7 +862,11 @@ data class VpnConfig(
                 sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
                 sbTlsFragment = p.getBoolean("sb_tls_fragment", false),
-                sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" }
+                sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" },
+                sbSpeedTestUrl = p.getString("sb_speed_test_url", DEFAULT_SB_SPEED_TEST_URL)
+                    .orEmpty()
+                    .trim()
+                    .ifBlank { DEFAULT_SB_SPEED_TEST_URL }
             )
         }
 
@@ -922,6 +938,7 @@ data class VpnConfig(
                 .putBoolean("sb_tcp_fast_open", config.sbTcpFastOpen)
                 .putBoolean("sb_tls_fragment", config.sbTlsFragment)
                 .putString("sb_log_level", config.sbLogLevel)
+                .putString("sb_speed_test_url", config.effectiveSbSpeedTestUrl())
                 .apply()
         }
 

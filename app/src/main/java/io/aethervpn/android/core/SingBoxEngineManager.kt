@@ -28,6 +28,22 @@ data class SpeedProbeResult(
     val kbPerSec: Long
 )
 
+data class SpeedProbeProgress(
+    val bytesRead: Long,
+    val totalBytes: Long,
+    val percent: Int,
+    val kbPerSec: Long
+)
+
+class SpeedProbeStalledException(
+    message: String,
+    val bytesDownloaded: Int,
+    val totalBytes: Long,
+    val percentReached: Int,
+    val partialKbPerSec: Long,
+    cause: Throwable? = null
+) : IllegalStateException(message, cause)
+
 data class SpeedCompareResult(
     val directSocks5: Result<SpeedProbeResult>,
     val throughTun: Result<SpeedProbeResult>
@@ -331,14 +347,15 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             config: VpnConfig,
             rawUriOrJson: String,
             traceTimeoutMs: Long = EPHEMERAL_TEST_TIMEOUT_MS,
-            speedProbeTimeoutMs: Int = 20_000
+            speedProbeTimeoutMs: Int = 25_000,
+            onSpeedProgress: ((SpeedProbeProgress) -> Unit)? = null
         ): Result<EphemeralTestWithSpeedResult> {
             val baseResult = withEphemeralSingBox(
                 context = context,
                 config = config,
                 rawUriOrJson = rawUriOrJson,
                 timeoutMs = traceTimeoutMs
-            ) { ephemeralPort, totalDeadline ->
+            ) { ephemeralPort, totalDeadline, _ ->
                 val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, traceTimeoutMs).toInt()
                 val validationResult = TunnelValidator.verifyThroughSocks(
                     socksPort = ephemeralPort,
@@ -351,9 +368,11 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                         validationResult.exceptionOrNull() ?: IllegalStateException("Trace test failed")
                     )
                 }
-                val speedResult = runDirectSocks5SpeedProbe(
+                val speedResult = runDirectSocks5SpeedProbeUrl(
                     socksPort = ephemeralPort,
-                    timeoutMs = speedProbeTimeoutMs
+                    speedTestUrl = config.effectiveSbSpeedTestUrl(),
+                    timeoutMs = speedProbeTimeoutMs,
+                    onProgress = onSpeedProgress
                 )
                 Result.success(
                     EphemeralTestWithSpeedResult(
@@ -582,6 +601,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
         const val SPEED_PROBE_BYTES = 262_144
         const val SPEED_COMPARE_BYTES = 524_288
+        const val SPEED_TEST_1MB_BYTES = 1_048_576
         private const val SPEED_PROBE_HOST = "speed.cloudflare.com"
         private const val SPEED_PROBE_PORT = 443
         private val STALLED_KB_REGEX = Regex("stalled at (\\d+)KB")
@@ -742,6 +762,73 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             }
         }
 
+        internal data class ParsedSpeedProbeTarget(
+            val host: String,
+            val port: Int,
+            val path: String,
+            val useTls: Boolean,
+            val expectedBytes: Int,
+            val exactBytesRequired: Boolean
+        )
+
+        internal fun parseSpeedProbeUrl(rawUrl: String): ParsedSpeedProbeTarget {
+            val normalized = rawUrl.trim().ifBlank { VpnConfig.DEFAULT_SB_SPEED_TEST_URL }
+            val parsed = runCatching { URL(normalized) }.getOrNull()
+            if (parsed == null || parsed.host.isNullOrBlank()) {
+                return ParsedSpeedProbeTarget(
+                    host = SPEED_PROBE_HOST,
+                    port = SPEED_PROBE_PORT,
+                    path = "/__down?bytes=${SPEED_TEST_1MB_BYTES}",
+                    useTls = true,
+                    expectedBytes = SPEED_TEST_1MB_BYTES,
+                    exactBytesRequired = true
+                )
+            }
+            val useTls = !parsed.protocol.equals("http", ignoreCase = true)
+            val port = if (parsed.port > 0) parsed.port else if (useTls) 443 else 80
+            val rawPath = parsed.path.orEmpty().ifBlank { "/" }
+            val query = parsed.query?.takeIf { it.isNotBlank() }
+            val fullPath = if (query != null) "$rawPath?$query" else rawPath
+            val bytesFromQuery = query
+                ?.split('&')
+                ?.firstNotNullOfOrNull { param ->
+                    val kv = param.split('=', limit = 2)
+                    if (kv.size == 2 && kv[0].equals("bytes", ignoreCase = true)) {
+                        kv[1].toIntOrNull()?.takeIf { it > 0 }
+                    } else {
+                        null
+                    }
+                }
+            return ParsedSpeedProbeTarget(
+                host = parsed.host,
+                port = port,
+                path = fullPath,
+                useTls = useTls,
+                expectedBytes = bytesFromQuery ?: SPEED_TEST_1MB_BYTES,
+                exactBytesRequired = bytesFromQuery != null
+            )
+        }
+
+        fun runDirectSocks5SpeedProbeUrl(
+            socksPort: Int,
+            speedTestUrl: String = VpnConfig.DEFAULT_SB_SPEED_TEST_URL,
+            timeoutMs: Int = 25_000,
+            onProgress: ((SpeedProbeProgress) -> Unit)? = null
+        ): Result<SpeedProbeResult> {
+            val target = parseSpeedProbeUrl(speedTestUrl)
+            return runDirectSocks5SpeedProbe(
+                socksPort = socksPort,
+                bytesToDownload = target.expectedBytes,
+                timeoutMs = timeoutMs,
+                host = target.host,
+                port = target.port,
+                path = target.path,
+                useTls = target.useTls,
+                exactBytesRequired = target.exactBytesRequired,
+                onProgress = onProgress
+            )
+        }
+
         /**
          * Downloads [bytesToDownload] bytes from [host]:[port][path] directly through
          * the local SOCKS5 listener on 127.0.0.1:[socksPort] to isolate sing-box vs HEV TUN stalls.
@@ -754,11 +841,14 @@ class SingBoxEngineManager(private val privateDataDir: File) {
             port: Int = SPEED_PROBE_PORT,
             path: String = "/__down?bytes=$bytesToDownload",
             useTls: Boolean = true,
-            exactBytesRequired: Boolean = true
+            exactBytesRequired: Boolean = true,
+            onProgress: ((SpeedProbeProgress) -> Unit)? = null
         ): Result<SpeedProbeResult> {
             var rawSocket: Socket? = null
             var sslSocket: Socket? = null
             var bodyBytesRead = 0
+            var expectedTotalBytes = bytesToDownload.toLong().coerceAtLeast(1L)
+            var startNs = System.nanoTime()
             return try {
                 rawSocket = Socket()
                 rawSocket.tcpNoDelay = true
@@ -833,32 +923,76 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 httpOut.write(req.toByteArray(Charsets.US_ASCII))
                 httpOut.flush()
 
-                // Parse HTTP status and skip headers byte-by-byte so buffered reads don't eat body bytes
+                // Parse HTTP status and headers byte-by-byte so buffered reads don't eat body bytes
                 val statusLine = readHttpLine(httpIn)
                     ?: return Result.failure(EOFException("Empty HTTP response from speed probe"))
                 val statusCode = statusLine.split(" ", limit = 3).getOrNull(1)?.toIntOrNull() ?: 0
                 if (statusCode !in 200..299) {
                     return Result.failure(IllegalStateException("HTTP $statusCode: $statusLine"))
                 }
+                var headerContentLength: Long? = null
                 while (true) {
                     val hdr = readHttpLine(httpIn) ?: break
                     if (hdr.isEmpty()) break
+                    if (hdr.startsWith("content-length:", ignoreCase = true)) {
+                        headerContentLength = hdr.substringAfter(":").trim().toLongOrNull()?.takeIf { it > 0L }
+                    }
+                }
+                if (headerContentLength != null) {
+                    expectedTotalBytes = headerContentLength
                 }
 
-                val startNs = System.nanoTime()
+                startNs = System.nanoTime()
+                var lastEmitNs = 0L
                 val buf = ByteArray(16 * 1024)
-                while (!exactBytesRequired || bodyBytesRead < bytesToDownload) {
+                val targetBytes = headerContentLength?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: bytesToDownload
+                while (!exactBytesRequired || bodyBytesRead < targetBytes) {
                     val n = httpIn.read(buf)
                     if (n < 0) break
                     bodyBytesRead += n
+                    val nowNs = System.nanoTime()
+                    if (onProgress != null && (nowNs - lastEmitNs >= 60_000_000L || bodyBytesRead >= expectedTotalBytes)) {
+                        lastEmitNs = nowNs
+                        val elapsedMsSoFar = ((nowNs - startNs) / 1_000_000L).coerceAtLeast(1L)
+                        val kbPerSecSoFar = (bodyBytesRead.toLong() * 1000L) / (elapsedMsSoFar * 1024L)
+                        val pct = ((bodyBytesRead.toLong() * 100L) / expectedTotalBytes.coerceAtLeast(1L))
+                            .toInt()
+                            .coerceIn(0, 100)
+                        onProgress(
+                            SpeedProbeProgress(
+                                bytesRead = bodyBytesRead.toLong(),
+                                totalBytes = expectedTotalBytes,
+                                percent = pct,
+                                kbPerSec = kbPerSecSoFar
+                            )
+                        )
+                    }
                 }
                 val elapsedMs = ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1L)
-                if ((exactBytesRequired && bodyBytesRead < bytesToDownload) || (!exactBytesRequired && bodyBytesRead == 0)) {
+                if ((exactBytesRequired && bodyBytesRead < targetBytes) || (!exactBytesRequired && bodyBytesRead == 0)) {
+                    val partialKbPerSec = (bodyBytesRead.toLong() * 1000L) / (elapsedMs * 1024L)
+                    val pct = ((bodyBytesRead.toLong() * 100L) / expectedTotalBytes.coerceAtLeast(1L))
+                        .toInt()
+                        .coerceIn(0, 99)
                     return Result.failure(
-                        EOFException("Incomplete download: ${bodyBytesRead}B of ${bytesToDownload}B after ${elapsedMs}ms")
+                        SpeedProbeStalledException(
+                            message = "Incomplete download: ${bodyBytesRead}B of ${expectedTotalBytes}B after ${elapsedMs}ms",
+                            bytesDownloaded = bodyBytesRead,
+                            totalBytes = expectedTotalBytes,
+                            percentReached = pct,
+                            partialKbPerSec = partialKbPerSec
+                        )
                     )
                 }
                 val kbPerSec = (bodyBytesRead.toLong() * 1000L) / (elapsedMs * 1024L)
+                onProgress?.invoke(
+                    SpeedProbeProgress(
+                        bytesRead = bodyBytesRead.toLong(),
+                        totalBytes = expectedTotalBytes.coerceAtLeast(bodyBytesRead.toLong()),
+                        percent = 100,
+                        kbPerSec = kbPerSec
+                    )
+                )
                 Result.success(
                     SpeedProbeResult(
                         bytesDownloaded = bodyBytesRead,
@@ -867,12 +1001,25 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     )
                 )
             } catch (e: Exception) {
-                val stalledSuffix = if (bodyBytesRead > 0) {
-                    " (stalled at ${bodyBytesRead / 1024}KB / ${bodyBytesRead}B)"
+                if (bodyBytesRead > 0) {
+                    val elapsedMs = ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1L)
+                    val partialKbPerSec = (bodyBytesRead.toLong() * 1000L) / (elapsedMs * 1024L)
+                    val pct = ((bodyBytesRead.toLong() * 100L) / expectedTotalBytes.coerceAtLeast(1L))
+                        .toInt()
+                        .coerceIn(0, 99)
+                    Result.failure(
+                        SpeedProbeStalledException(
+                            message = "${e.message ?: e.javaClass.simpleName} (stalled at ${bodyBytesRead / 1024}KB / ${pct}%)",
+                            bytesDownloaded = bodyBytesRead,
+                            totalBytes = expectedTotalBytes,
+                            percentReached = pct,
+                            partialKbPerSec = partialKbPerSec,
+                            cause = e
+                        )
+                    )
                 } else {
-                    ""
+                    Result.failure(IllegalStateException(e.message ?: e.javaClass.simpleName, e))
                 }
-                Result.failure(IllegalStateException("${e.message ?: e.javaClass.simpleName}$stalledSuffix", e))
             } finally {
                 runCatching { sslSocket?.close() }
                 runCatching { rawSocket?.close() }

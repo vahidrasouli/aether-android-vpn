@@ -7,8 +7,11 @@ import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.tabs.TabLayout
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import io.aethervpn.android.R
 import io.aethervpn.android.core.SingBoxBlockQuicMode
 import io.aethervpn.android.core.SingBoxTuningPreset
@@ -234,6 +237,49 @@ class SingBoxTuningActivity : AppCompatActivity() {
             }
             updateConfig { it.copy(sbLogLevel = level) }
         }
+
+        binding.layoutSbSpeedTestUrl.setOnClickListener {
+            showSpeedTestUrlDialog()
+        }
+    }
+
+    private fun showSpeedTestUrlDialog() {
+        val currentUrl = (cachedConfig ?: VpnConfig()).effectiveSbSpeedTestUrl()
+        val density = resources.displayMetrics.density
+        val padH = (20 * density).toInt()
+        val padV = (8 * density).toInt()
+
+        val til = TextInputLayout(this).apply {
+            hint = VpnConfig.DEFAULT_SB_SPEED_TEST_URL
+            setPadding(padH, padV, padH, 0)
+        }
+        val et = TextInputEditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            maxLines = 3
+            setText(currentUrl)
+            setSelection(text?.length ?: 0)
+        }
+        til.addView(et)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.sb_speed_test_url_title)
+            .setMessage("HTTP(S) download URL used by per-profile speed tests.")
+            .setView(til)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setNeutralButton("Reset to Default") { _, _ ->
+                updateConfig { it.copy(sbSpeedTestUrl = VpnConfig.DEFAULT_SB_SPEED_TEST_URL) }
+                binding.tvSbSpeedTestUrlSummary.text = VpnConfig.DEFAULT_SB_SPEED_TEST_URL
+            }
+            .setPositiveButton(R.string.action_save) { _, _ ->
+                val entered = et.text?.toString()?.trim().orEmpty()
+                if (!entered.startsWith("http://", ignoreCase = true) && !entered.startsWith("https://", ignoreCase = true)) {
+                    Snackbar.make(binding.singBoxTuningRoot, "Enter a valid http:// or https:// URL", Snackbar.LENGTH_SHORT).show()
+                } else {
+                    updateConfig { it.copy(sbSpeedTestUrl = entered) }
+                    binding.tvSbSpeedTestUrlSummary.text = entered
+                }
+            }
+            .show()
     }
 
     private fun updateConfig(transform: (VpnConfig) -> VpnConfig) {
@@ -341,6 +387,7 @@ class SingBoxTuningActivity : AppCompatActivity() {
                     else -> R.id.chipSbLogWarn
                 }
             )
+            binding.tvSbSpeedTestUrlSummary.text = cfg.effectiveSbSpeedTestUrl()
         } finally {
             isBindingUi = false
         }

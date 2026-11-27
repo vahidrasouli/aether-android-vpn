@@ -104,6 +104,13 @@
     <string name="action_copy_all_uris">Copy All URIs</string>
     <string name="action_save_to_file">Save to File (.txt)</string>
     <string name="action_more_options">More options</string>
+    <string name="action_export_singbox_json">Export Sing-box JSON</string>
+    <string name="action_copy_json">Copy JSON</string>
+    <string name="action_save_json_file">Save .json File</string>
+    <string name="tab_all_profiles">All</string>
+    <string name="tab_manual_profiles">Manual</string>
+    <string name="action_refresh_subscription">Refresh Subscription</string>
+    <string name="sb_speed_test_url_title">Speed Test Download URL</string>
     <string name="qr_share_hint">Scan with any compatible Sing-box or V2Ray client</string>
     <string name="action_cancel">Cancel</string>
 </resources>

@@ -12,7 +12,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.LinearLayout
 import android.widget.PopupMenu
+import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +28,7 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -40,11 +43,13 @@ import io.aethervpn.android.core.SingBoxEngineManager
 import io.aethervpn.android.core.SingBoxProfile
 import io.aethervpn.android.core.SingBoxProfileRepository
 import io.aethervpn.android.core.SingBoxProfileStoreState
+import io.aethervpn.android.core.SpeedProbeStalledException
 import io.aethervpn.android.core.TunnelPhase
 import io.aethervpn.android.core.VpnConfig
 import io.aethervpn.android.core.VpnStateStore
 import io.aethervpn.android.databinding.ActivitySingboxProfilesBinding
 import io.aethervpn.android.databinding.DialogAddSingboxProfileBinding
+import io.aethervpn.android.databinding.DialogExportSingboxJsonBinding
 import io.aethervpn.android.databinding.DialogShareQrBinding
 import io.aethervpn.android.databinding.ItemSingboxProfileBinding
 import kotlinx.coroutines.Dispatchers
@@ -69,15 +74,44 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
     private var storeState = SingBoxProfileStoreState()
     private val testingIds = mutableSetOf<String>()
+    private val testProgressMap = mutableMapOf<String, Int?>()
     private val testErrors = mutableMapOf<String, String>()
     private val testSpeeds = mutableMapOf<String, String>()
     private val serverPreviewCache = mutableMapOf<String, String>()
+    private val richBadgeCache = mutableMapOf<String, String>()
+    private var selectedTabId: String = SingBoxProfileRepository.TAB_ALL_ID
+    private var tabIds: List<String> = emptyList()
+    private var isBindingTabs = false
     private var testAllJob: Job? = null
     private var isBindingSwitches = false
     private var controlsExpanded = false
     private var pendingQrTargetInput: TextInputEditText? = null
+    private var pendingExportJsonPayload: String? = null
 
     private val adapter = ProfilesAdapter()
+
+    private val exportSingleJsonDocLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        val payload = pendingExportJsonPayload
+        pendingExportJsonPayload = null
+        if (uri == null || payload == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(payload.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    } ?: throw IllegalStateException("Unable to open output stream")
+                }
+            }
+            if (result.isSuccess) {
+                showSnack("Saved Sing-box JSON file")
+            } else {
+                showSnack("Save failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+            }
+        }
+    }
 
     private val pickQrImageLauncher = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -118,6 +152,10 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         binding.toolbarSingBox.setNavigationOnClickListener { finish() }
         binding.toolbarSingBox.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                R.id.action_add_profile -> {
+                    showProfileSheet()
+                    true
+                }
                 R.id.action_test_all -> {
                     runTestAll()
                     true
@@ -162,7 +200,25 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         (binding.rvSingBoxProfiles.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
         binding.rvSingBoxProfiles.adapter = adapter
 
-        binding.fabAddSingBoxProfile.setOnClickListener { showProfileSheet() }
+        binding.tabLayoutSubscriptions.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                if (isBindingTabs) return
+                val idx = tab?.position ?: return
+                val nextId = tabIds.getOrNull(idx) ?: SingBoxProfileRepository.TAB_ALL_ID
+                if (nextId != selectedTabId) {
+                    selectedTabId = nextId
+                    updateRefreshSubButtonVisibility()
+                    renderList()
+                }
+            }
+
+            override fun onTabUnselected(tab: TabLayout.Tab?) = Unit
+            override fun onTabReselected(tab: TabLayout.Tab?) = Unit
+        })
+
+        binding.btnRefreshSubscription.setOnClickListener {
+            refreshSelectedSubscription()
+        }
 
         bindSwitches()
         refreshAll()
@@ -227,24 +283,72 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
     private fun refreshAll() {
         lifecycleScope.launch {
-            val (cfg, state, previews) = withContext(Dispatchers.IO) {
+            val (cfg, state, caches) = withContext(Dispatchers.IO) {
                 val loadedCfg = VpnConfig.load(this@SingBoxProfilesActivity)
                 val loadedState = SingBoxProfileRepository.load(filesDir)
                 val previewMap = loadedState.profiles.associate { p ->
                     p.id to (serverPreviewCache[p.id] ?: SingBoxConfigParser.extractServerPreview(p.rawUriOrJson))
                 }
-                Triple(loadedCfg, loadedState, previewMap)
+                val badgeMap = loadedState.profiles.associate { p ->
+                    p.id to (richBadgeCache[p.id] ?: SingBoxConfigParser.formatRichProtocolBadge(p.rawUriOrJson, p.protocol))
+                }
+                Triple(loadedCfg, loadedState, previewMap to badgeMap)
             }
             serverPreviewCache.clear()
-            serverPreviewCache.putAll(previews)
+            serverPreviewCache.putAll(caches.first)
+            richBadgeCache.clear()
+            richBadgeCache.putAll(caches.second)
             syncSwitches(cfg)
             storeState = state
+            renderTabs()
             renderList()
         }
     }
 
+    private fun renderTabs() {
+        val subs = SingBoxProfileRepository.extractSubscriptions(storeState)
+        val hasAnyProfiles = storeState.profiles.isNotEmpty()
+        binding.layoutSubscriptionTabs.visibility = if (hasAnyProfiles) View.VISIBLE else View.GONE
+
+        val descriptors = mutableListOf<Pair<String, String>>()
+        descriptors += SingBoxProfileRepository.TAB_ALL_ID to "${getString(R.string.tab_all_profiles)} (${storeState.profiles.size})"
+
+        val manualCount = storeState.profiles.count { it.subscriptionId.isNullOrBlank() }
+        if (subs.isNotEmpty() || manualCount > 0) {
+            descriptors += SingBoxProfileRepository.TAB_MANUAL_ID to "${getString(R.string.tab_manual_profiles)} ($manualCount)"
+        }
+        for (sub in subs) {
+            val count = storeState.profiles.count { it.subscriptionId == sub.id }
+            descriptors += sub.id to "${sub.name} ($count)"
+        }
+
+        if (descriptors.none { it.first == selectedTabId }) {
+            selectedTabId = SingBoxProfileRepository.TAB_ALL_ID
+        }
+        tabIds = descriptors.map { it.first }
+
+        isBindingTabs = true
+        try {
+            binding.tabLayoutSubscriptions.removeAllTabs()
+            descriptors.forEach { (id, label) ->
+                val tab = binding.tabLayoutSubscriptions.newTab().setText(label)
+                binding.tabLayoutSubscriptions.addTab(tab, id == selectedTabId)
+            }
+        } finally {
+            isBindingTabs = false
+        }
+        updateRefreshSubButtonVisibility()
+    }
+
+    private fun updateRefreshSubButtonVisibility() {
+        val sub = SingBoxProfileRepository.extractSubscriptions(storeState)
+            .firstOrNull { it.id == selectedTabId }
+        binding.btnRefreshSubscription.visibility = if (!sub?.url.isNullOrBlank()) View.VISIBLE else View.GONE
+    }
+
     private fun renderList() {
-        val empty = storeState.profiles.isEmpty()
+        val visibleProfiles = SingBoxProfileRepository.filterProfilesByTab(storeState.profiles, selectedTabId)
+        val empty = visibleProfiles.isEmpty()
         binding.tvProfilesEmpty.visibility = if (empty) View.VISIBLE else View.GONE
         binding.rvSingBoxProfiles.visibility = if (empty) View.GONE else View.VISIBLE
         submitProfilesList()
@@ -252,14 +356,23 @@ class SingBoxProfilesActivity : AppCompatActivity() {
 
     private fun submitProfilesList() {
         val activeId = storeState.activeProfile?.id
-        val rows = storeState.profiles.map { profile ->
+        val visibleProfiles = SingBoxProfileRepository.filterProfilesByTab(storeState.profiles, selectedTabId)
+        val rows = visibleProfiles.map { profile ->
+            val preview = serverPreviewCache[profile.id] ?: ""
             SingBoxProfileRow(
                 profile = profile,
                 isActive = profile.id == activeId,
                 isTesting = testingIds.contains(profile.id),
+                progressPercent = testProgressMap[profile.id],
                 errorMessage = testErrors[profile.id],
                 speedLabel = testSpeeds[profile.id],
-                serverPreview = serverPreviewCache[profile.id] ?: ""
+                serverPreview = preview,
+                richProtocolBadge = richBadgeCache[profile.id] ?: profile.protocol,
+                countryBadge = SingBoxConfigParser.extractCountryBadge(
+                    name = profile.name,
+                    lastCountry = profile.lastCountry,
+                    serverPreview = preview
+                )
             )
         }
         adapter.submitList(rows)
@@ -345,6 +458,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     }
                     if (res.isSuccess) {
                         serverPreviewCache.remove(editingProfile.id)
+                        richBadgeCache.remove(editingProfile.id)
                         dialog.dismiss()
                         refreshAll()
                         showSnack("Updated ${res.getOrThrow().name}")
@@ -556,9 +670,22 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         val padH = (20 * density).toInt()
         val padV = (8 * density).toInt()
 
-        val til = TextInputLayout(this).apply {
-            hint = "https://example.com/sub"
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding(padH, padV, padH, 0)
+        }
+        val tilName = TextInputLayout(this).apply {
+            hint = "Subscription Name (optional)"
+        }
+        val etName = TextInputEditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            maxLines = 1
+        }
+        tilName.addView(etName)
+
+        val tilUrl = TextInputLayout(this).apply {
+            hint = "https://example.com/sub"
+            setPadding(0, (8 * density).toInt(), 0, 0)
         }
         val etUrl = TextInputEditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
@@ -569,69 +696,119 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 setText(clip)
             }
         }
-        til.addView(etUrl)
+        tilUrl.addView(etUrl)
+        container.addView(tilName)
+        container.addView(tilUrl)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Import Subscription")
-            .setMessage("Fetch base64 or plain multi-line sing-box URIs from an http(s):// URL.")
-            .setView(til)
+            .setMessage("Fetch base64 or plain multi-line sing-box URIs into a dedicated subscription tab.")
+            .setView(container)
             .setNegativeButton(R.string.action_cancel, null)
             .setPositiveButton("Import") { _, _ ->
                 val urlStr = etUrl.text?.toString()?.trim().orEmpty()
+                val customSubName = etName.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
                 if (!urlStr.startsWith("http://", ignoreCase = true) && !urlStr.startsWith("https://", ignoreCase = true)) {
                     showSnack("Enter a valid http:// or https:// subscription URL")
                 } else {
                     parentSheet.dismiss()
-                    importSubscriptionFromUrl(urlStr)
+                    importSubscriptionFromUrl(urlStr, customSubName)
                 }
             }
             .show()
     }
 
-    private fun importSubscriptionFromUrl(urlStr: String) {
+    private fun importSubscriptionFromUrl(urlStr: String, customSubName: String? = null) {
         showSnack("Fetching subscription…")
+        val subId = java.util.UUID.randomUUID().toString()
+        val subName = customSubName ?: SingBoxProfileRepository.defaultSubscriptionNameFromUrl(urlStr)
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 10_000
-                        readTimeout = 10_000
-                        instanceFollowRedirects = true
-                        setRequestProperty("User-Agent", "AetherVPN/1.1.0")
-                    }
-                    try {
-                        val code = conn.responseCode
-                        require(code in 200..299) { "HTTP $code from subscription server" }
-                        val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                            val buf = CharArray(8192)
-                            val sb = StringBuilder()
-                            var total = 0
-                            var read = reader.read(buf)
-                            while (read != -1 && total < 2 * 1024 * 1024) {
-                                sb.append(buf, 0, read)
-                                total += read
-                                read = reader.read(buf)
-                            }
-                            sb.toString()
-                        }
-                        SingBoxProfileRepository.addSubscriptionPayload(filesDir, body).getOrThrow()
-                    } finally {
-                        conn.disconnect()
-                    }
+                    val body = fetchSubscriptionBody(urlStr)
+                    SingBoxProfileRepository.addSubscriptionPayload(
+                        filesDir = filesDir,
+                        rawPayload = body,
+                        subscriptionId = subId,
+                        subscriptionName = subName,
+                        subscriptionUrl = urlStr
+                    ).getOrThrow()
+                }
+            }
+            if (result.isSuccess) {
+                val (imported, skipped) = result.getOrThrow()
+                selectedTabId = subId
+                refreshAll()
+                val msg = if (skipped > 0) {
+                    "Imported ${imported.size} profiles to '$subName' ($skipped skipped)"
+                } else {
+                    "Imported ${imported.size} profiles to '$subName'"
+                }
+                showSnack(msg)
+            } else {
+                showSnack("Subscription import failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+            }
+        }
+    }
+
+    private fun refreshSelectedSubscription() {
+        val sub = SingBoxProfileRepository.extractSubscriptions(storeState)
+            .firstOrNull { it.id == selectedTabId } ?: return
+        val urlStr = sub.url?.takeIf { it.isNotBlank() } ?: run {
+            showSnack("No URL saved for this subscription")
+            return
+        }
+        showSnack("Refreshing ${sub.name}…")
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val body = fetchSubscriptionBody(urlStr)
+                    SingBoxProfileRepository.replaceSubscriptionProfiles(
+                        filesDir = filesDir,
+                        subscriptionId = sub.id,
+                        rawPayload = body
+                    ).getOrThrow()
                 }
             }
             if (result.isSuccess) {
                 val (imported, skipped) = result.getOrThrow()
                 refreshAll()
                 val msg = if (skipped > 0) {
-                    "Imported ${imported.size} profiles ($skipped skipped)"
+                    "Refreshed ${sub.name}: ${imported.size} profiles ($skipped skipped)"
                 } else {
-                    "Imported ${imported.size} profiles"
+                    "Refreshed ${sub.name}: ${imported.size} profiles"
                 }
                 showSnack(msg)
             } else {
-                showSnack("Subscription import failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+                showSnack("Refresh failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
             }
+        }
+    }
+
+    private fun fetchSubscriptionBody(urlStr: String): String {
+        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 10_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "AetherVPN/1.1.0")
+        }
+        return try {
+            val code = conn.responseCode
+            require(code in 200..299) { "HTTP $code from subscription server" }
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                val buf = CharArray(8192)
+                val sb = StringBuilder()
+                var total = 0
+                var read = reader.read(buf)
+                while (read != -1 && total < 2 * 1024 * 1024) {
+                    sb.append(buf, 0, read)
+                    total += read
+                    read = reader.read(buf)
+                }
+                sb.toString()
+            }
+        } finally {
+            conn.disconnect()
         }
     }
 
@@ -757,6 +934,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
     private fun runProfileTest(profile: SingBoxProfile) {
         if (testingIds.contains(profile.id)) return
         testingIds.add(profile.id)
+        testProgressMap[profile.id] = null
         testErrors.remove(profile.id)
         testSpeeds.remove(profile.id)
         submitProfilesList()
@@ -767,14 +945,31 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 SingBoxEngineManager.runEphemeralTraceAndSpeedTest(
                     context = this@SingBoxProfilesActivity,
                     config = cfg,
-                    rawUriOrJson = profile.rawUriOrJson
+                    rawUriOrJson = profile.rawUriOrJson,
+                    onSpeedProgress = { progress ->
+                        runOnUiThread {
+                            if (testingIds.contains(profile.id)) {
+                                testProgressMap[profile.id] = progress.percent
+                                testSpeeds[profile.id] = "${progress.kbPerSec} KB/s"
+                                submitProfilesList()
+                            }
+                        }
+                    }
                 )
             }
             testingIds.remove(profile.id)
+            testProgressMap.remove(profile.id)
             if (result.isSuccess) {
                 val res = result.getOrThrow()
                 val v = res.validation
-                val speedLabel = SingBoxEngineManager.formatCompactSpeedBadge(res.speedProbe)
+                val speedProbeErr = res.speedProbe.exceptionOrNull()
+                val speedLabel = if (res.speedProbe.isSuccess) {
+                    "${res.speedProbe.getOrThrow().kbPerSec} KB/s"
+                } else if (speedProbeErr is SpeedProbeStalledException) {
+                    "${speedProbeErr.percentReached}% • ${speedProbeErr.partialKbPerSec} KB/s"
+                } else {
+                    SingBoxEngineManager.formatCompactSpeedBadge(res.speedProbe)
+                }
                 testSpeeds[profile.id] = speedLabel
                 val updatedState = withContext(Dispatchers.IO) {
                     SingBoxProfileRepository.updateTestResult(
@@ -799,6 +994,40 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         }
     }
 
+    private fun showExportSingBoxJsonSheet(profile: SingBoxProfile) {
+        lifecycleScope.launch {
+            val jsonResult = withContext(Dispatchers.IO) {
+                val cfg = VpnConfig.load(this@SingBoxProfilesActivity)
+                SingBoxConfigParser.exportPrettyRuntimeConfig(profile.rawUriOrJson, cfg)
+            }
+            if (jsonResult.isFailure) {
+                showSnack("Failed to generate JSON: ${jsonResult.exceptionOrNull()?.message ?: "unknown error"}")
+                return@launch
+            }
+            val prettyJson = jsonResult.getOrThrow()
+            val dialog = BottomSheetDialog(
+                this@SingBoxProfilesActivity,
+                com.google.android.material.R.style.Theme_Design_BottomSheetDialog
+            )
+            val sheetBinding = DialogExportSingboxJsonBinding.inflate(layoutInflater)
+            dialog.setContentView(sheetBinding.root)
+            sheetBinding.tvExportJsonSubtitle.text = profile.name
+            sheetBinding.tvExportJsonPreview.text = prettyJson
+            sheetBinding.btnCopyExportJson.setOnClickListener {
+                val cm = getSystemService(ClipboardManager::class.java)
+                cm?.setPrimaryClip(ClipData.newPlainText("${profile.name} Sing-box JSON", prettyJson))
+                Toast.makeText(this@SingBoxProfilesActivity, "Sing-box JSON copied to clipboard", Toast.LENGTH_SHORT).show()
+            }
+            sheetBinding.btnSaveExportJson.setOnClickListener {
+                val safeName = profile.name.replace(Regex("[^a-zA-Z0-9._-]+"), "_").trim('_').ifBlank { "singbox-profile" }
+                pendingExportJsonPayload = prettyJson
+                exportSingleJsonDocLauncher.launch("$safeName.json")
+                dialog.dismiss()
+            }
+            dialog.show()
+        }
+    }
+
     private fun showSnack(message: String) {
         Snackbar.make(binding.singBoxRoot, message, Snackbar.LENGTH_SHORT).apply {
             setBackgroundTint(ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.surface_elevated))
@@ -811,9 +1040,12 @@ class SingBoxProfilesActivity : AppCompatActivity() {
         val profile: SingBoxProfile,
         val isActive: Boolean,
         val isTesting: Boolean,
+        val progressPercent: Int? = null,
         val errorMessage: String?,
         val speedLabel: String? = null,
-        val serverPreview: String
+        val serverPreview: String,
+        val richProtocolBadge: String,
+        val countryBadge: String? = null
     )
 
     private object ProfileDiffCallback : DiffUtil.ItemCallback<SingBoxProfileRow>() {
@@ -844,7 +1076,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             val err = row.errorMessage
 
             b.radioActiveProfile.isChecked = isActive
-            b.tvProtocolBadge.text = p.protocol
+            b.tvProtocolBadge.text = row.richProtocolBadge
             b.tvProfileName.text = p.name
             b.cardProfileItem.strokeColor = ContextCompat.getColor(
                 this@SingBoxProfilesActivity,
@@ -852,28 +1084,55 @@ class SingBoxProfilesActivity : AppCompatActivity() {
             )
             b.tvServerPreview.text = row.serverPreview
 
+            if (!row.countryBadge.isNullOrBlank()) {
+                b.tvCountryBadge.visibility = View.VISIBLE
+                b.tvCountryBadge.text = row.countryBadge
+            } else {
+                b.tvCountryBadge.visibility = View.GONE
+            }
+
+            if (!row.speedLabel.isNullOrBlank()) {
+                b.tvSpeedResult.visibility = View.VISIBLE
+                b.tvSpeedResult.text = row.speedLabel
+                b.tvSpeedResult.setTextColor(
+                    ContextCompat.getColor(
+                        this@SingBoxProfilesActivity,
+                        if (row.speedLabel.contains("%")) R.color.warning_text else R.color.accent_primary
+                    )
+                )
+            } else {
+                b.tvSpeedResult.visibility = View.GONE
+            }
+
             when {
                 isTesting -> {
                     b.tvProfilePingBadge.visibility = View.VISIBLE
                     b.ivProfileTestError.visibility = View.GONE
-                    b.tvProfilePingBadge.text = "Testing…"
+                    b.tvProfilePingBadge.text = if (row.progressPercent != null) "Speed…" else "Testing…"
                     b.tvProfilePingBadge.setTextColor(
                         ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.accent_secondary)
                     )
                 }
                 !err.isNullOrBlank() -> {
-                    b.tvProfilePingBadge.visibility = View.GONE
+                    b.tvProfilePingBadge.visibility = View.VISIBLE
+                    b.tvProfilePingBadge.text = "Timeout"
+                    b.tvProfilePingBadge.setTextColor(
+                        ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.error_text)
+                    )
                     b.ivProfileTestError.visibility = View.VISIBLE
                     b.ivProfileTestError.setOnClickListener { showSnack("Error: $err") }
                 }
                 p.lastPingMs != null -> {
                     b.tvProfilePingBadge.visibility = View.VISIBLE
                     b.ivProfileTestError.visibility = View.GONE
-                    val countryPart = p.lastCountry?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
-                    val speedPart = row.speedLabel?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
-                    b.tvProfilePingBadge.text = "${p.lastPingMs}ms$countryPart$speedPart"
+                    b.tvProfilePingBadge.text = "${p.lastPingMs}ms"
+                    val pingColor = when {
+                        p.lastPingMs < 150L -> R.color.log_success
+                        p.lastPingMs <= 400L -> R.color.warning_text
+                        else -> R.color.error_text
+                    }
                     b.tvProfilePingBadge.setTextColor(
-                        ContextCompat.getColor(this@SingBoxProfilesActivity, R.color.log_success)
+                        ContextCompat.getColor(this@SingBoxProfilesActivity, pingColor)
                     )
                 }
                 else -> {
@@ -886,8 +1145,26 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 }
             }
 
-            b.btnTestProfile.isEnabled = !isTesting
-            b.btnTestProfile.alpha = if (isTesting) 0.4f else 1.0f
+            if (isTesting) {
+                b.progressTestRing.visibility = View.VISIBLE
+                b.btnTestProfile.visibility = View.INVISIBLE
+                b.btnTestProfile.isEnabled = false
+                if (row.progressPercent == null) {
+                    b.progressTestRing.isIndeterminate = true
+                    b.tvTestRingPercent.visibility = View.GONE
+                } else {
+                    b.progressTestRing.isIndeterminate = false
+                    b.progressTestRing.setProgressCompat(row.progressPercent, true)
+                    b.tvTestRingPercent.visibility = View.VISIBLE
+                    b.tvTestRingPercent.text = "${row.progressPercent}%"
+                }
+            } else {
+                b.progressTestRing.visibility = View.INVISIBLE
+                b.tvTestRingPercent.visibility = View.GONE
+                b.btnTestProfile.visibility = View.VISIBLE
+                b.btnTestProfile.isEnabled = true
+                b.btnTestProfile.alpha = 1.0f
+            }
 
             val selectAction = View.OnClickListener {
                 lifecycleScope.launch {
@@ -910,10 +1187,13 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                         SingBoxProfileRepository.deleteProfile(filesDir, p.id)
                     }
                     testingIds.remove(p.id)
+                    testProgressMap.remove(p.id)
                     testErrors.remove(p.id)
                     testSpeeds.remove(p.id)
                     serverPreviewCache.remove(p.id)
+                    richBadgeCache.remove(p.id)
                     storeState = updated
+                    renderTabs()
                     renderList()
                 }
             }
@@ -922,6 +1202,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 PopupMenu(this@SingBoxProfilesActivity, anchor).apply {
                     menu.add(0, 1, 0, R.string.action_share_qr)
                     menu.add(0, 2, 1, R.string.action_copy_uri)
+                    menu.add(0, 3, 2, R.string.action_export_singbox_json)
                     setOnMenuItemClickListener { menuItem ->
                         when (menuItem.itemId) {
                             1 -> {
@@ -930,6 +1211,10 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                             }
                             2 -> {
                                 copyProfileUri(p)
+                                true
+                            }
+                            3 -> {
+                                showExportSingBoxJsonSheet(p)
                                 true
                             }
                             else -> false
