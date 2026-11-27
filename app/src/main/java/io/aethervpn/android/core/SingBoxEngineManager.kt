@@ -355,7 +355,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                 config = config,
                 rawUriOrJson = rawUriOrJson,
                 timeoutMs = traceTimeoutMs
-            ) { ephemeralPort, totalDeadline, _ ->
+            ) { ephemeralPort, totalDeadline ->
                 val remainingTimeoutMs = (totalDeadline - System.currentTimeMillis()).coerceIn(1_500L, traceTimeoutMs).toInt()
                 val validationResult = TunnelValidator.verifyThroughSocks(
                     socksPort = ephemeralPort,
