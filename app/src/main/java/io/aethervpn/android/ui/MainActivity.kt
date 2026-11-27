@@ -35,7 +35,6 @@ import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherProtocol
 import io.aethervpn.android.core.AppThemeMode
-import io.aethervpn.android.core.ByeDpiPreset
 import io.aethervpn.android.core.CacheHygiene
 import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.DiagnosticsLog
@@ -319,7 +318,6 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerHevMode.adapter = simpleAdapter(HevMode.entries.map { it.label })
         binding.spinnerProtocol.adapter = simpleAdapter(AetherProtocol.entries.map { it.label })
         binding.spinnerChainMode.adapter = simpleAdapter(ChainMode.entries.map { it.label })
-        binding.spinnerSbByeDpiPreset.adapter = simpleAdapter(ByeDpiPreset.entries.map { it.label })
         binding.spinnerPsiphonMode.adapter = simpleAdapter(PsiphonMode.entries.map { it.label })
         binding.spinnerPsiphonRegion.adapter = simpleAdapter(VpnConfig.PSIPHON_REGIONS.map { it.second })
         binding.spinnerPsiphonProtocol.adapter = simpleAdapter(PsiphonProtocol.entries.map { it.label })
@@ -354,7 +352,6 @@ class MainActivity : AppCompatActivity() {
             binding.spinnerHevMode,
             binding.spinnerProtocol,
             binding.spinnerChainMode,
-            binding.spinnerSbByeDpiPreset,
             binding.spinnerPsiphonMode,
             binding.spinnerPsiphonRegion,
             binding.spinnerPsiphonProtocol,
@@ -385,7 +382,6 @@ class MainActivity : AppCompatActivity() {
             binding.switchBypassIran,
             binding.switchTlsFragment,
             binding.switchSbTlsFragment,
-            binding.switchSbByeDpiEnabled,
             binding.switchEch,
             binding.switchTlsVerify,
             binding.switchUpstreamProxy
@@ -396,8 +392,6 @@ class MainActivity : AppCompatActivity() {
                 if (sw === binding.switchUpstreamProxy) {
                     binding.layoutUpstreamProxyFields.visibility = if (isChecked) View.VISIBLE else View.GONE
                     syncUpstreamPreviewAndPreset()
-                } else if (sw === binding.switchSbByeDpiEnabled) {
-                    updateByeDpiPresetState(isChecked)
                 }
                 saveFromUiImmediate()
             }
@@ -572,10 +566,6 @@ class MainActivity : AppCompatActivity() {
             noizeProfile = NoizeProfile.entries[binding.spinnerNoize.selectedItemPosition],
             tlsFragmentation = binding.switchTlsFragment.isChecked,
             sbTlsFragment = binding.switchSbTlsFragment.isChecked,
-            sbByeDpiEnabled = binding.switchSbByeDpiEnabled.isChecked,
-            sbByeDpiPreset = ByeDpiPreset.entries[
-                binding.spinnerSbByeDpiPreset.selectedItemPosition.coerceIn(0, ByeDpiPreset.entries.lastIndex)
-            ],
             masqueSni = binding.etMasqueSni.text.toString().trim(),
             echEnabled = binding.switchEch.isChecked,
             tlsVerify = binding.switchTlsVerify.isChecked,
@@ -649,9 +639,6 @@ class MainActivity : AppCompatActivity() {
             updateHomeBadges(cfg)
             binding.switchSingBoxEnabled.isChecked = cfg.singBoxEnabled
             binding.switchSbTlsFragment.isChecked = cfg.sbTlsFragment
-            binding.switchSbByeDpiEnabled.isChecked = cfg.sbByeDpiEnabled
-            binding.spinnerSbByeDpiPreset.setSelection(cfg.sbByeDpiPreset.ordinal, false)
-            updateByeDpiPresetState(cfg.sbByeDpiEnabled)
             binding.spinnerChainMode.setSelection(cfg.chainMode.ordinal, false)
             refreshSingBoxSummary(cfg)
             binding.tvEngineLabSummary.text =
@@ -725,11 +712,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.action_bypass_proxy_app)
         }
-    }
-
-    private fun updateByeDpiPresetState(enabled: Boolean) {
-        binding.spinnerSbByeDpiPreset.isEnabled = enabled
-        binding.layoutSbByeDpiPreset.alpha = if (enabled) 1.0f else 0.45f
     }
 
     private fun refreshSingBoxSummary(

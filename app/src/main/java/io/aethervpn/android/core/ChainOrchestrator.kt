@@ -94,19 +94,8 @@ object ChainOrchestrator {
         } ?: "none"
 
         if (config.singBoxEnabled) {
-            val byeDpiHop = if (config.isByeDpiActive) {
-                val effectivePreset = ByeDpiEngineManager.resolveEffectivePreset(
-                    config.sbByeDpiPreset,
-                    config.sbByeDpiLastWinner
-                )
-                "ByeDPI (${VpnConfig.LOOPBACK_HOST}:${VpnConfig.BYEDPI_SOCKS_PORT}, ${effectivePreset.name})"
-            } else null
             return when (config.chainMode) {
-                ChainMode.SINGBOX_ONLY -> if (byeDpiHop != null) {
-                    "$prefix -> $singBoxHop -> $byeDpiHop -> $outboundDesc"
-                } else {
-                    "$prefix -> $singBoxHop -> $outboundDesc"
-                }
+                ChainMode.SINGBOX_ONLY -> "$prefix -> $singBoxHop -> $outboundDesc"
                 ChainMode.SINGBOX_TO_WARP -> "$prefix -> $warpHop -> $singBoxHop -> $outboundDesc"
                 ChainMode.SINGBOX_TO_PSIPHON -> "$prefix -> $psiphonHop -> $singBoxHop -> $outboundDesc"
                 ChainMode.SINGBOX_TO_WARP_TO_PSIPHON -> "$prefix -> $psiphonHop -> $warpHop -> $singBoxHop -> $outboundDesc"

@@ -35,7 +35,6 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.aethervpn.android.R
-import io.aethervpn.android.core.ByeDpiPreset
 import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.DiagnosticsLog
 import io.aethervpn.android.core.QrCodeHelper
@@ -950,9 +949,8 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     onSpeedProgress = { progress ->
                         runOnUiThread {
                             if (testingIds.contains(profile.id)) {
-                                val prefix = progress.activePreset?.let { "${it.shortTag}: " }.orEmpty()
                                 testProgressMap[profile.id] = progress.percent
-                                testSpeeds[profile.id] = "$prefix${SingBoxEngineManager.formatSpeedRate(progress.kbPerSec)}"
+                                testSpeeds[profile.id] = SingBoxEngineManager.formatSpeedRate(progress.kbPerSec)
                                 submitProfilesList()
                             }
                         }
@@ -965,28 +963,15 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 val res = result.getOrThrow()
                 val v = res.validation
                 val speedProbeErr = res.speedProbe.exceptionOrNull()
-                val baseSpeedLabel = if (res.speedProbe.isSuccess) {
+                val speedLabel = if (res.speedProbe.isSuccess) {
                     SingBoxEngineManager.formatSpeedRate(res.speedProbe.getOrThrow().kbPerSec)
                 } else if (speedProbeErr is SpeedProbeStalledException) {
                     "${speedProbeErr.percentReached}% • ${SingBoxEngineManager.formatSpeedRate(speedProbeErr.partialKbPerSec)}"
                 } else {
                     SingBoxEngineManager.formatCompactSpeedBadge(res.speedProbe)
                 }
-                val usedPreset = res.byeDpiPresetUsed
-                val speedLabel = if (usedPreset != null) {
-                    "$baseSpeedLabel • ${usedPreset.shortTag}"
-                } else {
-                    baseSpeedLabel
-                }
                 testSpeeds[profile.id] = speedLabel
                 val updatedState = withContext(Dispatchers.IO) {
-                    if (usedPreset != null &&
-                        cfg.sbByeDpiEnabled &&
-                        cfg.sbByeDpiPreset == ByeDpiPreset.AUTO &&
-                        res.speedProbe.isSuccess
-                    ) {
-                        VpnConfig.save(this@SingBoxProfilesActivity, cfg.copy(sbByeDpiLastWinner = usedPreset))
-                    }
                     SingBoxProfileRepository.updateTestResult(
                         filesDir = filesDir,
                         profileId = profile.id,
@@ -996,20 +981,14 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                     )
                 }
                 storeState = updatedState
-                val pathLabel = usedPreset?.let { "(via ByeDPI: ${it.shortTag})" } ?: "(Direct)"
                 DiagnosticsLog.record(
                     "SingBox",
-                    "Test '${profile.name}' $pathLabel: ${v.publicIp} • ${v.latencyMs}ms • $speedLabel"
+                    "Test '${profile.name}' (Direct): ${v.publicIp} • ${v.latencyMs}ms • $speedLabel"
                 )
                 showSnack("${v.publicIp} • ${v.latencyMs}ms • $speedLabel")
             } else {
                 val err = result.exceptionOrNull()?.message ?: "Trace test failed"
-                val pathLabel = if (cfg.sbByeDpiEnabled) {
-                    "(via ByeDPI: ${cfg.sbByeDpiPreset.shortTag})"
-                } else {
-                    "(Direct)"
-                }
-                DiagnosticsLog.record("SingBox", "Test '${profile.name}' $pathLabel failed: $err")
+                DiagnosticsLog.record("SingBox", "Test '${profile.name}' (Direct) failed: $err")
                 testErrors[profile.id] = err
             }
             submitProfilesList()

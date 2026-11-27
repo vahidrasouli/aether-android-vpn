@@ -13,7 +13,6 @@ import android.os.ParcelFileDescriptor
 import io.aethervpn.android.R
 import io.aethervpn.android.core.AetherEngineManager
 import io.aethervpn.android.core.AetherProtocol
-import io.aethervpn.android.core.ByeDpiEngineManager
 import io.aethervpn.android.core.ChainMode
 import io.aethervpn.android.core.ChainOrchestrator
 import io.aethervpn.android.core.CidrRoutePlanner
@@ -163,7 +162,6 @@ class AetherVpnService : VpnService() {
 
     private lateinit var engineManager: AetherEngineManager
     private lateinit var singBoxManager: SingBoxEngineManager
-    private lateinit var byeDpiManager: ByeDpiEngineManager
     private lateinit var hevManager: HevTunnelManager
 
     private var tunInterface: ParcelFileDescriptor? = null
@@ -194,7 +192,6 @@ class AetherVpnService : VpnService() {
         NotificationHelper.ensureChannel(this)
         engineManager = AetherEngineManager(filesDir)
         singBoxManager = SingBoxEngineManager(filesDir)
-        byeDpiManager = ByeDpiEngineManager(filesDir)
         hevManager = HevTunnelManager(cacheDir)
     }
 
@@ -453,20 +450,6 @@ class AetherVpnService : VpnService() {
             val protector = SocketProtectorCallback { fd -> protect(fd) }
 
             if (plan.startSingBoxFirst) {
-                if (config.isByeDpiActive) {
-                    val bdResult = byeDpiManager.start(
-                        context = this@AetherVpnService,
-                        preset = config.sbByeDpiPreset,
-                        listenPort = VpnConfig.BYEDPI_SOCKS_PORT,
-                        lastWinningPreset = config.sbByeDpiLastWinner
-                    )
-                    if (bdResult.isFailure) {
-                        return@withLock Result.failure(
-                            bdResult.exceptionOrNull() ?: IllegalStateException("ByeDPI failed to start")
-                        )
-                    }
-                }
-
                 // Upstream Sing-box starts first on 127.0.0.1:1825
                 val sbResult = singBoxManager.start(
                     context = this@AetherVpnService,
@@ -476,7 +459,6 @@ class AetherVpnService : VpnService() {
                     upstreamSocksPort = null
                 )
                 if (sbResult.isFailure) {
-                    byeDpiManager.stop()
                     return@withLock Result.failure(
                         sbResult.exceptionOrNull() ?: IllegalStateException("Sing-box core failed")
                     )
@@ -685,7 +667,6 @@ class AetherVpnService : VpnService() {
             stopUpstreamWatchdog()
             engineManager.stop()
             singBoxManager.stop()
-            byeDpiManager.stop()
             isCoreRunning = false
             isTunRunning = false
 
@@ -873,34 +854,22 @@ class AetherVpnService : VpnService() {
                 lastSingBoxStartedFirst = plan.startSingBoxFirst
                 val protector = SocketProtectorCallback { fd -> protect(fd) }
                 val chainError: Throwable? = if (plan.startSingBoxFirst) {
-                    val bdErr = if (config.isByeDpiActive) {
-                        byeDpiManager.start(
-                            context = this@AetherVpnService,
-                            preset = config.sbByeDpiPreset,
-                            listenPort = VpnConfig.BYEDPI_SOCKS_PORT,
-                            lastWinningPreset = config.sbByeDpiLastWinner
+                    val sbRes = singBoxManager.start(
+                        context = this@AetherVpnService,
+                        config = config,
+                        rawUriOrJson = activeProfile.rawUriOrJson,
+                        listenPort = VpnConfig.SING_BOX_SOCKS_PORT,
+                        upstreamSocksPort = null
+                    )
+                    if (sbRes.isFailure) {
+                        sbRes.exceptionOrNull()
+                    } else if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
+                        engineManager.start(
+                            config = plan.aetherEffectiveConfig,
+                            protector = protector,
+                            psiphonBinaryPath = psiphonBin
                         ).exceptionOrNull()
                     } else null
-                    if (bdErr != null) {
-                        bdErr
-                    } else {
-                        val sbRes = singBoxManager.start(
-                            context = this@AetherVpnService,
-                            config = config,
-                            rawUriOrJson = activeProfile.rawUriOrJson,
-                            listenPort = VpnConfig.SING_BOX_SOCKS_PORT,
-                            upstreamSocksPort = null
-                        )
-                        if (sbRes.isFailure) {
-                            sbRes.exceptionOrNull()
-                        } else if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
-                            engineManager.start(
-                                config = plan.aetherEffectiveConfig,
-                                protector = protector,
-                                psiphonBinaryPath = psiphonBin
-                            ).exceptionOrNull()
-                        } else null
-                    }
                 } else {
                     val engRes = if (plan.startAetherEngine && plan.aetherEffectiveConfig != null) {
                         engineManager.start(
@@ -1365,11 +1334,9 @@ class AetherVpnService : VpnService() {
             // Sing-box was upstream, Aether was downstream -> stop downstream Aether first
             engineManager.stop()
             singBoxManager.stop()
-            byeDpiManager.stop()
         } else {
             // Aether was upstream, Sing-box was downstream -> stop downstream Sing-box first
             singBoxManager.stop()
-            byeDpiManager.stop()
             engineManager.stop()
         }
     }

@@ -25,7 +25,6 @@ jobs:
       GRADLE_VERSION: "8.9"
       HEV_VERSION: "2.20.0"
       SINGBOX_VERSION: "v1.12.25"
-      BYEDPI_VERSION: "v0.17.3"
       BUILD_JOBS: "2"
 
     steps:
@@ -130,20 +129,6 @@ jobs:
           SINGBOX_VERSION: "${{ env.SINGBOX_VERSION }}"
         run: bash scripts/build-singbox.sh
 
-      - name: Cache compiled ARM64 libbyedpi.so
-        id: cache-byedpi
-        uses: actions/cache@v4
-        with:
-          path: app/src/main/jniLibs/arm64-v8a/libbyedpi.so
-          key: byedpi-${{ env.BYEDPI_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('scripts/build-byedpi.sh') }}
-
-      - name: Build ARM64 ByeDPI (C/NDK layer)
-        if: steps.cache-byedpi.outputs.cache-hit != 'true'
-        env:
-          ANDROID_NDK_HOME: "${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}"
-          BYEDPI_VERSION: "${{ env.BYEDPI_VERSION }}"
-        run: bash scripts/build-byedpi.sh
-
       - name: Fail-fast smoke test Psiphon TLS initialization
         run: |
           echo "[*] Running host-native ConsoleClient -version smoke test to verify psiphon-tls init..."
@@ -165,13 +150,11 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
           test -s app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so
           test -s app/src/main/jniLibs/arm64-v8a/libsing-box.so
-          test -s app/src/main/jniLibs/arm64-v8a/libbyedpi.so
           file app/src/main/jniLibs/arm64-v8a/libaether_jni.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libc++_shared.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so | grep -E -i -q "aarch64"
           file app/src/main/jniLibs/arm64-v8a/libsing-box.so | grep -E -i -q "aarch64"
-          file app/src/main/jniLibs/arm64-v8a/libbyedpi.so | grep -E -i -q "aarch64"
           echo "ARM64 shared libraries verified successfully."
 
       - name: Verify 16KB ELF alignment and DT_NEEDED dependency resolution
@@ -191,7 +174,7 @@ jobs:
 
           echo "=== 2. Verifying DT_NEEDED dependencies for all packaged shared libraries ==="
           ALLOWED_SYSTEM_LIBS="libc.so libm.so libdl.so liblog.so libz.so libandroid.so libjnigraphics.so libEGL.so libGLESv2.so libOpenSLES.so libmediandk.so"
-          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so libpsiphon-tunnel-core.so libsing-box.so libbyedpi.so"
+          BUNDLED_LIBS="libaether_jni.so libhev-socks5-tunnel.so libc++_shared.so libpsiphon-tunnel-core.so libsing-box.so"
           for so in app/src/main/jniLibs/arm64-v8a/*.so; do
             echo "Checking dependencies of $(basename "$so")..."
             NEEDED=$(readelf -d "$so" 2>/dev/null | grep "(NEEDED)" | sed -E 's/.*\[(.*)\]/\1/' || true)
@@ -277,7 +260,6 @@ jobs:
           unzip -l "$APK" | grep "lib/arm64-v8a/libc++_shared.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libpsiphon-tunnel-core.so"
           unzip -l "$APK" | grep "lib/arm64-v8a/libsing-box.so"
-          unzip -l "$APK" | grep "lib/arm64-v8a/libbyedpi.so"
           if unzip -l "$APK" | grep -E "lib/(armeabi|x86|x86_64)/"; then
             echo "ERROR: Unwanted ABIs packaged into APK"
             exit 1
@@ -316,17 +298,6 @@ jobs:
                   print("ERROR: libsing-box.so invalid ELF header")
                   sys.exit(1)
               print(f"SUCCESS: libsing-box.so inside APK verified (size={sb_info.file_size} bytes, ELFCLASS64, EM_AARCH64).")
-
-              bd_info = z.getinfo('lib/arm64-v8a/libbyedpi.so')
-              if bd_info.file_size == 0:
-                  print("ERROR: libbyedpi.so inside APK is empty!")
-                  sys.exit(1)
-              bd_raw = z.read('lib/arm64-v8a/libbyedpi.so')
-              bd_hdr = bd_raw[:64]
-              if bd_hdr[:4] != b'\x7fELF' or bd_hdr[4] != 2 or int.from_bytes(bd_hdr[18:20], 'little') != 0xb7:
-                  print("ERROR: libbyedpi.so invalid ELF header")
-                  sys.exit(1)
-              print(f"SUCCESS: libbyedpi.so inside APK verified (size={bd_info.file_size} bytes, ELFCLASS64, EM_AARCH64).")
           EOF
 
           echo "APK ARM64-v8a packaging verified successfully."

@@ -280,17 +280,11 @@ data class VpnConfig(
     val sbConnectTimeoutSec: Int = 10,
     val sbTcpFastOpen: Boolean = false,
     val sbTlsFragment: Boolean = false,
-    val sbByeDpiEnabled: Boolean = false,
-    val sbByeDpiPreset: ByeDpiPreset = ByeDpiPreset.AUTO,
-    val sbByeDpiLastWinner: ByeDpiPreset? = null,
     val sbLogLevel: String = "warn",
     val sbSpeedTestUrl: String = DEFAULT_SB_SPEED_TEST_URL
 ) {
     val isSingBoxOnlyActive: Boolean
         get() = singBoxEnabled && chainMode == ChainMode.SINGBOX_ONLY
-
-    val isByeDpiActive: Boolean
-        get() = sbByeDpiEnabled && isSingBoxOnlyActive
 
     val effectiveTunMtu: Int
         get() = if (isSingBoxOnlyActive) SING_BOX_ONLY_TUN_MTU else tunMtu
@@ -637,9 +631,6 @@ data class VpnConfig(
             put("sbConnectTimeoutSec", sbConnectTimeoutSec)
             put("sbTcpFastOpen", sbTcpFastOpen)
             put("sbTlsFragment", sbTlsFragment)
-            put("sbByeDpiEnabled", sbByeDpiEnabled)
-            put("sbByeDpiPreset", sbByeDpiPreset.name)
-            sbByeDpiLastWinner?.let { put("sbByeDpiLastWinner", it.name) }
             put("sbLogLevel", sbLogLevel)
             put("sbSpeedTestUrl", effectiveSbSpeedTestUrl())
         }.toString(2)
@@ -663,8 +654,6 @@ data class VpnConfig(
         const val DEFAULT_SOCKS_PORT = 1819
         const val PSIPHON_SOCKS_PORT = 1821
         const val SING_BOX_SOCKS_PORT = 1825
-        const val BYEDPI_SOCKS_PORT = ByeDpiEngineManager.DEFAULT_PORT
-        const val BYEDPI_SPEED_TEST_PORT = ByeDpiEngineManager.SPEED_TEST_PORT
         const val DEFAULT_TUN_MTU = 1280
         const val SING_BOX_ONLY_TUN_MTU = 1500
         const val TUN_IPV4_ADDRESS = "172.19.0.1"
@@ -807,11 +796,6 @@ data class VpnConfig(
                 sbConnectTimeoutSec = o.optInt("sbConnectTimeoutSec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = o.optBoolean("sbTcpFastOpen", false),
                 sbTlsFragment = o.optBoolean("sbTlsFragment", false),
-                sbByeDpiEnabled = o.optBoolean("sbByeDpiEnabled", false),
-                sbByeDpiPreset = enumOrDefault(o.optString("sbByeDpiPreset"), ByeDpiPreset.AUTO),
-                sbByeDpiLastWinner = o.optString("sbByeDpiLastWinner", "").takeIf { it.isNotBlank() }?.let {
-                    runCatching { enumValueOf<ByeDpiPreset>(it) }.getOrNull()
-                },
                 sbLogLevel = o.optString("sbLogLevel", "warn").ifBlank { "warn" },
                 sbSpeedTestUrl = o.optString("sbSpeedTestUrl", DEFAULT_SB_SPEED_TEST_URL)
                     .trim()
@@ -886,11 +870,6 @@ data class VpnConfig(
                 sbConnectTimeoutSec = p.getInt("sb_connect_timeout_sec", 10).coerceIn(3, 60),
                 sbTcpFastOpen = p.getBoolean("sb_tcp_fast_open", false),
                 sbTlsFragment = p.getBoolean("sb_tls_fragment", false),
-                sbByeDpiEnabled = p.getBoolean("sb_byedpi_enabled", false),
-                sbByeDpiPreset = enumOrDefault(p.getString("sb_byedpi_preset", null), ByeDpiPreset.AUTO),
-                sbByeDpiLastWinner = p.getString("sb_byedpi_last_winner", null)?.takeIf { it.isNotBlank() }?.let {
-                    runCatching { enumValueOf<ByeDpiPreset>(it) }.getOrNull()
-                },
                 sbLogLevel = p.getString("sb_log_level", "warn").orEmpty().ifBlank { "warn" },
                 sbSpeedTestUrl = p.getString("sb_speed_test_url", DEFAULT_SB_SPEED_TEST_URL)
                     .orEmpty()
@@ -966,9 +945,6 @@ data class VpnConfig(
                 .putInt("sb_connect_timeout_sec", config.sbConnectTimeoutSec)
                 .putBoolean("sb_tcp_fast_open", config.sbTcpFastOpen)
                 .putBoolean("sb_tls_fragment", config.sbTlsFragment)
-                .putBoolean("sb_byedpi_enabled", config.sbByeDpiEnabled)
-                .putString("sb_byedpi_preset", config.sbByeDpiPreset.name)
-                .putString("sb_byedpi_last_winner", config.sbByeDpiLastWinner?.name)
                 .putString("sb_log_level", config.sbLogLevel)
                 .putString("sb_speed_test_url", config.effectiveSbSpeedTestUrl())
                 .apply()

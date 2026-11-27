@@ -178,7 +178,6 @@ object SingBoxConfigParser {
         config: VpnConfig = VpnConfig()
     ): Result<String> = runCatching {
         val effectiveUpstreamSocksPort = upstreamSocksPort
-            ?: if (config.isByeDpiActive) VpnConfig.BYEDPI_SOCKS_PORT else null
         val parsed = parse(rawUriOrJson).getOrThrow()
         val root = if (parsed.isFullConfig) {
             JSONObject(parsed.outboundOrFullJson.toString()).apply {

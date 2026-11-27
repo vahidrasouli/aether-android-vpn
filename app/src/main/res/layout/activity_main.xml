@@ -864,48 +864,6 @@
                             android:text="@string/sb_tls_fragment_subtitle"
                             android:textColor="@color/text_secondary"
                             android:textSize="11.5sp" />
-
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="1dp"
-                            android:layout_marginTop="12dp"
-                            android:layout_marginBottom="4dp"
-                            android:background="@color/divider_line" />
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switchSbByeDpiEnabled"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="@string/sb_byedpi_title"
-                            android:textColor="@color/text_primary" />
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="@string/sb_byedpi_subtitle"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="11.5sp" />
-
-                        <LinearLayout
-                            android:id="@+id/layoutSbByeDpiPreset"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/sb_byedpi_preset_label"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="12sp" />
-
-                            <Spinner
-                                android:id="@+id/spinnerSbByeDpiPreset"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:layout_marginTop="2dp" />
-                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
