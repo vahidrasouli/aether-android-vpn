@@ -249,9 +249,20 @@ class SingBoxTuningActivity : AppCompatActivity() {
         val padH = (20 * density).toInt()
         val padV = (8 * density).toInt()
 
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padH, padV, padH, 0)
+        }
+
+        val chipGroup = com.google.android.material.chip.ChipGroup(this).apply {
+            isSingleSelection = true
+            isSelectionRequired = false
+            chipSpacingHorizontal = (6 * density).toInt()
+        }
+
         val til = TextInputLayout(this).apply {
             hint = VpnConfig.DEFAULT_SB_SPEED_TEST_URL
-            setPadding(padH, padV, padH, 0)
+            setPadding(0, (6 * density).toInt(), 0, 0)
         }
         val et = TextInputEditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
@@ -261,10 +272,43 @@ class SingBoxTuningActivity : AppCompatActivity() {
         }
         til.addView(et)
 
+        val presetChips = mutableListOf<Pair<com.google.android.material.chip.Chip, String>>()
+        for ((label, presetUrl) in VpnConfig.SPEED_TEST_URL_PRESETS) {
+            val chip = com.google.android.material.chip.Chip(this).apply {
+                id = View.generateViewId()
+                text = label
+                isCheckable = true
+                isChecked = currentUrl == presetUrl
+                setOnClickListener {
+                    et.setText(presetUrl)
+                    et.setSelection(presetUrl.length)
+                }
+            }
+            presetChips += chip to presetUrl
+            chipGroup.addView(chip)
+        }
+
+        et.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                val entered = s?.toString()?.trim().orEmpty()
+                for ((chip, presetUrl) in presetChips) {
+                    val shouldCheck = entered == presetUrl
+                    if (chip.isChecked != shouldCheck) {
+                        chip.isChecked = shouldCheck
+                    }
+                }
+            }
+        })
+
+        container.addView(chipGroup)
+        container.addView(til)
+
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.sb_speed_test_url_title)
             .setMessage("HTTP(S) download URL used by per-profile speed tests.")
-            .setView(til)
+            .setView(container)
             .setNegativeButton(R.string.action_cancel, null)
             .setNeutralButton("Reset to Default") { _, _ ->
                 updateConfig { it.copy(sbSpeedTestUrl = VpnConfig.DEFAULT_SB_SPEED_TEST_URL) }

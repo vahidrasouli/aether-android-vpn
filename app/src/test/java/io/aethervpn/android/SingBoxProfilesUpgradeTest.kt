@@ -133,4 +133,63 @@ class SingBoxProfilesUpgradeTest {
         assertEquals(1_048_576, parsedTarget.expectedBytes)
         assertTrue(parsedTarget.useTls)
     }
+
+    @Test
+    fun cloudflareSpeedTestPresetsHaveExpectedUrlsAndByteCounts() {
+        assertEquals(3, VpnConfig.SPEED_TEST_URL_PRESETS.size)
+        assertEquals(
+            "https://speed.cloudflare.com/__down?bytes=512000",
+            VpnConfig.SPEED_TEST_URL_500KB
+        )
+        assertEquals(
+            "https://speed.cloudflare.com/__down?bytes=1048576",
+            VpnConfig.DEFAULT_SB_SPEED_TEST_URL
+        )
+        assertEquals(
+            "https://speed.cloudflare.com/__down?bytes=5242880",
+            VpnConfig.SPEED_TEST_URL_5MB
+        )
+
+        val expectedSizes = listOf(512_000, 1_048_576, 5_242_880)
+        VpnConfig.SPEED_TEST_URL_PRESETS.forEachIndexed { idx, (_, url) ->
+            val target = SingBoxEngineManager.parseSpeedProbeUrl(url)
+            assertEquals("speed.cloudflare.com", target.host)
+            assertEquals(443, target.port)
+            assertTrue(target.useTls)
+            assertEquals(expectedSizes[idx], target.expectedBytes)
+            assertTrue(target.exactBytesRequired)
+        }
+    }
+
+    @Test
+    fun speedRateFormatterAlwaysIncludesExplicitKbOrMbPerSecondUnit() {
+        assertEquals("0 KB/s", SingBoxEngineManager.formatSpeedRate(-5))
+        assertEquals("0 KB/s", SingBoxEngineManager.formatSpeedRate(0))
+        assertEquals("256 KB/s", SingBoxEngineManager.formatSpeedRate(256))
+        assertEquals("1023 KB/s", SingBoxEngineManager.formatSpeedRate(1023))
+        assertEquals("1.0 MB/s", SingBoxEngineManager.formatSpeedRate(1024))
+        assertEquals("1.4 MB/s", SingBoxEngineManager.formatSpeedRate(1434))
+
+        val badgeKb = SingBoxEngineManager.formatCompactSpeedBadge(
+            Result.success(io.aethervpn.android.core.SpeedProbeResult(512_000, 2000, 256))
+        )
+        assertEquals("256 KB/s", badgeKb)
+
+        val badgeMb = SingBoxEngineManager.formatCompactSpeedBadge(
+            Result.success(io.aethervpn.android.core.SpeedProbeResult(1_048_576, 714, 1434))
+        )
+        assertEquals("1.4 MB/s", badgeMb)
+    }
+
+    @Test
+    fun speedProbeEnforcesNoCacheHeadersAndReusableMemoryBuffer() {
+        val req = SingBoxEngineManager.buildNoCacheSpeedProbeRequest(
+            host = "speed.cloudflare.com",
+            path = "/__down?bytes=1048576"
+        )
+        assertTrue(req.contains("Cache-Control: no-cache, no-store, max-age=0\r\n"))
+        assertTrue(req.contains("Pragma: no-cache\r\n"))
+        assertTrue(req.contains("Connection: close\r\n"))
+        assertTrue(SingBoxEngineManager.SPEED_PROBE_BUFFER_BYTES in 32_768..65_536)
+    }
 }

@@ -666,7 +666,15 @@ data class VpnConfig(
         const val SING_BOX_MAPDNS_ADDRESS = "198.18.0.2"
         const val SING_BOX_MAPDNS_NETWORK = "198.18.0.0"
         const val SING_BOX_MAPDNS_NETMASK = "255.254.0.0"
+        const val SPEED_TEST_URL_500KB = "https://speed.cloudflare.com/__down?bytes=512000"
         const val DEFAULT_SB_SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=1048576"
+        const val SPEED_TEST_URL_5MB = "https://speed.cloudflare.com/__down?bytes=5242880"
+
+        val SPEED_TEST_URL_PRESETS: List<Pair<String, String>> = listOf(
+            "500 KB" to SPEED_TEST_URL_500KB,
+            "1 MB (Default)" to DEFAULT_SB_SPEED_TEST_URL,
+            "5 MB" to SPEED_TEST_URL_5MB
+        )
         const val DNS_IPV4_PRIMARY = "1.1.1.1"
         const val DNS_IPV4_SECONDARY = "1.0.0.1"
         const val DNS_IPV6_PRIMARY = "2606:4700:4700::1111"

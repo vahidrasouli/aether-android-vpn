@@ -602,10 +602,32 @@ class SingBoxEngineManager(private val privateDataDir: File) {
         const val SPEED_PROBE_BYTES = 262_144
         const val SPEED_COMPARE_BYTES = 524_288
         const val SPEED_TEST_1MB_BYTES = 1_048_576
+        internal const val SPEED_PROBE_BUFFER_BYTES = 32 * 1024
         private const val SPEED_PROBE_HOST = "speed.cloudflare.com"
         private const val SPEED_PROBE_PORT = 443
         private val STALLED_KB_REGEX = Regex("stalled at (\\d+)KB")
         private val INCOMPLETE_BYTES_REGEX = Regex("Incomplete download: (\\d+)B")
+
+        /**
+         * Formats throughput in explicit rate units (`KB/s` below 1024 KB/s, `MB/s` at or above).
+         */
+        fun formatSpeedRate(kbPerSec: Long): String {
+            val safeKb = kbPerSec.coerceAtLeast(0L)
+            return if (safeKb >= 1024L) {
+                String.format(java.util.Locale.US, "%.1f MB/s", safeKb / 1024.0)
+            } else {
+                "$safeKb KB/s"
+            }
+        }
+
+        internal fun buildNoCacheSpeedProbeRequest(host: String, path: String): String {
+            return "GET $path HTTP/1.1\r\n" +
+                "Host: $host\r\n" +
+                "User-Agent: AetherAndroid/2.4.0\r\n" +
+                "Cache-Control: no-cache, no-store, max-age=0\r\n" +
+                "Pragma: no-cache\r\n" +
+                "Connection: close\r\n\r\n"
+        }
 
         fun formatSpeedProbeLog(
             result: Result<SpeedProbeResult>,
@@ -652,7 +674,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
         fun formatCompactSpeedBadge(result: Result<SpeedProbeResult>): String {
             return result.fold(
-                onSuccess = { probe -> "${probe.kbPerSec} KB/s" },
+                onSuccess = { probe -> formatSpeedRate(probe.kbPerSec) },
                 onFailure = { err ->
                     val stalledKb = extractStalledKb(err)
                     if (stalledKb != null) "stalled at $stalledKb KB" else "speed err"
@@ -720,7 +742,10 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     connectTimeout = timeoutMs
                     readTimeout = timeoutMs
                     useCaches = false
+                    defaultUseCaches = false
                     setRequestProperty("User-Agent", "AetherAndroid/2.4.0")
+                    setRequestProperty("Cache-Control", "no-cache, no-store, max-age=0")
+                    setRequestProperty("Pragma", "no-cache")
                     setRequestProperty("Connection", "close")
                 }
                 val code = conn.responseCode
@@ -728,7 +753,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     return Result.failure(IllegalStateException("HTTP $code"))
                 }
                 val startNs = System.nanoTime()
-                val buf = ByteArray(16 * 1024)
+                val buf = ByteArray(SPEED_PROBE_BUFFER_BYTES)
                 conn.inputStream.use { inStream ->
                     while (bodyBytesRead < bytesToDownload) {
                         val n = inStream.read(buf)
@@ -916,10 +941,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
                     httpOut = outStream
                     httpIn = inStream
                 }
-                val req = "GET $path HTTP/1.1\r\n" +
-                    "Host: $host\r\n" +
-                    "User-Agent: AetherAndroid/2.4.0\r\n" +
-                    "Connection: close\r\n\r\n"
+                val req = buildNoCacheSpeedProbeRequest(host = host, path = path)
                 httpOut.write(req.toByteArray(Charsets.US_ASCII))
                 httpOut.flush()
 
@@ -944,7 +966,7 @@ class SingBoxEngineManager(private val privateDataDir: File) {
 
                 startNs = System.nanoTime()
                 var lastEmitNs = 0L
-                val buf = ByteArray(16 * 1024)
+                val buf = ByteArray(SPEED_PROBE_BUFFER_BYTES)
                 val targetBytes = headerContentLength?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: bytesToDownload
                 while (!exactBytesRequired || bodyBytesRead < targetBytes) {
                     val n = httpIn.read(buf)

@@ -950,7 +950,7 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                         runOnUiThread {
                             if (testingIds.contains(profile.id)) {
                                 testProgressMap[profile.id] = progress.percent
-                                testSpeeds[profile.id] = "${progress.kbPerSec} KB/s"
+                                testSpeeds[profile.id] = SingBoxEngineManager.formatSpeedRate(progress.kbPerSec)
                                 submitProfilesList()
                             }
                         }
@@ -964,9 +964,9 @@ class SingBoxProfilesActivity : AppCompatActivity() {
                 val v = res.validation
                 val speedProbeErr = res.speedProbe.exceptionOrNull()
                 val speedLabel = if (res.speedProbe.isSuccess) {
-                    "${res.speedProbe.getOrThrow().kbPerSec} KB/s"
+                    SingBoxEngineManager.formatSpeedRate(res.speedProbe.getOrThrow().kbPerSec)
                 } else if (speedProbeErr is SpeedProbeStalledException) {
-                    "${speedProbeErr.percentReached}% • ${speedProbeErr.partialKbPerSec} KB/s"
+                    "${speedProbeErr.percentReached}% • ${SingBoxEngineManager.formatSpeedRate(speedProbeErr.partialKbPerSec)}"
                 } else {
                     SingBoxEngineManager.formatCompactSpeedBadge(res.speedProbe)
                 }
