@@ -36,9 +36,9 @@ object DiagnosticsLog {
         "Aether", "SingBox", "Psiphon", "Soar", "Tunnel", "HEV"
     )
     private val NETWORK_ERROR_KEYWORDS = listOf(
-        "timeout", "timed out", "i/o timeout", "connection refused",
+        "timeout", "timed out", "i/o timeout", "connection refused", "connect refused",
         "connection reset", "broken pipe", "network is unreachable",
-        "no route to host", "eof", "socket", "dial", "unreachable",
+        "no route to host", "eof", "socket", "socks", "dial", "unreachable",
         "failed to connect", "stream error", "dns"
     )
 
