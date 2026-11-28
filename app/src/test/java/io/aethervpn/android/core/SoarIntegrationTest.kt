@@ -230,6 +230,37 @@ class SoarIntegrationTest {
     }
 
     @Test
+    fun `SoarResolverPackStore deactivating active pack persists null without fallback`() {
+        val dir = tempFolder.newFolder("soar_packs_deactivate")
+        val p1 = ResolverPack(id = "pack-1", name = "Pack One", resolvers = listOf("1.1.1.1"))
+        val p2 = ResolverPack(id = "pack-2", name = "Pack Two", resolvers = listOf("8.8.8.8"))
+
+        SoarResolverPackStore.upsertPack(dir, p1, setActive = true)
+        SoarResolverPackStore.upsertPack(dir, p2, setActive = false)
+
+        val activeReloaded = SoarResolverPackStore.load(dir)
+        assertEquals("pack-1", activeReloaded.activePackId)
+        assertEquals("Pack One", activeReloaded.activePack?.name)
+
+        // Deactivate the active pack (simulates "Deactivate Pack" -> setActivePack(dir, null))
+        val deactivated = SoarResolverPackStore.setActivePack(dir, null)
+        assertNull(deactivated.activePackId)
+        assertNull(deactivated.activePack)
+        assertEquals(2, deactivated.packs.size)
+
+        // Reloading from disk must keep activePackId == null and not fall back to pack-1 or pack-2
+        val reloadedAfterDeactivate = SoarResolverPackStore.load(dir)
+        assertNull(reloadedAfterDeactivate.activePackId)
+        assertNull(reloadedAfterDeactivate.activePack)
+        assertEquals(2, reloadedAfterDeactivate.packs.size)
+
+        // Re-activating another pack continues to work normally
+        val reactivated = SoarResolverPackStore.setActivePack(dir, "pack-2")
+        assertEquals("pack-2", reactivated.activePackId)
+        assertEquals("Pack Two", SoarResolverPackStore.load(dir).activePack?.name)
+    }
+
+    @Test
     fun `SoarEngineManager injects active ResolverPack into runtime JSON config`() {
         val profile = sampleProfile()
         val pack = ResolverPack(

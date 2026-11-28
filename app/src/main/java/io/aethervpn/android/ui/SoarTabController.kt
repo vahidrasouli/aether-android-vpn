@@ -89,6 +89,8 @@ class SoarTabController(
     private var scannerLoadedFileName: String = ""
     private var scannerSelectedSourcePackId: String? = null
     private var scannerSelectedTargetProfileId: String? = null
+    private var scannerWorkers: Int = SoarResolverScanner.DEFAULT_CONCURRENCY
+    private var isWorkersEditable: Boolean = true
     private var pendingExportPack: ResolverPack? = null
 
     private lateinit var scannerFilePickerLauncher: ActivityResultLauncher<Array<String>>
@@ -104,6 +106,7 @@ class SoarTabController(
         binding.rvSoarPacks.layoutManager = LinearLayoutManager(activity)
         binding.rvSoarPacks.adapter = packsAdapter
 
+        syncWorkersControls(scannerWorkers, isEditable = true)
         bindListeners()
         observeRuntimeState()
         observeScannerState()
@@ -158,7 +161,7 @@ class SoarTabController(
             binding.rvSoarProfiles.visibility = if (storeState.profiles.isEmpty()) View.GONE else View.VISIBLE
 
             // Resolver Packs card
-            packsAdapter.submitList(packState.packs.toList())
+            packsAdapter.submitList(packState.packs.map { PackRow(it, it.id == packState.activePackId) })
             binding.tvSoarPacksCount.text = packState.packs.size.toString()
             binding.tvSoarPacksEmpty.visibility = if (packState.packs.isEmpty()) View.VISIBLE else View.GONE
             binding.rvSoarPacks.visibility = if (packState.packs.isEmpty()) View.GONE else View.VISIBLE
@@ -201,6 +204,7 @@ class SoarTabController(
         binding.actSoarActivePack.setOnItemClickListener { _, _, position, _ ->
             val selectedId = if (position == 0) null else packState.packs.getOrNull(position - 1)?.id
             packState = SoarResolverPackStore.setActivePack(activity.filesDir, selectedId)
+            reloadStore()
             toast(
                 packState.activePack?.let { "Active Resolver Pack: ${it.name}" }
                     ?: "Using Profile / Discovery resolvers"
@@ -385,14 +389,6 @@ class SoarTabController(
             scannerFilePickerLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
         }
 
-        binding.sliderScannerConcurrency.addOnChangeListener { _, value, _ ->
-            val workers = value.toInt().coerceIn(
-                SoarResolverScanner.MIN_CONCURRENCY,
-                SoarResolverScanner.MAX_CONCURRENCY
-            )
-            syncWorkersControls(workers, isEditable = binding.sliderScannerConcurrency.isEnabled)
-        }
-
         binding.btnScannerWorkersMinus.setOnClickListener {
             stepScannerWorkers(-1)
         }
@@ -499,7 +495,7 @@ class SoarTabController(
             return
         }
 
-        val concurrency = binding.sliderScannerConcurrency.value.toInt()
+        val concurrency = scannerWorkers
         val useTcpFallback = targetProfile.soarSettings.transport.equals("tcp", ignoreCase = true) ||
             targetProfile.soarSettings.transport.equals("auto", ignoreCase = true)
 
@@ -902,7 +898,7 @@ class SoarTabController(
                     ContextCompat.getColor(activity, R.color.warning_text)
                 )
                 binding.btnScannerStop.isEnabled = true
-                syncWorkersControls(binding.sliderScannerConcurrency.value.toInt(), isEditable = false)
+                syncWorkersControls(scannerWorkers, isEditable = false)
             }
             ScannerStatus.PAUSED -> {
                 binding.btnScannerStartPauseResume.text = "Resume"
@@ -910,7 +906,7 @@ class SoarTabController(
                     ContextCompat.getColor(activity, R.color.accent_primary)
                 )
                 binding.btnScannerStop.isEnabled = true
-                syncWorkersControls(binding.sliderScannerConcurrency.value.toInt(), isEditable = false)
+                syncWorkersControls(scannerWorkers, isEditable = false)
             }
             ScannerStatus.IDLE, ScannerStatus.COMPLETED, ScannerStatus.STOPPED -> {
                 binding.btnScannerStartPauseResume.text = "Start"
@@ -918,7 +914,7 @@ class SoarTabController(
                     ContextCompat.getColor(activity, R.color.accent_primary)
                 )
                 binding.btnScannerStop.isEnabled = false
-                syncWorkersControls(binding.sliderScannerConcurrency.value.toInt(), isEditable = true)
+                syncWorkersControls(scannerWorkers, isEditable = true)
             }
         }
 
@@ -926,15 +922,12 @@ class SoarTabController(
     }
 
     private fun stepScannerWorkers(delta: Int) {
-        val current = binding.sliderScannerConcurrency.value.toInt()
-        val next = (current + delta).coerceIn(
+        if (!isWorkersEditable) return
+        val next = (scannerWorkers + delta).coerceIn(
             SoarResolverScanner.MIN_CONCURRENCY,
             SoarResolverScanner.MAX_CONCURRENCY
         )
-        if (next != current) {
-            binding.sliderScannerConcurrency.value = next.toFloat()
-        }
-        syncWorkersControls(next, isEditable = binding.sliderScannerConcurrency.isEnabled)
+        syncWorkersControls(next, isEditable = isWorkersEditable)
     }
 
     private fun syncWorkersControls(workers: Int, isEditable: Boolean) {
@@ -942,8 +935,9 @@ class SoarTabController(
             SoarResolverScanner.MIN_CONCURRENCY,
             SoarResolverScanner.MAX_CONCURRENCY
         )
+        scannerWorkers = clamped
+        isWorkersEditable = isEditable
         binding.tvScannerConcurrencyBadge.text = clamped.toString()
-        binding.sliderScannerConcurrency.isEnabled = isEditable
         binding.btnScannerWorkersMinus.isEnabled = isEditable && clamped > SoarResolverScanner.MIN_CONCURRENCY
         binding.btnScannerWorkersPlus.isEnabled = isEditable && clamped < SoarResolverScanner.MAX_CONCURRENCY
     }
@@ -1278,8 +1272,13 @@ class SoarTabController(
         }
     }
 
+    private data class PackRow(
+        val pack: ResolverPack,
+        val isActive: Boolean
+    )
+
     private inner class SoarResolverPacksAdapter :
-        ListAdapter<ResolverPack, SoarResolverPacksAdapter.VH>(PACK_DIFF) {
+        ListAdapter<PackRow, SoarResolverPacksAdapter.VH>(PACK_DIFF) {
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
             val itemBinding = ItemSoarResolverPackBinding.inflate(
@@ -1295,8 +1294,9 @@ class SoarTabController(
         }
 
         inner class VH(private val b: ItemSoarResolverPackBinding) : RecyclerView.ViewHolder(b.root) {
-            fun bind(pack: ResolverPack) {
-                val isActive = pack.id == packState.activePackId
+            fun bind(row: PackRow) {
+                val pack = row.pack
+                val isActive = row.isActive
                 b.tvPackName.text = pack.name
                 b.tvPackCountBadge.text = "${pack.resolvers.size} DNS"
                 b.tvPackActivePill.visibility = if (isActive) View.VISIBLE else View.GONE
@@ -1441,11 +1441,11 @@ class SoarTabController(
                 oldItem == newItem
         }
 
-        private val PACK_DIFF = object : DiffUtil.ItemCallback<ResolverPack>() {
-            override fun areItemsTheSame(oldItem: ResolverPack, newItem: ResolverPack): Boolean =
-                oldItem.id == newItem.id
+        private val PACK_DIFF = object : DiffUtil.ItemCallback<PackRow>() {
+            override fun areItemsTheSame(oldItem: PackRow, newItem: PackRow): Boolean =
+                oldItem.pack.id == newItem.pack.id
 
-            override fun areContentsTheSame(oldItem: ResolverPack, newItem: ResolverPack): Boolean =
+            override fun areContentsTheSame(oldItem: PackRow, newItem: PackRow): Boolean =
                 oldItem == newItem
         }
     }

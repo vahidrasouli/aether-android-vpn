@@ -41,7 +41,11 @@ object SoarResolverPackStore {
         if (!file.exists()) return SoarResolverPackStoreState()
         return runCatching {
             val root = JSONObject(file.readText(Charsets.UTF_8))
-            val activeId = root.optString("activePackId", "").ifBlank { null }
+            val activeId = if (root.isNull("activePackId")) {
+                null
+            } else {
+                root.optString("activePackId", "").trim().ifBlank { null }
+            }
             val arr = root.optJSONArray("packs") ?: JSONArray()
             val list = mutableListOf<ResolverPack>()
             for (i in 0 until arr.length()) {
