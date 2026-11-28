@@ -13,9 +13,7 @@ import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
 import io.aethervpn.android.core.CiBuildState
@@ -47,6 +45,7 @@ class UpdateActivity : AppCompatActivity() {
     private var downloadGeneration = 0L
     private var isChecking = false
     private var ciRingAnimator: ObjectAnimator? = null
+    private var ciPollJob: Job? = null
     private var ciTimerJob: Job? = null
     private var lastCiEtag: String? = null
     private var lastTriggeredSuccessRunId: Long? = null
@@ -97,8 +96,6 @@ class UpdateActivity : AppCompatActivity() {
             }
         }
 
-        startGitHubActionsStatusPolling()
-
         // Start update check after the first frame renders so navigation feels instant.
         window.decorView.post {
             if (!isFinishing && !isDestroyed && !UpdateInstallStateStore.state.value.isInstallLocked) {
@@ -107,8 +104,21 @@ class UpdateActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        startGitHubActionsStatusPolling()
+    }
+
+    override fun onStop() {
+        ciPollJob?.cancel()
+        ciPollJob = null
+        stopCiAnimations()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         activeUpdateDownloadJob?.cancel()
+        ciPollJob?.cancel()
         ciRingAnimator?.cancel()
         ciTimerJob?.cancel()
         super.onDestroy()
@@ -463,25 +473,24 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun startGitHubActionsStatusPolling() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (isActive) {
-                    val result = GitHubActionsStatusChecker.fetchLatestRunStatus(lastCiEtag)
-                    var nextDelayMs = 30_000L
-                    result.onSuccess { poll ->
-                        lastCiEtag = poll.etag
-                        val state = poll.state
-                        if (!poll.notModified && state != null) {
-                            renderCiBuildState(state)
-                            if (state is CiBuildState.InProgress) {
-                                nextDelayMs = GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS
-                            }
-                        } else if (sawInProgressBuild) {
+        ciPollJob?.cancel()
+        ciPollJob = lifecycleScope.launch {
+            while (isActive) {
+                val result = GitHubActionsStatusChecker.fetchLatestRunStatus(lastCiEtag)
+                var nextDelayMs = 30_000L
+                result.onSuccess { poll ->
+                    lastCiEtag = poll.etag
+                    val state = poll.state
+                    if (!poll.notModified && state != null) {
+                        renderCiBuildState(state)
+                        if (state is CiBuildState.InProgress) {
                             nextDelayMs = GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS
                         }
+                    } else if (sawInProgressBuild) {
+                        nextDelayMs = GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS
                     }
-                    delay(nextDelayMs)
                 }
+                delay(nextDelayMs)
             }
         }
     }
