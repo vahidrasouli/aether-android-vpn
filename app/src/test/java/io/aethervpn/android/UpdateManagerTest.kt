@@ -1091,4 +1091,172 @@ class UpdateManagerTest {
             runCatching { server.close() }
         }
     }
+
+    @Test
+    fun checkForUpdatesFetchesDirectCdnManifestFirstWithoutCallingGitHubApi(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val targetSha = "a".repeat(64)
+        val patchSha = "b".repeat(64)
+        val manifestJson = """
+            {
+              "toVersionCode": 102,
+              "toVersionName": "1.1.0-debug-b102",
+              "fullAssetName": "aether-android-arm64-v1.1.0-debug-b102.apk",
+              "fullSize": 18000000,
+              "targetApkSha256": "$targetSha",
+              "patches": [
+                {
+                  "fromVersionCode": 101,
+                  "patchAssetName": "delta-b101-to-b102.patch",
+                  "patchSize": 250000,
+                  "patchSha256": "$patchSha"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val cdnCalls = java.util.concurrent.atomic.AtomicInteger(0)
+        val apiCalls = java.util.concurrent.atomic.AtomicInteger(0)
+        val return404FromCdn = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        val apiReleaseJson = """
+            {
+              "tag_name": "debug-latest",
+              "name": "v1.1.0-debug-b102",
+              "html_url": "https://github.com/vahidrasouli/aether-android-vpn/releases/tag/debug-latest",
+              "assets": [
+                {
+                  "name": "aether-android-arm64-v1.1.0-debug-b102.apk",
+                  "browser_download_url": "https://example.com/aether-android-arm64-v1.1.0-debug-b102.apk"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val server = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+        val acceptThread = Thread {
+            while (!server.isClosed) {
+                try {
+                    server.accept().use { sock ->
+                        val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                        val reqLine = inp.readLine() ?: return@use
+                        while (!inp.readLine().isNullOrEmpty()) { }
+                        val path = reqLine.split(" ").getOrNull(1) ?: "/"
+                        val out = sock.getOutputStream()
+                        if (path.contains("/releases/download/debug-latest/")) {
+                            cdnCalls.incrementAndGet()
+                            if (return404FromCdn.get()) {
+                                out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                            } else {
+                                val bytes = manifestJson.toByteArray()
+                                out.write("HTTP/1.1 200 OK\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                                out.write(bytes)
+                            }
+                        } else {
+                            apiCalls.incrementAndGet()
+                            val bytes = apiReleaseJson.toByteArray()
+                            out.write("HTTP/1.1 200 OK\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                            out.write(bytes)
+                        }
+                        out.flush()
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+        }
+        acceptThread.isDaemon = true
+        acceptThread.start()
+
+        try {
+            val cdnUrl = "http://127.0.0.1:${server.localPort}/releases/download/debug-latest/delta-manifest.json"
+            val apiUrl = "http://127.0.0.1:${server.localPort}/repos/vahidrasouli/aether-android-vpn/releases/tags/debug-latest"
+
+            val res = UpdateManager.checkForUpdates(
+                currentVersion = "1.1.0-debug-b101",
+                isDebugBuild = true,
+                apiUrl = apiUrl,
+                currentVersionCode = 101,
+                directManifestUrl = cdnUrl
+            )
+            assertTrue(res is UpdateCheckResult.UpdateAvailable)
+            val available = res as UpdateCheckResult.UpdateAvailable
+            assertEquals("1.1.0-debug-b102", available.release.versionName)
+            assertEquals(1, cdnCalls.get())
+            assertEquals("api.github.com fallback must NOT be called when CDN succeeds", 0, apiCalls.get())
+            assertEquals(
+                "http://127.0.0.1:${server.localPort}/releases/download/debug-latest/delta-b101-to-b102.patch",
+                available.release.deltaManifest?.matchedPatch?.patchDownloadUrl
+            )
+
+            // Verify 404 on CDN falls back to API
+            return404FromCdn.set(true)
+            val fallbackRes = UpdateManager.checkForUpdates(
+                currentVersion = "1.1.0-debug-b101",
+                isDebugBuild = true,
+                apiUrl = apiUrl,
+                currentVersionCode = 101,
+                directManifestUrl = cdnUrl
+            )
+            assertTrue(fallbackRes is UpdateCheckResult.UpdateAvailable)
+            assertEquals(1, apiCalls.get())
+        } finally {
+            runCatching { server.close() }
+        }
+    }
+
+    @Test
+    fun gitHubActionsStatusCheckerClampsProgressAt95AndStopsSilentlyOnRateLimit(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        assertEquals(45_000L, io.aethervpn.android.core.GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS)
+
+        val inProgJson = """
+            {"workflow_runs":[{"id":555,"run_number":102,"status":"in_progress","conclusion":null,"display_title":"fix: update","run_started_at":"2026-11-28T10:00:00Z","html_url":"https://github.com/run/555"}]}
+        """.trimIndent()
+        val state = io.aethervpn.android.core.GitHubActionsStatusChecker.parseWorkflowRunsJson(inProgJson)
+            as io.aethervpn.android.core.CiBuildState.InProgress
+        assertEquals(102, state.runNumber)
+
+        // Clamps at 95% even after 60 minutes while in_progress
+        val oneHourLater = state.startedAtMs + 60 * 60_000L
+        assertEquals(
+            95,
+            io.aethervpn.android.core.GitHubActionsStatusChecker.estimateBuildProgressPercent(state, oneHourLater)
+        )
+
+        // Hits 100% on completed/success
+        val succeeded = io.aethervpn.android.core.CiBuildState.Succeeded(555L, "fix: update", null, 102)
+        assertEquals(
+            100,
+            io.aethervpn.android.core.GitHubActionsStatusChecker.estimateBuildProgressPercent(succeeded)
+        )
+
+        // HTTP 403 / 429 returns rateLimited=true without throwing
+        val server = java.net.ServerSocket(0, 2, java.net.InetAddress.getByName("127.0.0.1"))
+        val thread = Thread {
+            try {
+                server.accept().use { sock ->
+                    val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                    while (!inp.readLine().isNullOrEmpty()) { }
+                    val out = sock.getOutputStream()
+                    out.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                    out.flush()
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+
+        try {
+            val poll = io.aethervpn.android.core.GitHubActionsStatusChecker.fetchLatestRunStatus(
+                previousEtag = null,
+                apiUrl = "http://127.0.0.1:${server.localPort}/actions/runs?per_page=1"
+            ).getOrThrow()
+            assertTrue(poll.rateLimited)
+            assertNull(poll.state)
+        } finally {
+            runCatching { server.close() }
+        }
+    }
 }

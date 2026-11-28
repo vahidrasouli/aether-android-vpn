@@ -292,6 +292,10 @@ object UpdateManager {
         "https://api.github.com/repos/vahidrasouli/aether-android-vpn/releases/latest"
     const val GITHUB_DEBUG_RELEASE_API =
         "https://api.github.com/repos/vahidrasouli/aether-android-vpn/releases/tags/debug-latest"
+    const val GITHUB_DEBUG_CDN_BASE_URL =
+        "https://github.com/vahidrasouli/aether-android-vpn/releases/download/debug-latest"
+    const val GITHUB_DEBUG_MANIFEST_CDN_URL =
+        "$GITHUB_DEBUG_CDN_BASE_URL/delta-manifest.json"
 
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 15_000
@@ -317,8 +321,44 @@ object UpdateManager {
         currentVersion: String,
         isDebugBuild: Boolean = BuildConfig.DEBUG,
         apiUrl: String = apiUrlForChannel(isDebugBuild),
-        currentVersionCode: Int = BuildConfig.VERSION_CODE
+        currentVersionCode: Int = BuildConfig.VERSION_CODE,
+        directManifestUrl: String = GITHUB_DEBUG_MANIFEST_CDN_URL
     ): UpdateCheckResult = withContext(Dispatchers.IO) {
+        if (isDebugBuild) {
+            var cdnConn: HttpURLConnection? = null
+            try {
+                cdnConn = (URL(directManifestUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    instanceFollowRedirects = true
+                    connectTimeout = CONNECT_TIMEOUT_MS
+                    readTimeout = READ_TIMEOUT_MS
+                    setRequestProperty("User-Agent", "AetherVpnAndroid/$currentVersion")
+                }
+                val cdnCode = cdnConn.responseCode
+                if (cdnCode in 200..299) {
+                    val manifestJson = cdnConn.inputStream.bufferedReader().use { it.readText() }
+                    val cdnBaseUrl = directManifestUrl.substringBeforeLast('/')
+                    return@withContext parseDebugManifestResponse(
+                        manifestJson = manifestJson,
+                        currentVersion = currentVersion,
+                        currentVersionCode = currentVersionCode,
+                        cdnBaseUrl = cdnBaseUrl
+                    )
+                }
+                if (cdnCode != HttpURLConnection.HTTP_NOT_FOUND) {
+                    return@withContext UpdateCheckResult.Unavailable(
+                        "Update check returned HTTP $cdnCode."
+                    )
+                }
+            } catch (e: Exception) {
+                return@withContext UpdateCheckResult.Unavailable(
+                    "Unable to check for updates: ${e.message ?: "network error"}"
+                )
+            } finally {
+                cdnConn?.disconnect()
+            }
+        }
+
         var conn: HttpURLConnection? = null
         try {
             conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
@@ -368,6 +408,72 @@ object UpdateManager {
         } finally {
             conn?.disconnect()
         }
+    }
+
+    internal fun parseDebugManifestResponse(
+        manifestJson: String,
+        currentVersion: String,
+        currentVersionCode: Int = 0,
+        cdnBaseUrl: String = GITHUB_DEBUG_CDN_BASE_URL
+    ): UpdateCheckResult {
+        val obj = runCatching { JSONObject(manifestJson) }.getOrNull()
+            ?: return UpdateCheckResult.Unavailable("Invalid update manifest from GitHub CDN.")
+
+        val toCode = obj.optInt("toVersionCode", -1)
+        val toVersionName = obj.optString("toVersionName", "").trim()
+        val fullName = obj.optString("fullAssetName", "").trim()
+        val fullSize = obj.optLong("fullSize", -1L)
+        val sha256 = obj.optString("targetApkSha256", "").trim()
+
+        if (toCode <= 0 || fullName.isEmpty() || sha256.length != 64) {
+            return UpdateCheckResult.Unavailable("Incomplete update manifest from GitHub CDN.")
+        }
+
+        val remoteDebug = DebugBuildVersion.parse(toVersionName)
+            ?: DebugBuildVersion.parse(fullName)
+            ?: return UpdateCheckResult.Unavailable("Unrecognized debug manifest version.")
+
+        if (!remoteDebug.isNewerThan(currentVersion)) {
+            return UpdateCheckResult.UpToDate(currentVersion)
+        }
+
+        val normalizedBase = cdnBaseUrl.trimEnd('/')
+        val assetUrls = mutableMapOf(fullName to "$normalizedBase/$fullName")
+        val patchesArray = obj.optJSONArray("patches")
+        if (patchesArray != null) {
+            for (i in 0 until patchesArray.length()) {
+                val entry = patchesArray.optJSONObject(i) ?: continue
+                val patchName = entry.optString("patchAssetName", "").trim()
+                if (patchName.isNotEmpty()) {
+                    assetUrls[patchName] = "$normalizedBase/$patchName"
+                }
+            }
+        }
+
+        val deltaManifest = if (currentVersionCode > 0) {
+            parseDeltaManifest(manifestJson, currentVersionCode, assetUrls)
+        } else {
+            DeltaManifest(
+                toVersionCode = toCode,
+                toVersionName = toVersionName,
+                fullAssetName = fullName,
+                fullSize = fullSize,
+                targetApkSha256 = sha256,
+                matchedPatch = null
+            )
+        }
+
+        return UpdateCheckResult.UpdateAvailable(
+            ReleaseInfo(
+                tagName = "debug-latest",
+                versionName = remoteDebug.rawVersion,
+                releaseNotes = "Rolling automated ARM64 Debug build (b$toCode).",
+                apkDownloadUrl = "$normalizedBase/$fullName",
+                apkFileName = fullName,
+                htmlUrl = "$GITHUB_REPO_URL/releases/tag/debug-latest",
+                deltaManifest = deltaManifest
+            )
+        )
     }
 
     private const val DELTA_MANIFEST_ASSET_NAME = "delta-manifest.json"

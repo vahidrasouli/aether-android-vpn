@@ -45,6 +45,7 @@ class UpdateActivity : AppCompatActivity() {
     private var downloadGeneration = 0L
     private var isChecking = false
     private var ciRingAnimator: ObjectAnimator? = null
+    private var ciShimmerAnimator: ObjectAnimator? = null
     private var ciPollJob: Job? = null
     private var ciTimerJob: Job? = null
     private var lastCiEtag: String? = null
@@ -120,6 +121,7 @@ class UpdateActivity : AppCompatActivity() {
         activeUpdateDownloadJob?.cancel()
         ciPollJob?.cancel()
         ciRingAnimator?.cancel()
+        ciShimmerAnimator?.cancel()
         ciTimerJob?.cancel()
         super.onDestroy()
     }
@@ -477,8 +479,13 @@ class UpdateActivity : AppCompatActivity() {
         ciPollJob = lifecycleScope.launch {
             while (isActive) {
                 val result = GitHubActionsStatusChecker.fetchLatestRunStatus(lastCiEtag)
-                var nextDelayMs = 30_000L
+                var nextDelayMs = 45_000L
+                var shouldStop = false
                 result.onSuccess { poll ->
+                    if (poll.rateLimited) {
+                        shouldStop = true
+                        return@onSuccess
+                    }
                     lastCiEtag = poll.etag
                     val state = poll.state
                     if (!poll.notModified && state != null) {
@@ -490,6 +497,7 @@ class UpdateActivity : AppCompatActivity() {
                         nextDelayMs = GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS
                     }
                 }
+                if (shouldStop) break
                 delay(nextDelayMs)
             }
         }
@@ -503,10 +511,12 @@ class UpdateActivity : AppCompatActivity() {
                 binding.ivCiStatusIcon.setImageResource(R.drawable.ic_gh_actions_ring)
                 binding.ivCiStatusIcon.imageTintList = null
                 startCiRingAnimation()
+                startCiShimmerAnimation()
                 binding.tvCiStatusPill.text = state.status.replace('_', ' ').uppercase(Locale.US)
                 binding.tvCiStatusPill.setTextColor(ContextCompat.getColor(this, R.color.warning_text))
-                binding.tvCiStatusTitle.text = state.title.ifBlank { "Building release…" }
-                startCiElapsedTimer(state.startedAtMs)
+                val buildLabel = if (state.runNumber > 0) "b${state.runNumber}" else "release"
+                binding.tvCiStatusTitle.text = state.title.ifBlank { "Building $buildLabel…" }
+                startCiElapsedTimer(state.startedAtMs, state.runNumber)
             }
 
             is CiBuildState.Succeeded -> {
@@ -558,13 +568,36 @@ class UpdateActivity : AppCompatActivity() {
         }
     }
 
-    private fun startCiElapsedTimer(startedAtMs: Long) {
+    private fun startCiShimmerAnimation() {
+        if (ciShimmerAnimator?.isRunning == true) return
+        binding.viewCiShimmer.visibility = View.VISIBLE
+        binding.cardCiBuildStatus.post {
+            if (isFinishing || isDestroyed || !sawInProgressBuild) return@post
+            val cardWidth = binding.cardCiBuildStatus.width.toFloat().coerceAtLeast(400f)
+            val shimmerWidth = binding.viewCiShimmer.width.toFloat().coerceAtLeast(140f)
+            ciShimmerAnimator?.cancel()
+            ciShimmerAnimator = ObjectAnimator.ofFloat(
+                binding.viewCiShimmer,
+                View.TRANSLATION_X,
+                -shimmerWidth,
+                cardWidth + shimmerWidth
+            ).apply {
+                duration = 1600L
+                repeatCount = ObjectAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                start()
+            }
+        }
+    }
+
+    private fun startCiElapsedTimer(startedAtMs: Long, runNumber: Int) {
         ciTimerJob?.cancel()
+        val buildTag = if (runNumber > 0) "b$runNumber" else "release"
         ciTimerJob = lifecycleScope.launch {
             while (isActive) {
                 val elapsed = System.currentTimeMillis() - startedAtMs
                 binding.tvCiStatusSubtitle.text =
-                    "Building release… ${GitHubActionsStatusChecker.formatElapsed(elapsed)}"
+                    "Building $buildTag… • ${GitHubActionsStatusChecker.formatElapsed(elapsed)}"
                 delay(1000L)
             }
         }
@@ -575,7 +608,11 @@ class UpdateActivity : AppCompatActivity() {
         ciTimerJob = null
         ciRingAnimator?.cancel()
         ciRingAnimator = null
+        ciShimmerAnimator?.cancel()
+        ciShimmerAnimator = null
         binding.ivCiStatusIcon.rotation = 0f
+        binding.viewCiShimmer.visibility = View.GONE
+        binding.viewCiShimmer.translationX = 0f
     }
 
     private fun installDownloadedApk(apkFile: File) {

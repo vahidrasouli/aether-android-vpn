@@ -448,4 +448,19 @@ class SoarIntegrationTest {
         )
         assertNull(SoarEngineManager.parseResolverTelemetry("SOCKS5 ready on 127.0.0.1:1829"))
     }
+
+    @Test
+    fun `SoarSpeedTester builds valid SOCKS5 ATYP 0x03 domain connect request`() {
+        val domain = "speed.cloudflare.com"
+        val req = SoarSpeedTester.buildSocks5ConnectRequest(domain, 443)
+        assertEquals(7 + domain.length, req.size)
+        assertEquals(0x05.toByte(), req[0]) // VER = 5
+        assertEquals(0x01.toByte(), req[1]) // CMD = CONNECT
+        assertEquals(0x00.toByte(), req[2]) // RSV = 0
+        assertEquals(0x03.toByte(), req[3]) // ATYP = DOMAINNAME
+        assertEquals(domain.length.toByte(), req[4])
+        assertEquals(domain, String(req, 5, domain.length, Charsets.US_ASCII))
+        assertEquals(0x01.toByte(), req[5 + domain.length]) // 443 >> 8 = 1
+        assertEquals(0xBB.toByte(), req[6 + domain.length]) // 443 & 0xFF = 0xBB
+    }
 }

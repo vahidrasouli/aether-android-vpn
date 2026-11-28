@@ -13,27 +13,31 @@ sealed interface CiBuildState {
         val status: String,
         val title: String,
         val startedAtMs: Long,
-        val htmlUrl: String?
+        val htmlUrl: String?,
+        val runNumber: Int = 0
     ) : CiBuildState
 
     data class Succeeded(
         val runId: Long,
         val title: String,
-        val htmlUrl: String?
+        val htmlUrl: String?,
+        val runNumber: Int = 0
     ) : CiBuildState
 
     data class Failed(
         val runId: Long,
         val conclusion: String,
         val title: String,
-        val htmlUrl: String?
+        val htmlUrl: String?,
+        val runNumber: Int = 0
     ) : CiBuildState
 }
 
 data class CiPollResult(
     val state: CiBuildState?,
     val etag: String?,
-    val notModified: Boolean = false
+    val notModified: Boolean = false,
+    val rateLimited: Boolean = false
 )
 
 /**
@@ -44,7 +48,8 @@ object GitHubActionsStatusChecker {
 
     const val GITHUB_ACTIONS_RUNS_API =
         "https://api.github.com/repos/vahidrasouli/aether-android-vpn/actions/runs?per_page=1"
-    const val POLL_INTERVAL_ACTIVE_MS = 12_000L
+    const val POLL_INTERVAL_ACTIVE_MS = 45_000L
+    private const val EXPECTED_BUILD_DURATION_MS = 10 * 60_000L
     private const val TIMEOUT_MS = 10_000
 
     suspend fun fetchLatestRunStatus(
@@ -70,6 +75,9 @@ object GitHubActionsStatusChecker {
                         HttpURLConnection.HTTP_NOT_MODIFIED -> {
                             CiPollResult(state = null, etag = newEtag, notModified = true)
                         }
+                        HttpURLConnection.HTTP_FORBIDDEN, 429 -> {
+                            CiPollResult(state = null, etag = previousEtag, notModified = true, rateLimited = true)
+                        }
                         in 200..299 -> {
                             val body = conn.inputStream.bufferedReader().use { it.readText() }
                             val parsed = parseWorkflowRunsJson(body)
@@ -92,6 +100,7 @@ object GitHubActionsStatusChecker {
         val run = runs.optJSONObject(0) ?: return null
 
         val runId = run.optLong("id", 0L)
+        val runNumber = run.optInt("run_number", 0)
         val status = run.optString("status", "").trim().lowercase()
         val conclusion = run.optString("conclusion", "").trim().lowercase()
         val rawTitle = run.optString("display_title", "").trim()
@@ -109,7 +118,8 @@ object GitHubActionsStatusChecker {
                     status = status,
                     title = shortTitle,
                     startedAtMs = startedMs,
-                    htmlUrl = htmlUrl
+                    htmlUrl = htmlUrl,
+                    runNumber = runNumber
                 )
             }
             "completed" -> {
@@ -117,19 +127,33 @@ object GitHubActionsStatusChecker {
                     CiBuildState.Succeeded(
                         runId = runId,
                         title = shortTitle,
-                        htmlUrl = htmlUrl
+                        htmlUrl = htmlUrl,
+                        runNumber = runNumber
                     )
                 } else {
                     CiBuildState.Failed(
                         runId = runId,
                         conclusion = conclusion.ifBlank { "failed" },
                         title = shortTitle,
-                        htmlUrl = htmlUrl
+                        htmlUrl = htmlUrl,
+                        runNumber = runNumber
                     )
                 }
             }
             else -> null
         }
+    }
+
+    fun estimateBuildProgressPercent(
+        state: CiBuildState,
+        nowMs: Long = System.currentTimeMillis()
+    ): Int = when (state) {
+        is CiBuildState.InProgress -> {
+            val elapsed = (nowMs - state.startedAtMs).coerceAtLeast(0L)
+            ((elapsed * 95L) / EXPECTED_BUILD_DURATION_MS).toInt().coerceIn(5, 95)
+        }
+        is CiBuildState.Succeeded -> 100
+        is CiBuildState.Failed -> 0
     }
 
     fun parseIsoTimestampMs(iso: String): Long? {
