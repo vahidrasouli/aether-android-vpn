@@ -45,12 +45,12 @@ rm -rf "${PSIPHON_SRC_DIR}/MobileLibrary"
 
 pushd "${PSIPHON_SRC_DIR}" >/dev/null
 
-LDFLAGS="-s -w"
+LDFLAGS="-s -w -buildid="
 if go version | grep -qE "go1\.(2[3-9]|[3-9][0-9])"; then
   LDFLAGS="${LDFLAGS} -checklinkname=0"
 fi
 
-BUILDDATE=$(date --iso-8601=seconds 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILDDATE=$(git log -1 --format=%cI HEAD 2>/dev/null || echo "2026-01-01T00:00:00Z")
 BUILDREPO="${PSIPHON_REPO}"
 BUILDREV="${PSIPHON_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "83aa73b")}"
 GOVERSION=$(go version | awk '{print $3}')

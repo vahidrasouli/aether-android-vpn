@@ -103,6 +103,10 @@ android {
     }
 
     packaging {
+        dex {
+            // Keep DEX uncompressed inside the APK for bsdiff delta efficiency
+            useLegacyPackaging = false
+        }
         jniLibs {
             // Extract libpsiphon-tunnel-core.so to nativeLibraryDir with +x permissions (required for execve() on Android 10+)
             // and compress .so files inside the APK.

@@ -113,7 +113,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-1.26.3-psiphon-cluvex-83aa73b-
 
+      - name: Cache compiled ARM64 libpsiphon-tunnel-core.so
+        id: cache-psiphon
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/jniLibs/arm64-v8a/libpsiphon-tunnel-core.so
+          key: psiphon-83aa73b-${{ hashFiles('scripts/build-psiphon.sh') }}-go-1.26.3-arm64-v1
+
       - name: Build ARM64 Psiphon tunnel core (Go layer)
+        if: steps.cache-psiphon.outputs.cache-hit != 'true'
         run: bash scripts/build-psiphon.sh
 
       - name: Cache compiled ARM64 libsing-box.so
@@ -141,6 +149,7 @@ jobs:
         run: bash scripts/build-soar.sh
 
       - name: Fail-fast smoke test Psiphon TLS initialization
+        if: steps.cache-psiphon.outputs.cache-hit != 'true'
         run: |
           echo "[*] Running host-native ConsoleClient -version smoke test to verify psiphon-tls init..."
           (
@@ -400,6 +409,49 @@ jobs:
                 break
               fi
               COUNT=$((COUNT + 1))
+              if [ "$COUNT" -eq 1 ]; then
+                echo "=== APK Entry Diff Diagnostic: b${PREV_VC} vs b${CURR_VERSION_CODE} ==="
+                python3 - "$PREV_APK" "$APK_PATH" <<'PYEOF'
+          import hashlib, sys, zipfile
+
+          def read_entries(path):
+              entries = {}
+              with zipfile.ZipFile(path, "r") as zf:
+                  for info in zf.infolist():
+                      h = hashlib.sha256(zf.read(info.filename)).hexdigest()[:16]
+                      method = "Stored" if info.compress_type == zipfile.ZIP_STORED else f"Defl:{info.compress_type}"
+                      entries[info.filename] = (method, info.compress_size, info.file_size, h)
+              return entries
+
+          old_e = read_entries(sys.argv[1])
+          new_e = read_entries(sys.argv[2])
+          all_names = sorted(set(old_e) | set(new_e))
+
+          changed = []
+          for name in all_names:
+              o = old_e.get(name)
+              n = new_e.get(name)
+              if o != n:
+                  csize = n[1] if n else 0
+                  changed.append((csize, name, o, n))
+
+          changed.sort(reverse=True)
+          print(f"Changed/added/removed entries: {len(changed)} / {len(all_names)} total")
+          for _, name, o, n in changed[:25]:
+              o_str = f"{o[0]} {o[1]}/{o[2]}B {o[3]}" if o else "MISSING"
+              n_str = f"{n[0]} {n[1]}/{n[2]}B {n[3]}" if n else "REMOVED"
+              print(f"  [DIFF] {name}: {o_str} -> {n_str}")
+
+          print("Key entries status (dex, arsc, .so):")
+          for name in all_names:
+              if name.endswith(".dex") or name == "resources.arsc" or name.endswith(".so"):
+                  o = old_e.get(name)
+                  n = new_e.get(name)
+                  status = "SAME" if o == n else "CHANGED"
+                  n_str = f"{n[0]} {n[1]}/{n[2]}B {n[3]}" if n else "REMOVED"
+                  print(f"  [{status}] {name}: {n_str}")
+          PYEOF
+              fi
               PATCH_NAME="delta-b${PREV_VC}-to-b${CURR_VERSION_CODE}.patch"
               CANDIDATE_PATCH="release-artifacts/${PATCH_NAME}"
               echo "Generating bsdiff patch: b${PREV_VC} -> b${CURR_VERSION_CODE}..."
