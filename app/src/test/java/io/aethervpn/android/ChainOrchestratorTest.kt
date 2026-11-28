@@ -363,6 +363,57 @@ class ChainOrchestratorTest {
         )
     }
 
+    @Test
+    fun warpToSingBoxQuicOutboundsBumpLowPerfProfileToMediumWhileTcpStaysLow() {
+        val mgr = AetherEngineManager(tempFolder.newFolder("aether_quic_perf"))
+        val lowWarpToSb = VpnConfig(
+            singBoxEnabled = true,
+            chainMode = ChainMode.WARP_TO_SINGBOX,
+            perfProfile = PerfProfile.LOW
+        )
+
+        // Hysteria2 and TUIC (both protocol label and JSON outbound) bump LOW -> MEDIUM
+        for (proto in listOf("HY2", "hysteria2", "tuic", "TUIC")) {
+            val plan = ChainOrchestrator.plan(lowWarpToSb, proto)
+            assertTrue("Expected autoBumpedPerfProfile for $proto", plan.autoBumpedPerfProfile)
+            assertEquals(PerfProfile.MEDIUM, plan.aetherEffectiveConfig?.perfProfile)
+            val args = mgr.buildCoreArguments(plan.aetherEffectiveConfig!!)
+            val perfIdx = args.indexOf("--perf")
+            assertTrue(perfIdx >= 0)
+            assertEquals("medium", args[perfIdx + 1])
+        }
+
+        // JSON profile with tuic outbound type also bumps LOW -> MEDIUM
+        val tuicJson = """{"type":"tuic","tag":"proxy","server":"198.51.100.30","server_port":443,"uuid":"11111111-2222-3333-4444-555555555555"}"""
+        val tuicJsonPlan = ChainOrchestrator.plan(lowWarpToSb, "JSON", tuicJson)
+        assertTrue(tuicJsonPlan.autoBumpedPerfProfile)
+        assertEquals(PerfProfile.MEDIUM, tuicJsonPlan.aetherEffectiveConfig?.perfProfile)
+
+        // Already MEDIUM or HIGH stays unchanged without auto-bump flag
+        val medPlan = ChainOrchestrator.plan(lowWarpToSb.copy(perfProfile = PerfProfile.MEDIUM), "HY2")
+        assertFalse(medPlan.autoBumpedPerfProfile)
+        assertEquals(PerfProfile.MEDIUM, medPlan.aetherEffectiveConfig?.perfProfile)
+
+        val highPlan = ChainOrchestrator.plan(lowWarpToSb.copy(perfProfile = PerfProfile.HIGH), "tuic")
+        assertFalse(highPlan.autoBumpedPerfProfile)
+        assertEquals(PerfProfile.HIGH, highPlan.aetherEffectiveConfig?.perfProfile)
+
+        // TCP protocols (VLESS / VMess / Trojan) remain on user's chosen LOW profile
+        for (tcpProto in listOf("VLESS", "VMess", "Trojan", "vless", "vmess", "trojan")) {
+            val plan = ChainOrchestrator.plan(lowWarpToSb, tcpProto)
+            assertFalse("TCP protocol $tcpProto must not auto-bump perfProfile", plan.autoBumpedPerfProfile)
+            assertEquals(PerfProfile.LOW, plan.aetherEffectiveConfig?.perfProfile)
+        }
+
+        // Other chain modes (e.g. SINGBOX_TO_WARP) do not auto-bump even for HY2
+        val reversePlan = ChainOrchestrator.plan(
+            lowWarpToSb.copy(chainMode = ChainMode.SINGBOX_TO_WARP),
+            "HY2"
+        )
+        assertFalse(reversePlan.autoBumpedPerfProfile)
+        assertEquals(PerfProfile.LOW, reversePlan.aetherEffectiveConfig?.perfProfile)
+    }
+
     private fun startMockTraceSocksServer(traceBody: String): Pair<Int, Thread> {
         val server = ServerSocket(0)
         val port = server.localPort

@@ -14,15 +14,32 @@ data class ChainExecutionPlan(
     val aetherEffectiveConfig: VpnConfig?,
     val singBoxUpstreamSocksPort: Int?,
     val requireWarpValidation: Boolean,
-    val protocolLabel: String
+    val protocolLabel: String,
+    val autoBumpedPerfProfile: Boolean = false
 )
 
 object ChainOrchestrator {
 
     private val SINGBOX_UPSTREAM_URL = "socks5://${VpnConfig.LOOPBACK_HOST}:${VpnConfig.SING_BOX_SOCKS_PORT}"
+    private val QUIC_PROTOCOLS = setOf("hysteria2", "hy2", "tuic")
 
-    fun plan(config: VpnConfig, profileProtocol: String = "Sing-box"): ChainExecutionPlan {
+    fun isQuicOutbound(profileProtocol: String, rawUriOrJson: String? = null): Boolean {
+        if (profileProtocol.trim().lowercase() in QUIC_PROTOCOLS) return true
+        if (!rawUriOrJson.isNullOrBlank()) {
+            return SingBoxConfigParser.isQuicOutbound(rawUriOrJson, profileProtocol)
+        }
+        return false
+    }
+
+    fun plan(
+        config: VpnConfig,
+        profileProtocol: String = "Sing-box",
+        rawUriOrJson: String? = null
+    ): ChainExecutionPlan {
         val mode = config.chainMode
+        val shouldBumpPerfForQuic = mode == ChainMode.WARP_TO_SINGBOX &&
+            config.perfProfile == PerfProfile.LOW &&
+            isQuicOutbound(profileProtocol, rawUriOrJson)
         val aetherCfg: VpnConfig? = when (mode) {
             ChainMode.SINGBOX_ONLY -> null
             ChainMode.SINGBOX_TO_WARP -> config.copy(
@@ -52,7 +69,8 @@ object ChainOrchestrator {
             ChainMode.WARP_TO_SINGBOX -> config.copy(
                 singBoxEnabled = false,
                 singBoxOnly = false,
-                psiphonMode = PsiphonMode.OFF
+                psiphonMode = PsiphonMode.OFF,
+                perfProfile = if (shouldBumpPerfForQuic) PerfProfile.MEDIUM else config.perfProfile
             )
             ChainMode.PSIPHON_TO_SINGBOX -> config.copy(
                 singBoxEnabled = false,
@@ -80,7 +98,8 @@ object ChainOrchestrator {
             aetherEffectiveConfig = aetherCfg,
             singBoxUpstreamSocksPort = singBoxUpstreamPort,
             requireWarpValidation = mode.isWarpFinalEgress,
-            protocolLabel = protoLabel
+            protocolLabel = protoLabel,
+            autoBumpedPerfProfile = shouldBumpPerfForQuic
         )
     }
 

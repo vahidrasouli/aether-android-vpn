@@ -529,7 +529,13 @@ class AetherVpnService : VpnService() {
                 ?: return@withLock Result.failure(
                     IllegalStateException("No Sing-box profile selected. Add or select a profile in Sing-box Profiles.")
                 )
-            val plan = ChainOrchestrator.plan(config, activeProfile.protocol)
+            val plan = ChainOrchestrator.plan(config, activeProfile.protocol, activeProfile.rawUriOrJson)
+            if (plan.autoBumpedPerfProfile) {
+                DiagnosticsLog.record(
+                    "Chain",
+                    "QUIC outbound detected — bumping Aether UDP buffer profile for stability"
+                )
+            }
 
             val psiphonBin = if (plan.chainMode.requiresPsiphon) {
                 val bin = AetherEngineManager.findPsiphonBinary(this@AetherVpnService)
@@ -952,7 +958,13 @@ class AetherVpnService : VpnService() {
                     }
                     return@withLock
                 }
-                val plan = ChainOrchestrator.plan(config, activeProfile.protocol)
+                val plan = ChainOrchestrator.plan(config, activeProfile.protocol, activeProfile.rawUriOrJson)
+            if (plan.autoBumpedPerfProfile) {
+                DiagnosticsLog.record(
+                    "Chain",
+                    "QUIC outbound detected — bumping Aether UDP buffer profile for stability"
+                )
+            }
                 val psiphonBin = if (plan.chainMode.requiresPsiphon) {
                     val bin = AetherEngineManager.findPsiphonBinary(this@AetherVpnService)
                     if (bin == null) {

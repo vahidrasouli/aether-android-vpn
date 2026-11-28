@@ -729,4 +729,63 @@ class SingBoxConfigParserTest {
         assertFalse(ssOutbound.has("tls"))
         assertTrue(SingBoxConfigParser.summarizeRuntimeConfig(ssJson).contains("frag=off"))
     }
+
+    @Test
+    fun warpToSingBoxHysteria2InjectsConservativeDefaultsWithoutOverridingExplicitValues() {
+        val warpChainCfg = VpnConfig(
+            singBoxEnabled = true,
+            chainMode = ChainMode.WARP_TO_SINGBOX,
+            sbConnectTimeoutSec = 10
+        )
+
+        // 1. Minimal Hysteria2 URI without upmbps/downmbps/alpn -> injects 15/40, ["h3"], 20s
+        val minimalHy2 = "hy2://hy2pass@hy2.example.com:8443?sni=hy2.example.com#HY2-NoRates"
+        val minimalRuntime = JSONObject(
+            SingBoxConfigParser.buildRuntimeConfig(
+                rawUriOrJson = minimalHy2,
+                upstreamSocksPort = VpnConfig.DEFAULT_SOCKS_PORT,
+                config = warpChainCfg
+            ).getOrThrow()
+        )
+        val minimalOb = minimalRuntime.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("hysteria2", minimalOb.getString("type"))
+        assertEquals("upstream-socks", minimalOb.getString("detour"))
+        assertEquals(15, minimalOb.getInt("up_mbps"))
+        assertEquals(40, minimalOb.getInt("down_mbps"))
+        assertEquals("20s", minimalOb.getString("connect_timeout"))
+        val minimalAlpn = minimalOb.getJSONObject("tls").getJSONArray("alpn")
+        assertEquals(1, minimalAlpn.length())
+        assertEquals("h3", minimalAlpn.getString(0))
+
+        // 2. Explicit upmbps/downmbps/alpn -> preserved without override, connect_timeout still >= 20s
+        val explicitHy2 = "hy2://hy2pass@hy2.example.com:8443?sni=hy2.example.com&upmbps=50&downmbps=120&alpn=h3,h2#HY2-Explicit"
+        val explicitRuntime = JSONObject(
+            SingBoxConfigParser.buildRuntimeConfig(
+                rawUriOrJson = explicitHy2,
+                upstreamSocksPort = VpnConfig.DEFAULT_SOCKS_PORT,
+                config = warpChainCfg
+            ).getOrThrow()
+        )
+        val explicitOb = explicitRuntime.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals(50, explicitOb.getInt("up_mbps"))
+        assertEquals(120, explicitOb.getInt("down_mbps"))
+        assertEquals("20s", explicitOb.getString("connect_timeout"))
+        val explicitAlpn = explicitOb.getJSONObject("tls").getJSONArray("alpn")
+        assertEquals(2, explicitAlpn.length())
+        assertEquals("h3", explicitAlpn.getString(0))
+        assertEquals("h2", explicitAlpn.getString(1))
+
+        // 3. Direct Sing-box Only (no WARP upstream) -> does NOT inject up_mbps/down_mbps or bump connect_timeout
+        val directRuntime = JSONObject(
+            SingBoxConfigParser.buildRuntimeConfig(
+                rawUriOrJson = minimalHy2,
+                upstreamSocksPort = null,
+                config = VpnConfig(singBoxEnabled = true, chainMode = ChainMode.SINGBOX_ONLY, sbConnectTimeoutSec = 10)
+            ).getOrThrow()
+        )
+        val directOb = directRuntime.getJSONArray("outbounds").getJSONObject(0)
+        assertFalse(directOb.has("up_mbps"))
+        assertFalse(directOb.has("down_mbps"))
+        assertEquals("10s", directOb.getString("connect_timeout"))
+    }
 }

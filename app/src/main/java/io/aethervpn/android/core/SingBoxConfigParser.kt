@@ -178,6 +178,8 @@ object SingBoxConfigParser {
         config: VpnConfig = VpnConfig()
     ): Result<String> = runCatching {
         val effectiveUpstreamSocksPort = upstreamSocksPort
+        val isWarpToSingBox = effectiveUpstreamSocksPort == VpnConfig.DEFAULT_SOCKS_PORT ||
+            (effectiveUpstreamSocksPort != null && config.chainMode == ChainMode.WARP_TO_SINGBOX)
         val parsed = parse(rawUriOrJson).getOrThrow()
         val root = if (parsed.isFullConfig) {
             JSONObject(parsed.outboundOrFullJson.toString()).apply {
@@ -216,6 +218,9 @@ object SingBoxConfigParser {
                         }
                         if (config.sbTlsFragment && !isSystemType) {
                             applyTlsFragmentIfEnabled(ob)
+                        }
+                        if (isWarpToSingBox && !isSystemType) {
+                            applyWarpChainHysteria2Defaults(ob, config)
                         }
                         newOutbounds.put(ob)
                     }
@@ -264,6 +269,9 @@ object SingBoxConfigParser {
                 }
                 if (config.sbTlsFragment) {
                     applyTlsFragmentIfEnabled(this)
+                }
+                if (isWarpToSingBox) {
+                    applyWarpChainHysteria2Defaults(this, config)
                 }
             }
             val isTcpOutbound = outbound.optString("type").lowercase() in TCP_BASED_OUTBOUND_TYPES
@@ -792,9 +800,60 @@ object SingBoxConfigParser {
 
     private val REDACTED_JSON_KEYS = setOf("uuid", "password", "private_key", "short_id")
     private const val UPSTREAM_SOCKS_TAG = "upstream-socks"
+    private const val WARP_CHAIN_HY2_DEFAULT_UP_MBPS = 15
+    private const val WARP_CHAIN_HY2_DEFAULT_DOWN_MBPS = 40
+    private const val WARP_CHAIN_HY2_MIN_CONNECT_TIMEOUT_SEC = 20
     private val SYSTEM_OUTBOUND_TYPES = setOf("direct", "block", "dns", "selector", "urltest")
     private val TCP_BASED_OUTBOUND_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks", "socks", "http")
     private val MULTIPLEX_SUPPORTED_TYPES = setOf("vmess", "vless", "trojan", "shadowsocks")
+    private val QUIC_OUTBOUND_TYPES = setOf("hysteria2", "hy2", "tuic")
+
+    fun isQuicOutbound(rawUriOrJson: String, fallbackProtocol: String = ""): Boolean {
+        val parsed = parse(rawUriOrJson).getOrNull()
+        if (parsed != null) {
+            if (!parsed.isFullConfig) {
+                val type = parsed.outboundOrFullJson.optString("type").trim().lowercase()
+                if (type in QUIC_OUTBOUND_TYPES) return true
+            } else {
+                val outbounds = parsed.outboundOrFullJson.optJSONArray("outbounds")
+                val finalTag = parsed.outboundOrFullJson.optJSONObject("route")
+                    ?.optString("final")
+                    ?.takeIf { it.isNotBlank() }
+                if (outbounds != null) {
+                    for (i in 0 until outbounds.length()) {
+                        val ob = outbounds.optJSONObject(i) ?: continue
+                        val tag = ob.optString("tag")
+                        val type = ob.optString("type").trim().lowercase()
+                        if (type in SYSTEM_OUTBOUND_TYPES) continue
+                        if (finalTag == null || tag == finalTag) {
+                            return type in QUIC_OUTBOUND_TYPES
+                        }
+                    }
+                }
+            }
+        }
+        return fallbackProtocol.trim().lowercase() in QUIC_OUTBOUND_TYPES
+    }
+
+    private fun applyWarpChainHysteria2Defaults(outbound: JSONObject, config: VpnConfig) {
+        if (!outbound.optString("type").equals("hysteria2", ignoreCase = true)) return
+        if (!outbound.has("up_mbps")) {
+            outbound.put("up_mbps", WARP_CHAIN_HY2_DEFAULT_UP_MBPS)
+        }
+        if (!outbound.has("down_mbps")) {
+            outbound.put("down_mbps", WARP_CHAIN_HY2_DEFAULT_DOWN_MBPS)
+        }
+        val tls = outbound.optJSONObject("tls") ?: JSONObject().also { outbound.put("tls", it) }
+        val existingAlpn = tls.optJSONArray("alpn")
+        if (existingAlpn == null || existingAlpn.length() == 0) {
+            tls.put("alpn", JSONArray().put("h3"))
+        }
+        val effectiveTimeoutSec = maxOf(
+            config.sbConnectTimeoutSec.coerceIn(3, 60),
+            WARP_CHAIN_HY2_MIN_CONNECT_TIMEOUT_SEC
+        )
+        outbound.put("connect_timeout", "${effectiveTimeoutSec}s")
+    }
 
     private fun buildLogObject(config: VpnConfig): JSONObject = JSONObject().apply {
         put("disabled", false)
