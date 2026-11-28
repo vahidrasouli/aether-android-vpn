@@ -1259,4 +1259,103 @@ class UpdateManagerTest {
             runCatching { server.close() }
         }
     }
+
+    @Test
+    fun checkForUpdatesDebugManifestBypassesHttpAndCdnCache(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        assertEquals(
+            "https://example.com/delta-manifest.json?t=12345",
+            UpdateManager.appendCacheBuster("https://example.com/delta-manifest.json", 12345L)
+        )
+        assertEquals(
+            "https://example.com/delta-manifest.json?foo=bar&t=12345",
+            UpdateManager.appendCacheBuster("https://example.com/delta-manifest.json?foo=bar", 12345L)
+        )
+
+        val targetSha = "c".repeat(64)
+        val buildNumber = java.util.concurrent.atomic.AtomicInteger(102)
+        val capturedPaths = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val capturedHeadersList = java.util.Collections.synchronizedList(mutableListOf<Map<String, String>>())
+
+        val server = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+        val acceptThread = Thread {
+            while (!server.isClosed) {
+                try {
+                    server.accept().use { sock ->
+                        val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                        val reqLine = inp.readLine() ?: return@use
+                        val path = reqLine.split(" ").getOrNull(1) ?: "/"
+                        val headers = mutableMapOf<String, String>()
+                        while (true) {
+                            val line = inp.readLine()
+                            if (line.isNullOrEmpty()) break
+                            val idx = line.indexOf(':')
+                            if (idx > 0) {
+                                headers[line.substring(0, idx).trim().lowercase()] =
+                                    line.substring(idx + 1).trim()
+                            }
+                        }
+                        capturedPaths.add(path)
+                        capturedHeadersList.add(headers)
+
+                        val num = buildNumber.get()
+                        val manifestJson = """
+                            {
+                              "toVersionCode": $num,
+                              "toVersionName": "1.1.0-debug-b$num",
+                              "fullAssetName": "aether-android-arm64-v1.1.0-debug-b$num.apk",
+                              "fullSize": 18000000,
+                              "targetApkSha256": "$targetSha",
+                              "patches": []
+                            }
+                        """.trimIndent().toByteArray()
+
+                        val out = sock.getOutputStream()
+                        out.write("HTTP/1.1 200 OK\r\nContent-Length: ${manifestJson.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        out.write(manifestJson)
+                        out.flush()
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+        }
+        acceptThread.isDaemon = true
+        acceptThread.start()
+
+        try {
+            val cdnUrl = "http://127.0.0.1:${server.localPort}/releases/download/debug-latest/delta-manifest.json"
+            val first = UpdateManager.checkForUpdates(
+                currentVersion = "1.1.0-debug-b101",
+                isDebugBuild = true,
+                apiUrl = "http://127.0.0.1:${server.localPort}/unused",
+                currentVersionCode = 101,
+                directManifestUrl = cdnUrl
+            ) as UpdateCheckResult.UpdateAvailable
+            assertEquals("1.1.0-debug-b102", first.release.versionName)
+
+            buildNumber.set(103)
+            val second = UpdateManager.checkForUpdates(
+                currentVersion = "1.1.0-debug-b101",
+                isDebugBuild = true,
+                apiUrl = "http://127.0.0.1:${server.localPort}/unused",
+                currentVersionCode = 101,
+                directManifestUrl = cdnUrl
+            ) as UpdateCheckResult.UpdateAvailable
+            assertEquals("1.1.0-debug-b103", second.release.versionName)
+
+            assertEquals(2, capturedPaths.size)
+            capturedPaths.forEach { path ->
+                assertTrue(
+                    "Expected cache-buster query param ?t=<digits>, got $path",
+                    path.matches(Regex("""^/releases/download/debug-latest/delta-manifest\.json\?t=\d+$"""))
+                )
+            }
+            capturedHeadersList.forEach { headers ->
+                assertEquals("no-cache, no-store", headers["cache-control"])
+                assertEquals("no-cache", headers["pragma"])
+            }
+        } finally {
+            runCatching { server.close() }
+        }
+    }
 }

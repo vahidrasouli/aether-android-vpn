@@ -327,17 +327,11 @@ object UpdateManager {
         if (isDebugBuild) {
             var cdnConn: HttpURLConnection? = null
             try {
-                cdnConn = (URL(directManifestUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    instanceFollowRedirects = true
-                    connectTimeout = CONNECT_TIMEOUT_MS
-                    readTimeout = READ_TIMEOUT_MS
-                    setRequestProperty("User-Agent", "AetherVpnAndroid/$currentVersion")
-                }
+                cdnConn = openNoCacheManifestConnection(directManifestUrl, currentVersion)
                 val cdnCode = cdnConn.responseCode
                 if (cdnCode in 200..299) {
                     val manifestJson = cdnConn.inputStream.bufferedReader().use { it.readText() }
-                    val cdnBaseUrl = directManifestUrl.substringBeforeLast('/')
+                    val cdnBaseUrl = directManifestUrl.substringBefore('?').substringBeforeLast('/')
                     return@withContext parseDebugManifestResponse(
                         manifestJson = manifestJson,
                         currentVersion = currentVersion,
@@ -491,16 +485,35 @@ object UpdateManager {
         return null
     }
 
+    internal fun appendCacheBuster(
+        url: String,
+        timestampMs: Long = System.currentTimeMillis()
+    ): String {
+        val separator = if ('?' in url) '&' else '?'
+        return "$url${separator}t=$timestampMs"
+    }
+
+    private fun openNoCacheManifestConnection(
+        url: String,
+        currentVersion: String
+    ): HttpURLConnection {
+        val bustedUrl = appendCacheBuster(url)
+        return (URL(bustedUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+            useCaches = false
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("User-Agent", "AetherVpnAndroid/$currentVersion")
+            setRequestProperty("Cache-Control", "no-cache, no-store")
+            setRequestProperty("Pragma", "no-cache")
+        }
+    }
+
     private fun fetchTextSafely(url: String, currentVersion: String): String? = runCatching {
         var conn: HttpURLConnection? = null
         try {
-            conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                instanceFollowRedirects = true
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                setRequestProperty("User-Agent", "AetherVpnAndroid/$currentVersion")
-            }
+            conn = openNoCacheManifestConnection(url, currentVersion)
             if (conn.responseCode in 200..299) {
                 conn.inputStream.bufferedReader().use { it.readText() }
             } else {
