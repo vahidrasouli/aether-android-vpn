@@ -390,7 +390,15 @@ class SoarTabController(
                 SoarResolverScanner.MIN_CONCURRENCY,
                 SoarResolverScanner.MAX_CONCURRENCY
             )
-            binding.tvScannerConcurrencyBadge.text = "$workers workers"
+            syncWorkersControls(workers, isEditable = binding.sliderScannerConcurrency.isEnabled)
+        }
+
+        binding.btnScannerWorkersMinus.setOnClickListener {
+            stepScannerWorkers(-1)
+        }
+
+        binding.btnScannerWorkersPlus.setOnClickListener {
+            stepScannerWorkers(1)
         }
 
         binding.btnScannerStartPauseResume.setOnClickListener {
@@ -894,7 +902,7 @@ class SoarTabController(
                     ContextCompat.getColor(activity, R.color.warning_text)
                 )
                 binding.btnScannerStop.isEnabled = true
-                binding.sliderScannerConcurrency.isEnabled = false
+                syncWorkersControls(binding.sliderScannerConcurrency.value.toInt(), isEditable = false)
             }
             ScannerStatus.PAUSED -> {
                 binding.btnScannerStartPauseResume.text = "Resume"
@@ -902,7 +910,7 @@ class SoarTabController(
                     ContextCompat.getColor(activity, R.color.accent_primary)
                 )
                 binding.btnScannerStop.isEnabled = true
-                binding.sliderScannerConcurrency.isEnabled = false
+                syncWorkersControls(binding.sliderScannerConcurrency.value.toInt(), isEditable = false)
             }
             ScannerStatus.IDLE, ScannerStatus.COMPLETED, ScannerStatus.STOPPED -> {
                 binding.btnScannerStartPauseResume.text = "Start"
@@ -910,11 +918,34 @@ class SoarTabController(
                     ContextCompat.getColor(activity, R.color.accent_primary)
                 )
                 binding.btnScannerStop.isEnabled = false
-                binding.sliderScannerConcurrency.isEnabled = true
+                syncWorkersControls(binding.sliderScannerConcurrency.value.toInt(), isEditable = true)
             }
         }
 
         binding.btnScannerSaveHealthy.isEnabled = state.healthyCount > 0
+    }
+
+    private fun stepScannerWorkers(delta: Int) {
+        val current = binding.sliderScannerConcurrency.value.toInt()
+        val next = (current + delta).coerceIn(
+            SoarResolverScanner.MIN_CONCURRENCY,
+            SoarResolverScanner.MAX_CONCURRENCY
+        )
+        if (next != current) {
+            binding.sliderScannerConcurrency.value = next.toFloat()
+        }
+        syncWorkersControls(next, isEditable = binding.sliderScannerConcurrency.isEnabled)
+    }
+
+    private fun syncWorkersControls(workers: Int, isEditable: Boolean) {
+        val clamped = workers.coerceIn(
+            SoarResolverScanner.MIN_CONCURRENCY,
+            SoarResolverScanner.MAX_CONCURRENCY
+        )
+        binding.tvScannerConcurrencyBadge.text = clamped.toString()
+        binding.sliderScannerConcurrency.isEnabled = isEditable
+        binding.btnScannerWorkersMinus.isEnabled = isEditable && clamped > SoarResolverScanner.MIN_CONCURRENCY
+        binding.btnScannerWorkersPlus.isEnabled = isEditable && clamped < SoarResolverScanner.MAX_CONCURRENCY
     }
 
     private fun renderRuntimeState(state: SoarRuntimeState) {

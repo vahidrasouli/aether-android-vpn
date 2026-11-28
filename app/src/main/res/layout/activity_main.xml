@@ -1699,14 +1699,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="14dp">
 
                 <!-- Header Row: Title + Live Status Pill -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="2dp">
 
                     <LinearLayout
                         android:layout_width="0dp"
@@ -1717,9 +1718,10 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:letterSpacing="-0.01"
                             android:text="Soar DNS Tunnel"
                             android:textColor="@color/text_primary"
-                            android:textSize="20sp"
+                            android:textSize="19sp"
                             android:textStyle="bold" />
 
                         <TextView
@@ -1727,9 +1729,10 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
+                            android:fontFamily="monospace"
                             android:text="Disconnected • 127.0.0.1:1829"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11.5sp" />
                     </LinearLayout>
 
                     <TextView
@@ -1740,7 +1743,7 @@
                         android:background="@drawable/bg_pill_chain"
                         android:fontFamily="monospace"
                         android:paddingHorizontal="8dp"
-                        android:paddingVertical="4dp"
+                        android:paddingVertical="3dp"
                         android:text="0 / 0 DNS"
                         android:textColor="@color/accent_primary"
                         android:textSize="10.5sp"
@@ -1751,7 +1754,7 @@
                         android:id="@+id/tvSoarStatusPill"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="@drawable/bg_pill_chain"
+                        android:background="@drawable/bg_pill_status"
                         android:paddingHorizontal="10dp"
                         android:paddingVertical="4dp"
                         android:text="Disconnected"
@@ -1765,7 +1768,7 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     app:cardCornerRadius="16dp">
 
                     <LinearLayout
@@ -1774,10 +1777,35 @@
                         android:orientation="vertical"
                         android:padding="14dp">
 
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <ImageView
+                                android:layout_width="15dp"
+                                android:layout_height="15dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_tunnel_24"
+                                app:tint="@color/accent_primary" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
+                                android:letterSpacing="0.06"
+                                android:text="CONNECTION MODE"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10.5sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
                         <com.google.android.material.button.MaterialButtonToggleGroup
                             android:id="@+id/toggleSoarMode"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
                             app:checkedButton="@+id/btnSoarModeProxy"
                             app:selectionRequired="true"
                             app:singleSelection="true">
@@ -1786,23 +1814,25 @@
                                 android:id="@+id/btnSoarModeProxy"
                                 style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="0dp"
-                                android:layout_height="38dp"
+                                android:layout_height="36dp"
                                 android:layout_weight="1"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
                                 android:text="Proxy Only"
-                                android:textSize="12sp" />
+                                android:textSize="12sp"
+                                app:strokeColor="@color/card_border" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnSoarModeVpn"
                                 style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="0dp"
-                                android:layout_height="38dp"
+                                android:layout_height="36dp"
                                 android:layout_weight="1"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
                                 android:text="VPN (Full Device)"
-                                android:textSize="12sp" />
+                                android:textSize="12sp"
+                                app:strokeColor="@color/card_border" />
                         </com.google.android.material.button.MaterialButtonToggleGroup>
 
                         <com.google.android.material.textfield.TextInputLayout
@@ -1810,14 +1840,20 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="10dp"
-                            android:hint="Active Resolver Pack">
+                            android:hint="Active Resolver Pack"
+                            app:boxCornerRadiusBottomEnd="12dp"
+                            app:boxCornerRadiusBottomStart="12dp"
+                            app:boxCornerRadiusTopEnd="12dp"
+                            app:boxCornerRadiusTopStart="12dp"
+                            app:boxStrokeColor="@color/card_border">
 
                             <AutoCompleteTextView
                                 android:id="@+id/actSoarActivePack"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:inputType="none"
-                                android:textSize="13sp" />
+                                android:paddingVertical="10dp"
+                                android:textSize="12.5sp" />
                         </com.google.android.material.textfield.TextInputLayout>
 
                         <HorizontalScrollView
@@ -1837,51 +1873,31 @@
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarQuickBalanced"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="32dp"
-                                    android:text="Balanced"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="11sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="Balanced" />
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarQuickTurbo"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="32dp"
-                                    android:text="Turbo"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="11sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="Turbo" />
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarQuickStable"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="32dp"
-                                    android:text="Stable"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="11sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="Stable" />
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarQuickStrict"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="32dp"
-                                    android:text="Strict"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="11sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="Strict" />
                             </com.google.android.material.chip.ChipGroup>
                         </HorizontalScrollView>
 
@@ -1889,10 +1905,11 @@
                             android:id="@+id/btnSoarConnect"
                             style="@style/Widget.Aether.Button"
                             android:layout_width="match_parent"
-                            android:layout_height="46dp"
+                            android:layout_height="44dp"
                             android:layout_marginTop="10dp"
-                            android:minHeight="46dp"
-                            android:text="Start Soar Proxy" />
+                            android:minHeight="44dp"
+                            android:text="Start Soar Proxy"
+                            app:cornerRadius="12dp" />
 
                         <!-- Active Proxy-Only Quick Actions -->
                         <LinearLayout
@@ -1924,12 +1941,14 @@
                                 android:layout_width="0dp"
                                 android:layout_height="36dp"
                                 android:layout_weight="1"
+                                android:fontFamily="monospace"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
                                 android:text="Copy 127.0.0.1:1829"
                                 android:textColor="@color/text_primary"
-                                android:textSize="11.5sp"
-                                app:cornerRadius="10dp" />
+                                android:textSize="11sp"
+                                app:cornerRadius="10dp"
+                                app:strokeColor="@color/card_border" />
                         </LinearLayout>
 
                         <TextView
@@ -1948,7 +1967,7 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     app:cardCornerRadius="16dp">
 
                     <LinearLayout
@@ -1963,13 +1982,21 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
+                            <ImageView
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_speed_24"
+                                app:tint="@color/accent_primary" />
+
                             <TextView
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
                                 android:layout_weight="1"
                                 android:text="Speed Test"
                                 android:textColor="@color/text_primary"
-                                android:textSize="15sp"
+                                android:textSize="14.5sp"
                                 android:textStyle="bold" />
 
                             <com.google.android.material.chip.ChipGroup
@@ -1984,39 +2011,24 @@
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarSpeed100k"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="28dp"
-                                    android:text="100 KB"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="10.5sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="100 KB" />
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarSpeed200k"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="28dp"
-                                    android:text="200 KB"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="10.5sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="200 KB" />
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipSoarSpeed500k"
-                                    style="@style/Widget.Material3.Chip.Filter"
+                                    style="@style/Widget.Aether.Chip.Choice.Compact"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="28dp"
-                                    android:text="500 KB"
-                                    android:textColor="@color/selector_chip_text"
-                                    android:textSize="10.5sp"
-                                    app:chipBackgroundColor="@color/selector_chip_bg"
-                                    app:chipStrokeColor="@color/selector_chip_stroke"
-                                    app:chipStrokeWidth="1dp" />
+                                    android:layout_height="wrap_content"
+                                    android:text="500 KB" />
                             </com.google.android.material.chip.ChipGroup>
                         </LinearLayout>
 
@@ -2066,7 +2078,7 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     app:cardCornerRadius="16dp">
 
                     <LinearLayout
@@ -2081,12 +2093,20 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
+                            <ImageView
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_protocol_24"
+                                app:tint="@color/accent_primary" />
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
                                 android:text="Soar Configs"
                                 android:textColor="@color/text_primary"
-                                android:textSize="15sp"
+                                android:textSize="14.5sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -2095,6 +2115,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginStart="8dp"
                                 android:background="@drawable/bg_pill_chain"
+                                android:fontFamily="monospace"
                                 android:paddingHorizontal="7dp"
                                 android:paddingVertical="1dp"
                                 android:text="0"
@@ -2111,14 +2132,14 @@
                                 android:id="@+id/btnSoarAdd"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="34dp"
+                                android:layout_height="32dp"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
-                                android:minHeight="34dp"
+                                android:minHeight="32dp"
                                 android:paddingHorizontal="12dp"
                                 android:text="+ Add"
                                 android:textColor="@color/accent_primary"
-                                android:textSize="12sp"
+                                android:textSize="11.5sp"
                                 android:textStyle="bold"
                                 app:backgroundTint="@color/accent_primary_container"
                                 app:cornerRadius="10dp" />
@@ -2128,12 +2149,12 @@
                             android:id="@+id/tvSoarEmpty"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="10dp"
                             android:gravity="center"
-                            android:paddingVertical="8dp"
+                            android:paddingVertical="6dp"
                             android:text="No Soar configs yet. Tap + Add to import soar:// or create one."
                             android:textColor="@color/text_secondary"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:visibility="gone" />
 
                         <androidx.recyclerview.widget.RecyclerView
@@ -2150,7 +2171,7 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     app:cardCornerRadius="16dp">
 
                     <LinearLayout
@@ -2165,12 +2186,20 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
+                            <ImageView
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_tune_24"
+                                app:tint="@color/accent_primary" />
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
                                 android:text="Resolver Packs"
                                 android:textColor="@color/text_primary"
-                                android:textSize="15sp"
+                                android:textSize="14.5sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -2179,6 +2208,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginStart="8dp"
                                 android:background="@drawable/bg_pill_chain"
+                                android:fontFamily="monospace"
                                 android:paddingHorizontal="7dp"
                                 android:paddingVertical="1dp"
                                 android:text="0"
@@ -2195,14 +2225,14 @@
                                 android:id="@+id/btnSoarNewPack"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="34dp"
+                                android:layout_height="32dp"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
-                                android:minHeight="34dp"
+                                android:minHeight="32dp"
                                 android:paddingHorizontal="12dp"
                                 android:text="+ New Pack"
                                 android:textColor="@color/accent_primary"
-                                android:textSize="12sp"
+                                android:textSize="11.5sp"
                                 android:textStyle="bold"
                                 app:backgroundTint="@color/accent_primary_container"
                                 app:cornerRadius="10dp" />
@@ -2212,12 +2242,12 @@
                             android:id="@+id/tvSoarPacksEmpty"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="10dp"
                             android:gravity="center"
-                            android:paddingVertical="8dp"
+                            android:paddingVertical="6dp"
                             android:text="No Resolver Packs yet. Import soar://, scan IPs, or tap + New Pack."
                             android:textColor="@color/text_secondary"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:visibility="gone" />
 
                         <androidx.recyclerview.widget.RecyclerView
@@ -2234,7 +2264,7 @@
                     style="@style/Widget.Aether.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     android:layout_marginBottom="16dp"
                     app:cardCornerRadius="16dp">
 
@@ -2250,20 +2280,28 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
+                            <ImageView
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_refresh_24"
+                                app:tint="@color/accent_primary" />
+
                             <TextView
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
                                 android:layout_weight="1"
                                 android:text="Resolver Scanner"
                                 android:textColor="@color/text_primary"
-                                android:textSize="15sp"
+                                android:textSize="14.5sp"
                                 android:textStyle="bold" />
 
                             <TextView
                                 android:id="@+id/tvScannerStatusPill"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:background="@drawable/bg_pill_chain"
+                                android:background="@drawable/bg_pill_status"
                                 android:paddingHorizontal="9dp"
                                 android:paddingVertical="2dp"
                                 android:text="Idle"
@@ -2286,30 +2324,32 @@
                                 android:id="@+id/btnScannerSourceFile"
                                 style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="0dp"
-                                android:layout_height="36dp"
+                                android:layout_height="34dp"
                                 android:layout_weight="1"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
                                 android:text="Import .txt File"
-                                android:textSize="12sp" />
+                                android:textSize="11.5sp"
+                                app:strokeColor="@color/card_border" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnScannerSourcePack"
                                 style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="0dp"
-                                android:layout_height="36dp"
+                                android:layout_height="34dp"
                                 android:layout_weight="1"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
                                 android:text="Saved Pack"
-                                android:textSize="12sp" />
+                                android:textSize="11.5sp"
+                                app:strokeColor="@color/card_border" />
                         </com.google.android.material.button.MaterialButtonToggleGroup>
 
                         <LinearLayout
                             android:id="@+id/layoutScannerFileSource"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
@@ -2317,11 +2357,12 @@
                                 android:id="@+id/btnScannerPickFile"
                                 style="@style/Widget.Aether.Button.Tonal"
                                 android:layout_width="wrap_content"
-                                android:layout_height="38dp"
-                                android:minHeight="38dp"
-                                android:paddingHorizontal="14dp"
+                                android:layout_height="34dp"
+                                android:minHeight="34dp"
+                                android:paddingHorizontal="12dp"
                                 android:text="Choose .txt"
-                                android:textSize="12sp" />
+                                android:textSize="11.5sp"
+                                app:cornerRadius="10dp" />
 
                             <TextView
                                 android:id="@+id/tvScannerFileSummary"
@@ -2330,10 +2371,11 @@
                                 android:layout_marginStart="10dp"
                                 android:layout_weight="1"
                                 android:ellipsize="end"
+                                android:fontFamily="monospace"
                                 android:maxLines="1"
                                 android:text="No .txt file loaded"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="12sp" />
+                                android:textSize="11.5sp" />
                         </LinearLayout>
 
                         <com.google.android.material.textfield.TextInputLayout
@@ -2341,16 +2383,22 @@
                             style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
+                            android:layout_marginTop="8dp"
                             android:hint="Source Resolver Pack"
-                            android:visibility="gone">
+                            android:visibility="gone"
+                            app:boxCornerRadiusBottomEnd="12dp"
+                            app:boxCornerRadiusBottomStart="12dp"
+                            app:boxCornerRadiusTopEnd="12dp"
+                            app:boxCornerRadiusTopStart="12dp"
+                            app:boxStrokeColor="@color/card_border">
 
                             <AutoCompleteTextView
                                 android:id="@+id/actScannerSourcePack"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:inputType="none"
-                                android:textSize="13sp" />
+                                android:paddingVertical="10dp"
+                                android:textSize="12.5sp" />
                         </com.google.android.material.textfield.TextInputLayout>
 
                         <!-- Target Soar Config Selector -->
@@ -2358,22 +2406,28 @@
                             style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:hint="Target Soar Config (Zone)">
+                            android:layout_marginTop="8dp"
+                            android:hint="Target Soar Config (Zone)"
+                            app:boxCornerRadiusBottomEnd="12dp"
+                            app:boxCornerRadiusBottomStart="12dp"
+                            app:boxCornerRadiusTopEnd="12dp"
+                            app:boxCornerRadiusTopStart="12dp"
+                            app:boxStrokeColor="@color/card_border">
 
                             <AutoCompleteTextView
                                 android:id="@+id/actScannerTargetConfig"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:inputType="none"
-                                android:textSize="13sp" />
+                                android:paddingVertical="10dp"
+                                android:textSize="12.5sp" />
                         </com.google.android.material.textfield.TextInputLayout>
 
-                        <!-- Concurrency Slider -->
+                        <!-- Sleek Compact Workers Control -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="10dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
@@ -2381,35 +2435,96 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="Concurrency (Workers)"
+                                android:text="Workers"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="12sp" />
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnScannerWorkersMinus"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:gravity="center"
+                                android:insetLeft="0dp"
+                                android:insetTop="0dp"
+                                android:insetRight="0dp"
+                                android:insetBottom="0dp"
+                                android:minWidth="0dp"
+                                android:minHeight="0dp"
+                                android:padding="0dp"
+                                android:text="−"
+                                android:textColor="@color/text_primary"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                app:backgroundTint="@color/surface_elevated"
+                                app:cornerRadius="14dp"
+                                app:strokeColor="@color/card_border"
+                                app:strokeWidth="1dp" />
 
                             <TextView
                                 android:id="@+id/tvScannerConcurrencyBadge"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
+                                android:layout_marginHorizontal="6dp"
+                                android:background="@drawable/bg_pill_chain"
                                 android:fontFamily="monospace"
-                                android:text="25 workers"
+                                android:gravity="center"
+                                android:minWidth="36dp"
+                                android:paddingHorizontal="9dp"
+                                android:paddingVertical="2dp"
+                                android:text="25"
                                 android:textColor="@color/accent_primary"
-                                android:textSize="12sp"
+                                android:textSize="11.5sp"
                                 android:textStyle="bold" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnScannerWorkersPlus"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:gravity="center"
+                                android:insetLeft="0dp"
+                                android:insetTop="0dp"
+                                android:insetRight="0dp"
+                                android:insetBottom="0dp"
+                                android:minWidth="0dp"
+                                android:minHeight="0dp"
+                                android:padding="0dp"
+                                android:text="+"
+                                android:textColor="@color/text_primary"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                app:backgroundTint="@color/surface_elevated"
+                                app:cornerRadius="14dp"
+                                app:strokeColor="@color/card_border"
+                                app:strokeWidth="1dp" />
                         </LinearLayout>
 
                         <com.google.android.material.slider.Slider
                             android:id="@+id/sliderScannerConcurrency"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
                             android:stepSize="1"
                             android:value="25"
                             android:valueFrom="1"
-                            android:valueTo="100" />
+                            android:valueTo="100"
+                            app:haloColor="@color/accent_primary_container"
+                            app:haloRadius="14dp"
+                            app:labelBehavior="gone"
+                            app:thumbColor="@color/accent_primary"
+                            app:thumbRadius="7dp"
+                            app:tickVisible="false"
+                            app:trackColorActive="@color/accent_primary"
+                            app:trackColorInactive="@color/surface_elevated"
+                            app:trackHeight="3dp" />
 
-                        <!-- Live Stat Pills -->
+                        <!-- Live Mini-Metric Tiles -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="4dp"
                             android:orientation="horizontal">
 
                             <LinearLayout
@@ -2417,10 +2532,11 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginEnd="6dp"
                                 android:layout_weight="1"
-                                android:background="@drawable/bg_pill_chain"
+                                android:background="@drawable/bg_pill_status"
                                 android:gravity="center"
                                 android:orientation="vertical"
-                                android:paddingVertical="8dp">
+                                android:paddingHorizontal="4dp"
+                                android:paddingVertical="7dp">
 
                                 <TextView
                                     android:id="@+id/tvStatTotal"
@@ -2435,6 +2551,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
+                                    android:layout_marginTop="1dp"
                                     android:text="Total"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
@@ -2445,10 +2562,11 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginEnd="6dp"
                                 android:layout_weight="1"
-                                android:background="@drawable/bg_pill_chain"
+                                android:background="@drawable/bg_pill_status"
                                 android:gravity="center"
                                 android:orientation="vertical"
-                                android:paddingVertical="8dp">
+                                android:paddingHorizontal="4dp"
+                                android:paddingVertical="7dp">
 
                                 <TextView
                                     android:id="@+id/tvStatHealthy"
@@ -2463,6 +2581,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
+                                    android:layout_marginTop="1dp"
                                     android:text="Healthy"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
@@ -2473,10 +2592,11 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginEnd="6dp"
                                 android:layout_weight="1"
-                                android:background="@drawable/bg_pill_chain"
+                                android:background="@drawable/bg_pill_status"
                                 android:gravity="center"
                                 android:orientation="vertical"
-                                android:paddingVertical="8dp">
+                                android:paddingHorizontal="4dp"
+                                android:paddingVertical="7dp">
 
                                 <TextView
                                     android:id="@+id/tvStatRejected"
@@ -2491,6 +2611,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
+                                    android:layout_marginTop="1dp"
                                     android:text="Rejected"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
@@ -2500,10 +2621,11 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:background="@drawable/bg_pill_chain"
+                                android:background="@drawable/bg_pill_status"
                                 android:gravity="center"
                                 android:orientation="vertical"
-                                android:paddingVertical="8dp">
+                                android:paddingHorizontal="4dp"
+                                android:paddingVertical="7dp">
 
                                 <TextView
                                     android:id="@+id/tvStatPercent"
@@ -2518,6 +2640,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
+                                    android:layout_marginTop="1dp"
                                     android:text="Scanned"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
@@ -2533,7 +2656,8 @@
                             android:progress="0"
                             app:indicatorColor="@color/accent_primary"
                             app:trackColor="@color/surface_elevated"
-                            app:trackCornerRadius="4dp" />
+                            app:trackCornerRadius="4dp"
+                            app:trackThickness="4dp" />
 
                         <TextView
                             android:id="@+id/tvScannerError"
@@ -2548,44 +2672,47 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
+                            android:layout_marginTop="10dp"
                             android:orientation="horizontal">
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnScannerStartPauseResume"
                                 style="@style/Widget.Aether.Button"
                                 android:layout_width="0dp"
-                                android:layout_height="40dp"
+                                android:layout_height="38dp"
                                 android:layout_marginEnd="6dp"
-                                android:layout_weight="1.2"
-                                android:minHeight="40dp"
+                                android:layout_weight="1.15"
+                                android:minHeight="38dp"
                                 android:text="Start"
-                                android:textSize="12.5sp" />
+                                android:textSize="12sp"
+                                app:cornerRadius="12dp" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnScannerStop"
                                 style="@style/Widget.Aether.Button.Outlined"
                                 android:layout_width="0dp"
-                                android:layout_height="40dp"
+                                android:layout_height="38dp"
                                 android:layout_marginEnd="6dp"
                                 android:layout_weight="0.8"
                                 android:enabled="false"
-                                android:minHeight="40dp"
+                                android:minHeight="38dp"
                                 android:text="Stop"
-                                android:textSize="12.5sp" />
+                                android:textSize="12sp"
+                                app:cornerRadius="12dp" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnScannerSaveHealthy"
                                 style="@style/Widget.Aether.Button.Tonal"
                                 android:layout_width="0dp"
-                                android:layout_height="40dp"
-                                android:layout_weight="1.2"
+                                android:layout_height="38dp"
+                                android:layout_weight="1.15"
                                 android:enabled="false"
-                                android:minHeight="40dp"
+                                android:minHeight="38dp"
                                 android:text="Save Healthy"
                                 android:textColor="@color/accent_primary"
-                                android:textSize="12sp"
-                                app:backgroundTint="@color/accent_primary_container" />
+                                android:textSize="11.5sp"
+                                app:backgroundTint="@color/accent_primary_container"
+                                app:cornerRadius="12dp" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
