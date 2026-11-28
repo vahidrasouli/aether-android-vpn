@@ -1,5 +1,6 @@
 package io.aethervpn.android.ui
 
+import android.animation.ObjectAnimator
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.content.res.ColorStateList
@@ -8,12 +9,17 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import io.aethervpn.android.BuildConfig
 import io.aethervpn.android.R
+import io.aethervpn.android.core.CiBuildState
+import io.aethervpn.android.core.GitHubActionsStatusChecker
 import io.aethervpn.android.core.ReleaseInfo
 import io.aethervpn.android.core.UpdateCheckResult
 import io.aethervpn.android.core.UpdateInstallPhase
@@ -24,8 +30,9 @@ import io.aethervpn.android.databinding.ActivityUpdateBinding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -37,7 +44,13 @@ class UpdateActivity : AppCompatActivity() {
     private var pendingUpdateRelease: ReleaseInfo? = null
     private var pendingInstallApkFile: File? = null
     private var activeUpdateDownloadJob: Job? = null
+    private var downloadGeneration = 0L
     private var isChecking = false
+    private var ciRingAnimator: ObjectAnimator? = null
+    private var ciTimerJob: Job? = null
+    private var lastCiEtag: String? = null
+    private var lastTriggeredSuccessRunId: Long? = null
+    private var sawInProgressBuild = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,6 +83,10 @@ class UpdateActivity : AppCompatActivity() {
             cancelActiveDownload()
         }
 
+        binding.btnDiscardUpdate.setOnClickListener {
+            discardPartialDownload()
+        }
+
         if (!UpdateInstallStateStore.state.value.isInstallLocked) {
             UpdateInstallStateStore.reset()
         }
@@ -79,6 +96,8 @@ class UpdateActivity : AppCompatActivity() {
                 renderInstallState(installState)
             }
         }
+
+        startGitHubActionsStatusPolling()
 
         // Start update check after the first frame renders so navigation feels instant.
         window.decorView.post {
@@ -90,6 +109,8 @@ class UpdateActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         activeUpdateDownloadJob?.cancel()
+        ciRingAnimator?.cancel()
+        ciTimerJob?.cancel()
         super.onDestroy()
     }
 
@@ -135,6 +156,7 @@ class UpdateActivity : AppCompatActivity() {
 
         applyPrimaryButtonStyle(enabled = false, label = "Checking…", activeStyle = false)
         binding.btnCancelUpdate.visibility = View.GONE
+        binding.btnDiscardUpdate.visibility = View.GONE
         binding.tvUpdateHeadline.text = getString(R.string.update_headline_checking)
         binding.tvUpdateStatus.text = "Querying GitHub Releases…"
         binding.tvLatestBuild.visibility = View.GONE
@@ -220,6 +242,7 @@ class UpdateActivity : AppCompatActivity() {
                         hasPartial -> getString(R.string.action_resume_download)
                         else -> getString(R.string.action_download_install)
                     }
+                    binding.btnDiscardUpdate.visibility = if (hasPartial) View.VISIBLE else View.GONE
                     applyPrimaryButtonStyle(enabled = true, label = btnLabel, activeStyle = false)
                 }
 
@@ -251,6 +274,7 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun startDownloadAndPatch(rel: ReleaseInfo) {
+        val gen = ++downloadGeneration
         activeUpdateDownloadJob = lifecycleScope.launch {
             val resumingBytes = withContext(Dispatchers.IO) {
                 UpdateManager.getPartialDownloadSize(rel, cacheDir)
@@ -258,6 +282,7 @@ class UpdateActivity : AppCompatActivity() {
 
             applyPrimaryButtonStyle(enabled = false, label = "Updating…", activeStyle = true)
             binding.btnCancelUpdate.visibility = View.VISIBLE
+            binding.btnDiscardUpdate.visibility = View.GONE
             binding.tvUpdateStageLabel.visibility = View.VISIBLE
             binding.tvUpdateStageLabel.text = if (resumingBytes > 0L) {
                 "Resuming download..."
@@ -315,8 +340,10 @@ class UpdateActivity : AppCompatActivity() {
                 }
 
                 binding.btnCancelUpdate.visibility = View.GONE
+                if (gen != downloadGeneration) return@launch
                 downloadResult.onSuccess { file ->
                     pendingInstallApkFile = file
+                    binding.btnDiscardUpdate.visibility = View.GONE
                     binding.progressUpdateDownload.isIndeterminate = false
                     binding.progressUpdateDownload.progress = 100
                     binding.tvUpdateStageLabel.text = "Installing..."
@@ -332,7 +359,9 @@ class UpdateActivity : AppCompatActivity() {
                     val hasPart = withContext(Dispatchers.IO) {
                         UpdateManager.getPartialDownloadSize(rel, cacheDir) > 0L
                     }
+                    if (gen != downloadGeneration) return@launch
                     if (hasPart) {
+                        binding.btnDiscardUpdate.visibility = View.VISIBLE
                         applyPrimaryButtonStyle(
                             enabled = true,
                             label = getString(R.string.action_resume_download),
@@ -341,6 +370,7 @@ class UpdateActivity : AppCompatActivity() {
                         binding.tvUpdateStageLabel.text = "Download paused"
                         binding.tvUpdateStatus.text = "Download paused (${err.message ?: "network error"})"
                     } else {
+                        binding.btnDiscardUpdate.visibility = View.GONE
                         applyPrimaryButtonStyle(
                             enabled = true,
                             label = getString(R.string.action_download_install),
@@ -353,31 +383,65 @@ class UpdateActivity : AppCompatActivity() {
                     }
                 }
             } catch (_: CancellationException) {
-                val savedBytes = withContext(NonCancellable + Dispatchers.IO) {
-                    UpdateManager.getPartialDownloadSize(rel, cacheDir)
-                }
-                if (savedBytes > 0L) {
-                    binding.btnCancelUpdate.visibility = View.GONE
-                    binding.progressUpdateDownload.isIndeterminate = false
-                    binding.tvUpdateStageLabel.text = "Download paused"
-                    binding.tvUpdateStatus.text = "Download paused • Tap Resume to continue"
-                    applyPrimaryButtonStyle(
-                        enabled = true,
-                        label = getString(R.string.action_resume_download),
-                        activeStyle = false
-                    )
-                } else {
-                    resetDownloadProgressUi("Download cancelled")
-                }
+                // UI already transitioned immediately in cancelActiveDownload()
             } finally {
-                activeUpdateDownloadJob = null
+                if (gen == downloadGeneration) {
+                    activeUpdateDownloadJob = null
+                }
             }
         }
     }
 
     private fun cancelActiveDownload() {
+        downloadGeneration++
+        val job = activeUpdateDownloadJob
+        activeUpdateDownloadJob = null
+        job?.cancel()
+        lifecycleScope.launch(Dispatchers.IO) {
+            UpdateManager.abortActiveDownloads()
+        }
+
         binding.btnCancelUpdate.visibility = View.GONE
+        binding.progressUpdateDownload.isIndeterminate = false
+
+        val rel = pendingUpdateRelease
+        lifecycleScope.launch {
+            val savedBytes = if (rel != null) {
+                withContext(Dispatchers.IO) {
+                    UpdateManager.getPartialDownloadSize(rel, cacheDir)
+                }
+            } else {
+                0L
+            }
+            if (savedBytes > 0L) {
+                binding.btnDiscardUpdate.visibility = View.VISIBLE
+                binding.tvUpdateStageLabel.visibility = View.VISIBLE
+                binding.tvUpdateStageLabel.text = "Download paused"
+                binding.tvUpdateStatus.text = "Download paused • Tap Resume to continue"
+                applyPrimaryButtonStyle(
+                    enabled = true,
+                    label = getString(R.string.action_resume_download),
+                    activeStyle = false
+                )
+            } else {
+                resetDownloadProgressUi("Download cancelled")
+            }
+        }
+    }
+
+    private fun discardPartialDownload() {
+        downloadGeneration++
         activeUpdateDownloadJob?.cancel()
+        activeUpdateDownloadJob = null
+        val rel = pendingUpdateRelease
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                UpdateManager.abortActiveDownloads()
+                UpdateManager.discardAllPartialDownloads(rel, cacheDir)
+            }
+            resetDownloadProgressUi("Partial download discarded")
+            checkForUpdates()
+        }
     }
 
     private fun resetDownloadProgressUi(statusMessage: String) {
@@ -389,12 +453,120 @@ class UpdateActivity : AppCompatActivity() {
         binding.tvUpdateProgressDetail.text = ""
         binding.tvUpdateStatus.text = statusMessage
         binding.btnCancelUpdate.visibility = View.GONE
+        binding.btnDiscardUpdate.visibility = View.GONE
         val label = if (pendingUpdateRelease != null) {
             getString(R.string.action_download_install)
         } else {
             getString(R.string.action_check_updates)
         }
         applyPrimaryButtonStyle(enabled = true, label = label, activeStyle = false)
+    }
+
+    private fun startGitHubActionsStatusPolling() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    val result = GitHubActionsStatusChecker.fetchLatestRunStatus(lastCiEtag)
+                    var nextDelayMs = 30_000L
+                    result.onSuccess { poll ->
+                        lastCiEtag = poll.etag
+                        val state = poll.state
+                        if (!poll.notModified && state != null) {
+                            renderCiBuildState(state)
+                            if (state is CiBuildState.InProgress) {
+                                nextDelayMs = GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS
+                            }
+                        } else if (sawInProgressBuild) {
+                            nextDelayMs = GitHubActionsStatusChecker.POLL_INTERVAL_ACTIVE_MS
+                        }
+                    }
+                    delay(nextDelayMs)
+                }
+            }
+        }
+    }
+
+    private fun renderCiBuildState(state: CiBuildState) {
+        binding.cardCiBuildStatus.visibility = View.VISIBLE
+        when (state) {
+            is CiBuildState.InProgress -> {
+                sawInProgressBuild = true
+                binding.ivCiStatusIcon.setImageResource(R.drawable.ic_gh_actions_ring)
+                binding.ivCiStatusIcon.imageTintList = null
+                startCiRingAnimation()
+                binding.tvCiStatusPill.text = state.status.replace('_', ' ').uppercase(Locale.US)
+                binding.tvCiStatusPill.setTextColor(ContextCompat.getColor(this, R.color.warning_text))
+                binding.tvCiStatusTitle.text = state.title.ifBlank { "Building release…" }
+                startCiElapsedTimer(state.startedAtMs)
+            }
+
+            is CiBuildState.Succeeded -> {
+                stopCiAnimations()
+                binding.ivCiStatusIcon.setImageResource(R.drawable.ic_check_circle_24)
+                binding.ivCiStatusIcon.imageTintList = ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.log_success)
+                )
+                binding.tvCiStatusPill.text = "PASSED"
+                binding.tvCiStatusPill.setTextColor(ContextCompat.getColor(this, R.color.log_success))
+
+                val shouldAutoRefresh = sawInProgressBuild && lastTriggeredSuccessRunId != state.runId
+                sawInProgressBuild = false
+                if (shouldAutoRefresh) {
+                    lastTriggeredSuccessRunId = state.runId
+                    binding.tvCiStatusTitle.text = "Build succeeded — checking latest update…"
+                    binding.tvCiStatusSubtitle.text = state.title
+                    checkForUpdates()
+                } else {
+                    binding.tvCiStatusTitle.text = "Latest CI build succeeded"
+                    binding.tvCiStatusSubtitle.text = state.title
+                }
+            }
+
+            is CiBuildState.Failed -> {
+                sawInProgressBuild = false
+                stopCiAnimations()
+                binding.ivCiStatusIcon.setImageResource(R.drawable.ic_error_24)
+                val isCancelled = state.conclusion == "cancelled"
+                val colorRes = if (isCancelled) R.color.text_secondary else R.color.error_text
+                binding.ivCiStatusIcon.imageTintList = ColorStateList.valueOf(
+                    ContextCompat.getColor(this, colorRes)
+                )
+                binding.tvCiStatusPill.text = state.conclusion.uppercase(Locale.US)
+                binding.tvCiStatusPill.setTextColor(ContextCompat.getColor(this, colorRes))
+                binding.tvCiStatusTitle.text = if (isCancelled) "CI build cancelled" else "CI build failed"
+                binding.tvCiStatusSubtitle.text = state.title
+            }
+        }
+    }
+
+    private fun startCiRingAnimation() {
+        if (ciRingAnimator?.isRunning == true) return
+        ciRingAnimator = ObjectAnimator.ofFloat(binding.ivCiStatusIcon, View.ROTATION, 0f, 360f).apply {
+            duration = 1200L
+            repeatCount = ObjectAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+
+    private fun startCiElapsedTimer(startedAtMs: Long) {
+        ciTimerJob?.cancel()
+        ciTimerJob = lifecycleScope.launch {
+            while (isActive) {
+                val elapsed = System.currentTimeMillis() - startedAtMs
+                binding.tvCiStatusSubtitle.text =
+                    "Building release… ${GitHubActionsStatusChecker.formatElapsed(elapsed)}"
+                delay(1000L)
+            }
+        }
+    }
+
+    private fun stopCiAnimations() {
+        ciTimerJob?.cancel()
+        ciTimerJob = null
+        ciRingAnimator?.cancel()
+        ciRingAnimator = null
+        binding.ivCiStatusIcon.rotation = 0f
     }
 
     private fun installDownloadedApk(apkFile: File) {

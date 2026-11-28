@@ -9,7 +9,8 @@ data class ResolverPack(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val resolvers: List<String> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val metrics: Map<String, ResolverBenchmarkMetrics> = emptyMap()
 ) {
     fun previewSummary(): String {
         if (resolvers.isEmpty()) return "Empty pack"
@@ -58,12 +59,30 @@ object SoarResolverPackStore {
                         resolvers.add(item)
                     }
                 }
+                val metricsObj = obj.optJSONObject("metrics")
+                val metricsMap = mutableMapOf<String, ResolverBenchmarkMetrics>()
+                if (metricsObj != null) {
+                    val keys = metricsObj.keys()
+                    while (keys.hasNext()) {
+                        val ip = keys.next()
+                        val mObj = metricsObj.optJSONObject(ip) ?: continue
+                        metricsMap[ip] = ResolverBenchmarkMetrics(
+                            ip = ip,
+                            avgPingMs = mObj.optInt("avgPingMs", Int.MAX_VALUE),
+                            jitterMs = mObj.optInt("jitterMs", Int.MAX_VALUE),
+                            lossPercent = mObj.optInt("lossPercent", 100),
+                            successCount = mObj.optInt("successCount", 0),
+                            totalProbes = mObj.optInt("totalProbes", ResolverBenchmarkMetrics.DEFAULT_PROBES_PER_IP)
+                        )
+                    }
+                }
                 list.add(
                     ResolverPack(
                         id = id,
                         name = name,
                         resolvers = resolvers,
-                        createdAt = createdAt
+                        createdAt = createdAt,
+                        metrics = metricsMap
                     )
                 )
             }
@@ -87,6 +106,19 @@ object SoarResolverPackStore {
                         put("resolvers", JSONArray().apply {
                             pack.resolvers.forEach { put(it) }
                         })
+                        if (pack.metrics.isNotEmpty()) {
+                            put("metrics", JSONObject().apply {
+                                pack.metrics.forEach { (ip, m) ->
+                                    put(ip, JSONObject().apply {
+                                        put("avgPingMs", m.avgPingMs)
+                                        put("jitterMs", m.jitterMs)
+                                        put("lossPercent", m.lossPercent)
+                                        put("successCount", m.successCount)
+                                        put("totalProbes", m.totalProbes)
+                                    })
+                                }
+                            })
+                        }
                     })
                 }
             })
@@ -101,9 +133,12 @@ object SoarResolverPackStore {
         setActive: Boolean = false
     ): SoarResolverPackStoreState {
         val current = load(filesDir)
+        val cleanResolvers = pack.resolvers.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        val cleanResolverSet = cleanResolvers.toHashSet()
         val cleanPack = pack.copy(
             name = pack.name.trim().ifBlank { "Resolver Pack" },
-            resolvers = pack.resolvers.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            resolvers = cleanResolvers,
+            metrics = pack.metrics.filterKeys { it in cleanResolverSet }
         )
         val idx = current.packs.indexOfFirst { it.id == cleanPack.id }
         val updated = current.packs.toMutableList()

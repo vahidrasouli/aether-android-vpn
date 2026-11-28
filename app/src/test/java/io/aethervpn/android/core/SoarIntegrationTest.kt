@@ -376,4 +376,76 @@ class SoarIntegrationTest {
         assertTrue(yaml.contains("network: 198.18.0.0"))
         assertTrue(yaml.contains("netmask: 255.254.0.0"))
     }
+
+    @Test
+    fun `SoarResolverBenchmark computes jitter, packet loss and sorts 0 percent loss + lowest jitter first`() {
+        val stableLowJitter = SoarResolverBenchmark.computeMetrics(
+            ip = "1.1.1.1",
+            rttsMs = listOf(40L, 42L, 41L, 43L, 41L), // diffs: 2, 1, 2, 2 -> avg=1.75 -> 2ms
+            totalProbes = 5
+        )
+        assertEquals(0, stableLowJitter.lossPercent)
+        assertEquals(41, stableLowJitter.avgPingMs)
+        assertEquals(2, stableLowJitter.jitterMs)
+
+        val fastButJittery = SoarResolverBenchmark.computeMetrics(
+            ip = "8.8.8.8",
+            rttsMs = listOf(20L, 80L, 20L, 80L, 20L), // diffs: 60, 60, 60, 60 -> 60ms
+            totalProbes = 5
+        )
+        assertEquals(0, fastButJittery.lossPercent)
+        assertEquals(44, fastButJittery.avgPingMs)
+        assertEquals(60, fastButJittery.jitterMs)
+
+        val packetLoss = SoarResolverBenchmark.computeMetrics(
+            ip = "9.9.9.9",
+            rttsMs = listOf(15L, null, 16L, 15L, null), // 2 lost out of 5 -> 40%
+            totalProbes = 5
+        )
+        assertEquals(40, packetLoss.lossPercent)
+        assertEquals(15, packetLoss.avgPingMs)
+
+        val unreachable = SoarResolverBenchmark.computeMetrics(
+            ip = "4.2.2.4",
+            rttsMs = listOf(null, null, null, null, null),
+            totalProbes = 5
+        )
+        assertEquals(100, unreachable.lossPercent)
+        assertTrue(unreachable.isUnreachable)
+
+        val sorted = SoarResolverBenchmark.sortByQuality(
+            listOf(unreachable, packetLoss, fastButJittery, stableLowJitter)
+        )
+        assertEquals(listOf("1.1.1.1", "8.8.8.8", "9.9.9.9", "4.2.2.4"), sorted.map { it.ip })
+    }
+
+    @Test
+    fun `SoarPreset applies expected tuning values and SoarEngineManager parses resolver telemetry`() {
+        val base = SoarSettings()
+        val turbo = base.withPreset(SoarPreset.TURBO)
+        assertEquals("udp", turbo.transport)
+        assertEquals(1232, turbo.maxAnswer)
+        assertEquals(128, turbo.maxInflight)
+        assertEquals(40, turbo.maxPathWindow)
+        assertEquals(150, turbo.holdMs)
+        assertEquals(90, turbo.sessionIdleSeconds)
+        assertEquals(SoarPreset.TURBO, turbo.matchingPreset())
+
+        val strict = base.withPreset(SoarPreset.STRICT)
+        assertEquals("tcp", strict.transport)
+        assertEquals(512, strict.maxAnswer)
+        assertEquals(32, strict.maxInflight)
+        assertEquals(12, strict.maxPathWindow)
+        assertEquals(500, strict.holdMs)
+        assertEquals(240, strict.sessionIdleSeconds)
+        assertEquals(SoarPreset.STRICT, strict.matchingPreset())
+
+        assertEquals(
+            14 to 48,
+            SoarEngineManager.parseResolverTelemetry(
+                "Resolvers: active=14 verified=20 discovered=12 total=48 established=3"
+            )
+        )
+        assertNull(SoarEngineManager.parseResolverTelemetry("SOCKS5 ready on 127.0.0.1:1829"))
+    }
 }

@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/card_bg"
+    android:orientation="vertical"
+    android:paddingBottom="16dp">
+
+    <!-- Drag Handle -->
+    <View
+        android:layout_width="36dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="8dp"
+        android:background="@color/card_border" />
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="18dp"
+        android:paddingBottom="10dp">
+
+        <TextView
+            android:id="@+id/tvPackViewerName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Healthy DNS"
+            android:textColor="@color/text_primary"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvPackViewerCountBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_pill_chain"
+            android:paddingHorizontal="9dp"
+            android:paddingVertical="3dp"
+            android:text="0 DNS"
+            android:textColor="@color/accent_primary"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPackViewerSetActive"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginStart="6dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="30dp"
+            android:paddingHorizontal="10dp"
+            android:text="Use Pack"
+            android:textColor="@color/accent_primary"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            app:backgroundTint="@color/accent_primary_container"
+            app:cornerRadius="8dp" />
+    </LinearLayout>
+
+    <!-- Action Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="18dp"
+        android:paddingBottom="10dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPackBenchmark"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1.35"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="36dp"
+            android:paddingHorizontal="8dp"
+            android:text="Benchmark / Rank"
+            android:textColor="@color/accent_primary"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            app:backgroundTint="@color/accent_primary_container"
+            app:cornerRadius="10dp"
+            app:icon="@drawable/ic_speed_24"
+            app:iconPadding="4dp"
+            app:iconSize="15dp"
+            app:iconTint="@color/accent_primary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPackAddIp"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="0.85"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="36dp"
+            android:paddingHorizontal="8dp"
+            android:text="Add IP"
+            android:textColor="@color/text_primary"
+            android:textSize="11.5sp"
+            app:cornerRadius="10dp"
+            app:icon="@drawable/ic_add_24"
+            app:iconPadding="3dp"
+            app:iconSize="15dp"
+            app:iconTint="@color/text_primary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPackExport"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="0.95"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="36dp"
+            android:paddingHorizontal="8dp"
+            android:text="Export .txt"
+            android:textColor="@color/text_primary"
+            android:textSize="11.5sp"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+    <!-- Benchmark Progress Section -->
+    <LinearLayout
+        android:id="@+id/layoutPackBenchmarkProgress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="18dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvPackBenchmarkStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:text="Benchmarking 0 / 0…"
+                android:textColor="@color/accent_primary"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPackBenchmarkCancel"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minHeight="30dp"
+                android:text="Cancel"
+                android:textColor="@color/error_text"
+                android:textSize="11.5sp" />
+        </LinearLayout>
+
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/progressPackBenchmark"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="100"
+            app:indicatorColor="@color/accent_primary"
+            app:trackColor="@color/surface_bg"
+            app:trackCornerRadius="4dp"
+            app:trackThickness="5dp" />
+    </LinearLayout>
+
+    <!-- Search Input -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="18dp"
+        android:layout_marginBottom="8dp"
+        android:hint="Search IP…">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etPackSearch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1"
+            android:textSize="13sp" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider_line" />
+
+    <TextView
+        android:id="@+id/tvPackViewerEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:padding="24dp"
+        android:text="No resolvers match your filter"
+        android:textColor="@color/text_secondary"
+        android:textSize="12.5sp"
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvPackResolvers"
+        android:layout_width="match_parent"
+        android:layout_height="340dp"
+        android:clipToPadding="false"
+        android:paddingHorizontal="18dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="12dp" />
+</LinearLayout>

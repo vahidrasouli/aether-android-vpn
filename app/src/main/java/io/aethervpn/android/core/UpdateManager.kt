@@ -296,6 +296,20 @@ object UpdateManager {
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 15_000
 
+    private val activeDownloadConnections = Collections.synchronizedSet(mutableSetOf<HttpURLConnection>())
+    private val activeDownloadStreams = Collections.synchronizedSet(mutableSetOf<java.io.InputStream>())
+
+    fun abortActiveDownloads() {
+        val streams = synchronized(activeDownloadStreams) {
+            activeDownloadStreams.toList().also { activeDownloadStreams.clear() }
+        }
+        val conns = synchronized(activeDownloadConnections) {
+            activeDownloadConnections.toList().also { activeDownloadConnections.clear() }
+        }
+        streams.forEach { runCatching { it.close() } }
+        conns.forEach { runCatching { it.disconnect() } }
+    }
+
     fun apiUrlForChannel(isDebugBuild: Boolean): String =
         if (isDebugBuild) GITHUB_DEBUG_RELEASE_API else GITHUB_LATEST_RELEASE_API
 
@@ -694,6 +708,16 @@ object UpdateManager {
         }
     }
 
+    fun discardAllPartialDownloads(release: ReleaseInfo?, cacheDir: File) {
+        if (release != null) {
+            cancelPartialDownloads(release, cacheDir)
+        }
+        val updatesDir = File(cacheDir, "updates")
+        if (updatesDir.exists() && updatesDir.isDirectory) {
+            cleanupUpdatesDir(updatesDir, keepPartFileName = null)
+        }
+    }
+
     fun cleanupInstalledApks(cacheDir: File) {
         val updatesDir = File(cacheDir, "updates")
         if (!updatesDir.exists() || !updatesDir.isDirectory) return
@@ -956,7 +980,14 @@ object UpdateManager {
                     setRequestProperty("Range", rangeHeader)
                 }
             }
-            val code = conn.responseCode
+            activeDownloadConnections.add(conn)
+            val code = try {
+                conn.responseCode
+            } catch (e: Exception) {
+                activeDownloadConnections.remove(conn)
+                runCatching { conn.disconnect() }
+                throw e
+            }
             if (code == HttpURLConnection.HTTP_MOVED_PERM ||
                 code == HttpURLConnection.HTTP_MOVED_TEMP ||
                 code == HttpURLConnection.HTTP_SEE_OTHER ||
@@ -964,6 +995,7 @@ object UpdateManager {
                 code == 308
             ) {
                 val location = conn.getHeaderField("Location")
+                activeDownloadConnections.remove(conn)
                 conn.disconnect()
                 if (location.isNullOrBlank()) {
                     throw IllegalStateException("Redirect without Location header (HTTP $code)")
@@ -993,7 +1025,10 @@ object UpdateManager {
                 return ProbeResult(resolvedUrl, len, ranges)
             }
         } finally {
-            headPair?.second?.disconnect()
+            headPair?.second?.let {
+                activeDownloadConnections.remove(it)
+                it.disconnect()
+            }
         }
         return probeWithRangeGet(initialUrl, expectedTotalBytes)
     }
@@ -1016,6 +1051,7 @@ object UpdateManager {
                 else -> ProbeResult(resolvedUrl, expectedTotalBytes, acceptRanges = false)
             }
         } finally {
+            activeDownloadConnections.remove(conn)
             conn.disconnect()
         }
     }
@@ -1070,7 +1106,7 @@ object UpdateManager {
 
         val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
             if (cause != null) {
-                activeConnections.toList().forEach { runCatching { it.disconnect() } }
+                abortActiveDownloads()
             }
         }
 
@@ -1098,6 +1134,7 @@ object UpdateManager {
                                     setRequestProperty("Range", "bytes=$startOffset-${chunk.end}")
                                 }
                                 activeConnections.add(conn)
+                                activeDownloadConnections.add(conn)
 
                                 coroutineContext.ensureActive()
                                 val code = conn.responseCode
@@ -1110,7 +1147,10 @@ object UpdateManager {
 
                                 val buffer = ByteArray(CHUNK_BUFFER_SIZE)
                                 var chunkPos = startOffset
-                                conn.inputStream.use { input ->
+                                val rawStream = conn.inputStream
+                                activeDownloadStreams.add(rawStream)
+                                try {
+                                    rawStream.use { input ->
                                     while (chunkPos <= chunk.end) {
                                         coroutineContext.ensureActive()
                                         val read = input.read(buffer)
@@ -1164,6 +1204,9 @@ object UpdateManager {
                                         }
                                         progressToEmit?.let { onProgress(it) }
                                     }
+                                    }
+                                } finally {
+                                    activeDownloadStreams.remove(rawStream)
                                 }
                                 if (chunkPos <= chunk.end) {
                                     throw IllegalStateException(
@@ -1173,6 +1216,7 @@ object UpdateManager {
                             } finally {
                                 if (conn != null) {
                                     activeConnections.remove(conn)
+                                    activeDownloadConnections.remove(conn)
                                     runCatching { conn.disconnect() }
                                 }
                             }
@@ -1240,10 +1284,11 @@ object UpdateManager {
                     setRequestProperty("Range", "bytes=$existingBytes-")
                 }
             }
+            activeDownloadConnections.add(conn)
 
             cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
                 if (cause != null) {
-                    runCatching { conn?.disconnect() }
+                    abortActiveDownloads()
                 }
             }
 
@@ -1275,37 +1320,43 @@ object UpdateManager {
                 onProgress(DownloadProgress(downloadedBytes, totalBytes, initPct, 0L))
             }
 
-            conn.inputStream.use { input ->
-                FileOutputStream(partFile, appendMode).use { output ->
-                    val buffer = ByteArray(CHUNK_BUFFER_SIZE)
-                    while (true) {
-                        coroutineContext.ensureActive()
-                        val read = input.read(buffer)
-                        if (read <= 0) break
-                        coroutineContext.ensureActive()
-                        output.write(buffer, 0, read)
-                        downloadedBytes += read
-                        val nowNs = System.nanoTime()
-                        val speedElapsedNs = nowNs - lastSpeedSampleNs
-                        if (speedElapsedNs >= 400_000_000L) {
-                            val deltaBytes = (downloadedBytes - lastSpeedSampleBytes).coerceAtLeast(0L)
-                            currentSpeedBps = (deltaBytes * 1_000_000_000L) / speedElapsedNs
-                            lastSpeedSampleNs = nowNs
-                            lastSpeedSampleBytes = downloadedBytes
+            val rawStream = conn.inputStream
+            activeDownloadStreams.add(rawStream)
+            try {
+                rawStream.use { input ->
+                    FileOutputStream(partFile, appendMode).use { output ->
+                        val buffer = ByteArray(CHUNK_BUFFER_SIZE)
+                        while (true) {
+                            coroutineContext.ensureActive()
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            coroutineContext.ensureActive()
+                            output.write(buffer, 0, read)
+                            downloadedBytes += read
+                            val nowNs = System.nanoTime()
+                            val speedElapsedNs = nowNs - lastSpeedSampleNs
+                            if (speedElapsedNs >= 400_000_000L) {
+                                val deltaBytes = (downloadedBytes - lastSpeedSampleBytes).coerceAtLeast(0L)
+                                currentSpeedBps = (deltaBytes * 1_000_000_000L) / speedElapsedNs
+                                lastSpeedSampleNs = nowNs
+                                lastSpeedSampleBytes = downloadedBytes
+                            }
+                            val pct = if (totalBytes > 0L) {
+                                ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                            } else {
+                                0
+                            }
+                            if (pct != lastReportedPct || downloadedBytes - lastReportedBytes >= 131_072L) {
+                                lastReportedPct = pct
+                                lastReportedBytes = downloadedBytes
+                                onProgress(DownloadProgress(downloadedBytes, totalBytes, pct, currentSpeedBps))
+                            }
                         }
-                        val pct = if (totalBytes > 0L) {
-                            ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                        } else {
-                            0
-                        }
-                        if (pct != lastReportedPct || downloadedBytes - lastReportedBytes >= 131_072L) {
-                            lastReportedPct = pct
-                            lastReportedBytes = downloadedBytes
-                            onProgress(DownloadProgress(downloadedBytes, totalBytes, pct, currentSpeedBps))
-                        }
+                        output.flush()
                     }
-                    output.flush()
                 }
+            } finally {
+                activeDownloadStreams.remove(rawStream)
             }
             coroutineContext.ensureActive()
             if (targetFile.exists()) {
@@ -1318,7 +1369,10 @@ object UpdateManager {
             onProgress(DownloadProgress(downloadedBytes, totalBytes.coerceAtLeast(downloadedBytes), 100, currentSpeedBps))
         } finally {
             cancelHandle?.dispose()
-            runCatching { conn?.disconnect() }
+            if (conn != null) {
+                activeDownloadConnections.remove(conn)
+                runCatching { conn.disconnect() }
+            }
         }
     }
 

@@ -245,4 +245,22 @@ class DiagnosticsLogTest {
         assertTrue(afterRestore[1].contains("[Network] Internet restored"))
         assertTrue(afterRestore[2].contains("[Aether] Connected to WARP gateway"))
     }
+
+    @Test
+    fun testSoarResolverTelemetryUpdatesInPlaceWithoutDuplicateRows() {
+        DiagnosticsLog.record("Soar", "Launching libsoar.so on 127.0.0.1:1829")
+        DiagnosticsLog.record("Soar", "Resolvers: active=4 verified=8 discovered=10 total=22 established=1")
+        DiagnosticsLog.record("Chain", "SOCKS5 ready")
+        DiagnosticsLog.record("Soar", "Resolvers: active=4 verified=8 discovered=10 total=22 established=1")
+        DiagnosticsLog.record("Soar", "Resolvers: active=12 verified=18 discovered=20 total=40 established=4")
+
+        val entries = DiagnosticsLog.entries()
+        assertEquals("Telemetry must update in-place without appending new rows", 3, entries.size)
+        val telemetryLines = entries.filter { it.contains("[Soar] Resolvers:") }
+        assertEquals(1, telemetryLines.size)
+        assertTrue(
+            "Latest telemetry stats must replace previous in-place",
+            telemetryLines[0].contains("active=12 verified=18 discovered=20 total=40 established=4")
+        )
+    }
 }

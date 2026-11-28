@@ -28,6 +28,11 @@ object DiagnosticsLog {
     private var lastTag: String? = null
     private var repeatCount: Int = 0
     private var lastUiEmitMs: Long = 0L
+    private var lastSoarTelemetryBody: String? = null
+    private var soarTelemetryRepeatCount: Int = 0
+
+    private val soarResolversTelemetryRegex =
+        Regex("""^Resolvers:\s*active=\d+\b.*\btotal=\d+\b.*""")
 
     @Volatile
     private var networkOffline: Boolean = false
@@ -158,7 +163,31 @@ object DiagnosticsLog {
             if (shouldSuppressDuringNetworkDrop(tag, clean)) {
                 return
             }
-            if (ring.isNotEmpty() && lastPattern == pattern && lastTag == tag) {
+            if (tag == "Soar" && soarResolversTelemetryRegex.matches(clean)) {
+                val existingIdx = ring.indexOfFirst { it.contains("[Soar] Resolvers:") }
+                if (existingIdx >= 0) {
+                    if (clean == lastSoarTelemetryBody) {
+                        soarTelemetryRepeatCount++
+                        ring[existingIdx] = "$ts [Soar] $clean (x$soarTelemetryRepeatCount)"
+                    } else {
+                        lastSoarTelemetryBody = clean
+                        soarTelemetryRepeatCount = 1
+                        ring[existingIdx] = "$ts [Soar] $clean"
+                    }
+                } else {
+                    lastSoarTelemetryBody = clean
+                    soarTelemetryRepeatCount = 1
+                    if (ring.size >= MAX_ENTRIES) ring.removeFirst()
+                    ring.addLast("$ts [Soar] $clean")
+                }
+                if (ring.none { it.contains("[Soar] Resolvers:") }) {
+                lastSoarTelemetryBody = null
+                soarTelemetryRepeatCount = 0
+            }
+            _logsFlow.value = ring.toList()
+                lastUiEmitMs = nowMs
+                shouldNotifyListeners = soarTelemetryRepeatCount <= 2
+            } else if (ring.isNotEmpty() && lastPattern == pattern && lastTag == tag) {
                 repeatCount++
                 val baseMsg = lastCleanMessage ?: clean
                 val updatedLine = "$ts [$tag] $baseMsg (x$repeatCount)"
@@ -166,7 +195,11 @@ object DiagnosticsLog {
                 // Rate-limit high-frequency burst emissions to keep UI CPU low,
                 // while always emitting the initial collapse (x2) immediately.
                 if (repeatCount <= 2 || nowMs - lastUiEmitMs >= UI_BURST_EMIT_INTERVAL_MS) {
-                    _logsFlow.value = ring.toList()
+                    if (ring.none { it.contains("[Soar] Resolvers:") }) {
+                lastSoarTelemetryBody = null
+                soarTelemetryRepeatCount = 0
+            }
+            _logsFlow.value = ring.toList()
                     lastUiEmitMs = nowMs
                 }
                 shouldNotifyListeners = repeatCount <= 5 || repeatCount % 5 == 0
@@ -178,7 +211,11 @@ object DiagnosticsLog {
                 val line = "$ts [$tag] $clean"
                 if (ring.size >= MAX_ENTRIES) ring.removeFirst()
                 ring.addLast(line)
-                _logsFlow.value = ring.toList()
+                if (ring.none { it.contains("[Soar] Resolvers:") }) {
+                lastSoarTelemetryBody = null
+                soarTelemetryRepeatCount = 0
+            }
+            _logsFlow.value = ring.toList()
                 lastUiEmitMs = nowMs
             }
         }
@@ -205,6 +242,8 @@ object DiagnosticsLog {
         lastTag = null
         repeatCount = 0
         lastUiEmitMs = 0L
+        lastSoarTelemetryBody = null
+        soarTelemetryRepeatCount = 0
         networkOffline = false
         _logsFlow.value = emptyList()
     }
@@ -223,6 +262,10 @@ object DiagnosticsLog {
                 lastCleanMessage = null
                 lastTag = null
                 repeatCount = 0
+            }
+            if (ring.none { it.contains("[Soar] Resolvers:") }) {
+                lastSoarTelemetryBody = null
+                soarTelemetryRepeatCount = 0
             }
             _logsFlow.value = ring.toList()
         }

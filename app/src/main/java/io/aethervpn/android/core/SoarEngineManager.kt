@@ -33,7 +33,9 @@ data class SoarRuntimeState(
     val mode: SoarConnectionMode = SoarConnectionMode.PROXY_ONLY,
     val profileName: String = "",
     val listenAddress: String = "${SoarEngineManager.DEFAULT_LISTEN_HOST}:${SoarEngineManager.DEFAULT_LISTEN_PORT}",
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val activeResolvers: Int? = null,
+    val totalResolvers: Int? = null
 ) {
     val isActive: Boolean get() = phase == SoarPhase.CONNECTED || phase == SoarPhase.STARTING
     val isConnected: Boolean get() = phase == SoarPhase.CONNECTED
@@ -47,6 +49,13 @@ object SoarStateStore {
         _state.value = newState
     }
 
+    fun updateResolverCounts(active: Int, total: Int) {
+        val current = _state.value
+        if (current.activeResolvers != active || current.totalResolvers != total) {
+            _state.value = current.copy(activeResolvers = active, totalResolvers = total)
+        }
+    }
+
     fun resetStopped(mode: SoarConnectionMode = _state.value.mode) {
         _state.value = SoarRuntimeState(phase = SoarPhase.STOPPED, mode = mode)
     }
@@ -56,7 +65,9 @@ object SoarStateStore {
         _state.value = _state.value.copy(
             phase = SoarPhase.ERROR,
             mode = mode,
-            errorMessage = message
+            errorMessage = message,
+            activeResolvers = null,
+            totalResolvers = null
         )
     }
 }
@@ -74,6 +85,7 @@ class SoarEngineManager(private val privateDataDir: File) {
 
     private var logReaderJob: Job? = null
     private var activeConfigFile: File? = null
+    private var recordDiagnosticsEnabled: Boolean = true
 
     suspend fun start(
         context: Context,
@@ -82,7 +94,9 @@ class SoarEngineManager(private val privateDataDir: File) {
         activePack: ResolverPack? = null,
         listenHost: String = DEFAULT_LISTEN_HOST,
         listenPort: Int = DEFAULT_LISTEN_PORT,
-        readinessTimeoutMs: Long = 10_000L
+        readinessTimeoutMs: Long = 10_000L,
+        configFileName: String = "soar-config.json",
+        recordDiagnostics: Boolean = true
     ): Result<Unit> {
         val binary = findSoarBinary(context)
             ?: return Result.failure(
@@ -94,22 +108,25 @@ class SoarEngineManager(private val privateDataDir: File) {
         }
 
         stop()
+        recordDiagnosticsEnabled = recordDiagnostics
 
         val stateDir = File(privateDataDir, "soar").apply { mkdirs() }
-        val configFile = File(stateDir, "soar-config.json")
+        val configFile = File(stateDir, configFileName)
         configFile.writeText(buildRuntimeConfigJson(profile, activePack), Charsets.UTF_8)
         activeConfigFile = configFile
 
         val listenAddr = "$listenHost:$listenPort"
         val args = buildCommandArgs(binary.absolutePath, configFile.absolutePath, listenAddr)
-        DiagnosticsLog.record("Chain", buildChainLog(mode, profile, listenHost, listenPort))
-        if (activePack != null && activePack.resolvers.isNotEmpty()) {
-            DiagnosticsLog.record(
-                "Soar",
-                "Injecting Resolver Pack '${activePack.name}' (${activePack.resolvers.size} resolvers)"
-            )
+        if (recordDiagnosticsEnabled) {
+            DiagnosticsLog.record("Chain", buildChainLog(mode, profile, listenHost, listenPort))
+            if (activePack != null && activePack.resolvers.isNotEmpty()) {
+                DiagnosticsLog.record(
+                    "Soar",
+                    "Injecting Resolver Pack '${activePack.name}' (${activePack.resolvers.size} resolvers)"
+                )
+            }
+            DiagnosticsLog.record("Soar", "Launching libsoar.so on $listenAddr (domain=${profile.domain})")
         }
-        DiagnosticsLog.record("Soar", "Launching libsoar.so on $listenAddr (domain=${profile.domain})")
 
         val pb = ProcessBuilder(args)
             .directory(stateDir)
@@ -131,7 +148,9 @@ class SoarEngineManager(private val privateDataDir: File) {
                 return Result.failure(IllegalStateException("libsoar.so exited prematurely (code $exitCode)"))
             }
             if (isSocks5Ready(listenHost, listenPort)) {
-                DiagnosticsLog.record("Soar", "SOCKS5 ready on $listenAddr")
+                if (recordDiagnosticsEnabled) {
+                    DiagnosticsLog.record("Soar", "SOCKS5 ready on $listenAddr")
+                }
                 return Result.success(Unit)
             }
             delay(backoffMs)
@@ -156,7 +175,9 @@ class SoarEngineManager(private val privateDataDir: File) {
                     proc.destroyForcibly()
                 }
             }
-            DiagnosticsLog.record("Soar", "Stopped libsoar.so")
+            if (recordDiagnosticsEnabled) {
+                DiagnosticsLog.record("Soar", "Stopped libsoar.so")
+            }
         }
         cleanupConfigFile()
     }
@@ -175,7 +196,10 @@ class SoarEngineManager(private val privateDataDir: File) {
                     var line: String? = reader.readLine()
                     while (isActive && line != null) {
                         val trimmed = line.trim()
-                        if (trimmed.isNotEmpty()) {
+                        if (trimmed.isNotEmpty() && recordDiagnosticsEnabled) {
+                            parseResolverTelemetry(trimmed)?.let { (active, total) ->
+                                SoarStateStore.updateResolverCounts(active, total)
+                            }
                             DiagnosticsLog.record("Soar", trimmed)
                         }
                         line = reader.readLine()
@@ -269,6 +293,16 @@ class SoarEngineManager(private val privateDataDir: File) {
             port: Int = DEFAULT_LISTEN_PORT
         ): String {
             return "tg://socks?server=$host&port=$port"
+        }
+
+        private val RESOLVER_TELEMETRY_REGEX =
+            Regex("""Resolvers:\s*.*\bactive=(\d+)\b.*\btotal=(\d+)\b""")
+
+        fun parseResolverTelemetry(line: String): Pair<Int, Int>? {
+            val match = RESOLVER_TELEMETRY_REGEX.find(line) ?: return null
+            val active = match.groupValues[1].toIntOrNull() ?: return null
+            val total = match.groupValues[2].toIntOrNull() ?: return null
+            return active to total
         }
 
         private fun isSocks5Ready(host: String, port: Int): Boolean {

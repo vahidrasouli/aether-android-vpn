@@ -123,11 +123,80 @@
                     android:textSize="12.5sp" />
             </com.google.android.material.textfield.TextInputLayout>
 
-            <!-- Section 2: Transport & Discovery -->
+            <!-- Section 2: Internet Presets & Transport -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
+                android:letterSpacing="0.08"
+                android:text="INTERNET PRESETS"
+                android:textColor="@color/accent_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chipGroupSoarSheetPresets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                app:chipSpacingHorizontal="6dp"
+                app:selectionRequired="false"
+                app:singleLine="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipSoarSheetBalanced"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="Balanced"
+                    android:textColor="@color/selector_chip_text"
+                    android:textSize="11.5sp"
+                    app:chipBackgroundColor="@color/selector_chip_bg"
+                    app:chipStrokeColor="@color/selector_chip_stroke"
+                    app:chipStrokeWidth="1dp" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipSoarSheetTurbo"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="Turbo"
+                    android:textColor="@color/selector_chip_text"
+                    android:textSize="11.5sp"
+                    app:chipBackgroundColor="@color/selector_chip_bg"
+                    app:chipStrokeColor="@color/selector_chip_stroke"
+                    app:chipStrokeWidth="1dp" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipSoarSheetStable"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="Stable"
+                    android:textColor="@color/selector_chip_text"
+                    android:textSize="11.5sp"
+                    app:chipBackgroundColor="@color/selector_chip_bg"
+                    app:chipStrokeColor="@color/selector_chip_stroke"
+                    app:chipStrokeWidth="1dp" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipSoarSheetStrict"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="Strict"
+                    android:textColor="@color/selector_chip_text"
+                    android:textSize="11.5sp"
+                    app:chipBackgroundColor="@color/selector_chip_bg"
+                    app:chipStrokeColor="@color/selector_chip_stroke"
+                    app:chipStrokeWidth="1dp" />
+            </com.google.android.material.chip.ChipGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
                 android:letterSpacing="0.08"
                 android:text="TRANSPORT &amp; DISCOVERY"
                 android:textColor="@color/accent_primary"

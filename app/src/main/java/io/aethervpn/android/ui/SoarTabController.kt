@@ -30,31 +30,40 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import io.aethervpn.android.R
+import io.aethervpn.android.core.BenchmarkProgress
+import io.aethervpn.android.core.ResolverBenchmarkMetrics
 import io.aethervpn.android.core.ResolverPack
 import io.aethervpn.android.core.ResolverScanState
 import io.aethervpn.android.core.ScannerStatus
 import io.aethervpn.android.core.SoarConnectionMode
 import io.aethervpn.android.core.SoarEngineManager
 import io.aethervpn.android.core.SoarPhase
+import io.aethervpn.android.core.SoarPreset
 import io.aethervpn.android.core.SoarProfile
 import io.aethervpn.android.core.SoarProfileParser
 import io.aethervpn.android.core.SoarProfileStore
 import io.aethervpn.android.core.SoarProfileStoreState
+import io.aethervpn.android.core.SoarResolverBenchmark
 import io.aethervpn.android.core.SoarResolverPackStore
 import io.aethervpn.android.core.SoarResolverPackStoreState
 import io.aethervpn.android.core.SoarResolverScanner
 import io.aethervpn.android.core.SoarRuntimeState
 import io.aethervpn.android.core.SoarSettings
+import io.aethervpn.android.core.SoarSpeedTester
 import io.aethervpn.android.core.SoarStateStore
 import io.aethervpn.android.core.SoarTransport
 import io.aethervpn.android.databinding.ActivityMainBinding
 import io.aethervpn.android.databinding.BottomSheetSoarProfileBinding
+import io.aethervpn.android.databinding.BottomSheetSoarResolverPackBinding
 import io.aethervpn.android.databinding.DialogSoarResolverPackBinding
 import io.aethervpn.android.databinding.ItemSoarProfileBinding
+import io.aethervpn.android.databinding.ItemSoarResolverIpBinding
 import io.aethervpn.android.databinding.ItemSoarResolverPackBinding
 import io.aethervpn.android.vpn.AetherVpnService
 import io.aethervpn.android.vpn.SoarProxyService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,6 +78,8 @@ class SoarTabController(
     private var storeState = SoarProfileStoreState()
     private var packState = SoarResolverPackStoreState()
     private var isBindingModeToggle = false
+    private var isBindingQuickPreset = false
+    private var speedTestJob: Job? = null
 
     private val profilesAdapter = SoarProfilesAdapter()
     private val packsAdapter = SoarResolverPacksAdapter()
@@ -153,8 +164,27 @@ class SoarTabController(
             binding.rvSoarPacks.visibility = if (packState.packs.isEmpty()) View.GONE else View.VISIBLE
 
             bindDropdowns()
+            syncQuickPresetChips()
             renderRuntimeState(SoarStateStore.state.value)
         }
+    }
+
+    private fun syncQuickPresetChips() {
+        val active = storeState.activeProfile
+        isBindingQuickPreset = true
+        val chipId = when (active?.soarSettings?.matchingPreset()) {
+            SoarPreset.BALANCED -> R.id.chipSoarQuickBalanced
+            SoarPreset.TURBO -> R.id.chipSoarQuickTurbo
+            SoarPreset.STABLE -> R.id.chipSoarQuickStable
+            SoarPreset.STRICT -> R.id.chipSoarQuickStrict
+            null -> View.NO_ID
+        }
+        if (chipId == View.NO_ID) {
+            binding.chipGroupSoarQuickPresets.clearCheck()
+        } else {
+            binding.chipGroupSoarQuickPresets.check(chipId)
+        }
+        isBindingQuickPreset = false
     }
 
     private fun bindDropdowns() {
@@ -305,6 +335,44 @@ class SoarTabController(
             toast("Copied $addr")
         }
 
+        binding.chipGroupSoarQuickPresets.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (isBindingQuickPreset) return@setOnCheckedStateChangeListener
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val preset = when (checkedId) {
+                R.id.chipSoarQuickBalanced -> SoarPreset.BALANCED
+                R.id.chipSoarQuickTurbo -> SoarPreset.TURBO
+                R.id.chipSoarQuickStable -> SoarPreset.STABLE
+                R.id.chipSoarQuickStrict -> SoarPreset.STRICT
+                else -> return@setOnCheckedStateChangeListener
+            }
+            val active = storeState.activeProfile
+            if (active == null) {
+                toast("Add or select a Soar config first")
+                syncQuickPresetChips()
+                return@setOnCheckedStateChangeListener
+            }
+            val updated = active.copy(soarSettings = active.soarSettings.withPreset(preset))
+            storeState = SoarProfileStore.upsertProfile(activity.filesDir, updated, setActive = true)
+            profilesAdapter.submitList(storeState.profiles.toList())
+            val note = if (SoarStateStore.state.value.isConnected) {
+                "Applied ${preset.label} — reconnect Soar to take effect"
+            } else {
+                "Applied ${preset.label} preset"
+            }
+            toast(note)
+        }
+
+        binding.btnSoarSpeedTest.setOnClickListener {
+            if (speedTestJob?.isActive == true) {
+                speedTestJob?.cancel()
+                speedTestJob = null
+                binding.btnSoarSpeedTest.text = "Test Speed"
+                binding.tvSoarSpeedResult.text = "Speed test cancelled"
+                return@setOnClickListener
+            }
+            runSoarSpeedTest()
+        }
+
         // Scanner controls
         binding.toggleScannerSource.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
@@ -344,6 +412,62 @@ class SoarTabController(
                 return@setOnClickListener
             }
             showSaveHealthyPackDialog(healthy)
+        }
+    }
+
+    private fun runSoarSpeedTest() {
+        val profile = storeState.activeProfile
+        if (profile == null) {
+            toast("Add or select a Soar config first")
+            return
+        }
+        val sizeBytes = when (binding.chipGroupSoarSpeedSize.checkedChipId) {
+            R.id.chipSoarSpeed100k -> SoarSpeedTester.SIZE_100_KB
+            R.id.chipSoarSpeed500k -> SoarSpeedTester.SIZE_500_KB
+            else -> SoarSpeedTester.SIZE_200_KB
+        }
+        val sizeLabel = "${sizeBytes / 1024} KB"
+        val activePack = packState.activePack
+
+        binding.btnSoarSpeedTest.text = "Cancel"
+        binding.tvSoarSpeedResult.setTextColor(ContextCompat.getColor(activity, R.color.accent_primary))
+        binding.tvSoarSpeedResult.text = if (SoarStateStore.state.value.isConnected) {
+            "Testing $sizeLabel via 127.0.0.1:1829…"
+        } else {
+            "Starting temp Soar (:1830) & testing $sizeLabel…"
+        }
+
+        speedTestJob = activity.lifecycleScope.launch {
+            try {
+                val res = SoarSpeedTester.runTest(
+                    context = activity,
+                    profile = profile,
+                    activePack = activePack,
+                    sizeBytes = sizeBytes,
+                    privateDataDir = activity.filesDir
+                )
+                if (activity.isFinishing || activity.isDestroyed) return@launch
+                res.onSuccess { r ->
+                    binding.tvSoarSpeedResult.setTextColor(ContextCompat.getColor(activity, R.color.log_success))
+                    binding.tvSoarSpeedResult.text = String.format(
+                        Locale.US,
+                        "TTFB: %d ms  •  Speed: %.1f KB/s",
+                        r.ttfbMs,
+                        r.speedKbps
+                    )
+                }.onFailure { err ->
+                    binding.tvSoarSpeedResult.setTextColor(ContextCompat.getColor(activity, R.color.error_text))
+                    binding.tvSoarSpeedResult.text = "Failed: ${err.message ?: "error"}"
+                }
+            } catch (_: CancellationException) {
+                binding.tvSoarSpeedResult.setTextColor(ContextCompat.getColor(activity, R.color.text_secondary))
+                binding.tvSoarSpeedResult.text = "Speed test cancelled"
+            } finally {
+                speedTestJob = null
+                if (!activity.isFinishing && !activity.isDestroyed) {
+                    binding.btnSoarSpeedTest.text = "Test Speed"
+                }
+            }
         }
     }
 
@@ -490,6 +614,193 @@ class SoarTabController(
             .show()
     }
 
+    private fun showResolverPackViewerSheet(initialPack: ResolverPack) {
+        val sheet = BottomSheetDialog(activity)
+        val sb = BottomSheetSoarResolverPackBinding.inflate(LayoutInflater.from(activity))
+        sheet.setContentView(sb.root)
+        sheet.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+
+        var currentPack = packState.packs.firstOrNull { it.id == initialPack.id } ?: initialPack
+        var searchQuery = ""
+        var benchmarkJob: Job? = null
+
+        lateinit var ipAdapter: ResolverIpAdapter
+
+        fun renderPackViewer() {
+            val isActive = currentPack.id == packState.activePackId
+            sb.tvPackViewerName.text = currentPack.name
+            sb.tvPackViewerCountBadge.text = "${currentPack.resolvers.size} DNS"
+            sb.btnPackViewerSetActive.text = if (isActive) "Active ✓" else "Use Pack"
+            sb.btnPackViewerSetActive.setTextColor(
+                ContextCompat.getColor(activity, if (isActive) R.color.log_success else R.color.accent_primary)
+            )
+
+            val indexed = currentPack.resolvers.mapIndexed { idx, ip ->
+                ResolverIpRow(
+                    index = idx + 1,
+                    ip = ip,
+                    metrics = currentPack.metrics[ip]
+                )
+            }
+            val filtered = if (searchQuery.isBlank()) {
+                indexed
+            } else {
+                val q = searchQuery.trim()
+                indexed.filter { it.ip.contains(q, ignoreCase = true) }
+            }
+            ipAdapter.submitList(filtered)
+            sb.tvPackViewerEmpty.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
+            sb.rvPackResolvers.visibility = if (filtered.isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        ipAdapter = ResolverIpAdapter(
+            onCopy = { ip ->
+                copyTextToClipboard("DNS Resolver", ip)
+                toast("Copied $ip")
+            },
+            onDelete = { ip ->
+                val updatedResolvers = currentPack.resolvers.filterNot { it == ip }
+                val updatedMetrics = currentPack.metrics.filterKeys { it != ip }
+                currentPack = currentPack.copy(resolvers = updatedResolvers, metrics = updatedMetrics)
+                packState = SoarResolverPackStore.upsertPack(activity.filesDir, currentPack)
+                reloadStore()
+                renderPackViewer()
+            }
+        )
+
+        sb.rvPackResolvers.layoutManager = LinearLayoutManager(activity)
+        sb.rvPackResolvers.adapter = ipAdapter
+
+        sb.etPackSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                searchQuery = s?.toString().orEmpty()
+                renderPackViewer()
+            }
+        })
+
+        sb.btnPackViewerSetActive.setOnClickListener {
+            val isActive = currentPack.id == packState.activePackId
+            val nextId = if (isActive) null else currentPack.id
+            packState = SoarResolverPackStore.setActivePack(activity.filesDir, nextId)
+            reloadStore()
+            renderPackViewer()
+        }
+
+        sb.btnPackAddIp.setOnClickListener {
+            val til = TextInputLayout(activity).apply {
+                hint = "IPv4 Resolver(s), one per line or comma-separated"
+                setPadding(48, 24, 48, 8)
+            }
+            val et = TextInputEditText(til.context).apply {
+                minLines = 2
+                maxLines = 5
+            }
+            til.addView(et)
+
+            MaterialAlertDialogBuilder(activity)
+                .setTitle("Add Resolver IP")
+                .setView(til)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Add") { _, _ ->
+                    val raw = et.text?.toString().orEmpty()
+                    val parsed = SoarResolverScanner.parseResolverLines(raw.lineSequence())
+                    if (parsed.isEmpty()) {
+                        toast("Enter at least one valid IPv4 address")
+                        return@setPositiveButton
+                    }
+                    val merged = (currentPack.resolvers + parsed).distinct()
+                    val addedCount = merged.size - currentPack.resolvers.size
+                    currentPack = currentPack.copy(resolvers = merged)
+                    packState = SoarResolverPackStore.upsertPack(activity.filesDir, currentPack)
+                    reloadStore()
+                    renderPackViewer()
+                    toast(if (addedCount > 0) "Added $addedCount IP(s)" else "IP(s) already in pack")
+                }
+                .show()
+        }
+
+        sb.btnPackExport.setOnClickListener {
+            pendingExportPack = currentPack
+            val safeName = currentPack.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            packExportFileLauncher.launch("$safeName.txt")
+        }
+
+        sb.btnPackBenchmarkCancel.setOnClickListener {
+            benchmarkJob?.cancel()
+        }
+
+        sb.btnPackBenchmark.setOnClickListener {
+            if (benchmarkJob?.isActive == true) return@setOnClickListener
+            val targetProfile = storeState.profiles.firstOrNull { it.id == scannerSelectedTargetProfileId }
+                ?: storeState.activeProfile
+            if (targetProfile == null || targetProfile.domain.isBlank()) {
+                toast("Add a Soar config with a valid domain first")
+                return@setOnClickListener
+            }
+            if (currentPack.resolvers.isEmpty()) {
+                toast("Pack is empty")
+                return@setOnClickListener
+            }
+
+            val useTcpFallback = targetProfile.soarSettings.transport.equals("tcp", ignoreCase = true) ||
+                targetProfile.soarSettings.transport.equals("auto", ignoreCase = true)
+
+            sb.btnPackBenchmark.isEnabled = false
+            sb.layoutPackBenchmarkProgress.visibility = View.VISIBLE
+            sb.progressPackBenchmark.progress = 0
+            sb.tvPackBenchmarkStatus.text = "Benchmarking 0 / ${currentPack.resolvers.size} (5 probes/IP)…"
+
+            benchmarkJob = activity.lifecycleScope.launch {
+                try {
+                    val sortedMetrics = SoarResolverBenchmark.benchmarkPack(
+                        resolvers = currentPack.resolvers,
+                        domain = targetProfile.domain,
+                        useTcpFallback = useTcpFallback
+                    ) { progress: BenchmarkProgress ->
+                        activity.runOnUiThread {
+                            if (!sheet.isShowing) return@runOnUiThread
+                            val pct = if (progress.totalCount > 0) {
+                                ((progress.completedCount * 100L) / progress.totalCount).toInt().coerceIn(0, 100)
+                            } else {
+                                0
+                            }
+                            sb.progressPackBenchmark.setProgressCompat(pct, true)
+                            sb.tvPackBenchmarkStatus.text =
+                                "Benchmarking ${progress.completedCount} / ${progress.totalCount} (5 probes/IP)…"
+                        }
+                    }
+
+                    val sortedIps = sortedMetrics.map { it.ip }
+                    val metricsMap = sortedMetrics.associateBy { it.ip }
+                    currentPack = currentPack.copy(resolvers = sortedIps, metrics = metricsMap)
+                    packState = SoarResolverPackStore.upsertPack(activity.filesDir, currentPack)
+                    reloadStore()
+                    renderPackViewer()
+                    toast("Ranked ${sortedIps.size} resolvers (0% loss & lowest jitter first)")
+                } catch (_: CancellationException) {
+                    toast("Benchmark cancelled")
+                } finally {
+                    benchmarkJob = null
+                    if (sheet.isShowing) {
+                        sb.btnPackBenchmark.isEnabled = true
+                        sb.layoutPackBenchmarkProgress.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
+        sheet.setOnDismissListener {
+            benchmarkJob?.cancel()
+            benchmarkJob = null
+        }
+
+        renderPackViewer()
+        sheet.show()
+    }
+
     private fun showResolverPackEditorDialog(existing: ResolverPack?) {
         val dlgBinding = DialogSoarResolverPackBinding.inflate(LayoutInflater.from(activity))
         if (existing != null) {
@@ -619,6 +930,15 @@ class SoarTabController(
             SoarPhase.STOPPED -> R.color.text_secondary
         }
         binding.tvSoarStatusPill.setTextColor(ContextCompat.getColor(activity, pillColor))
+
+        val activeRes = state.activeResolvers
+        val totalRes = state.totalResolvers
+        if (state.isConnected && activeRes != null && totalRes != null) {
+            binding.tvSoarResolverPill.text = "$activeRes / $totalRes DNS"
+            binding.tvSoarResolverPill.visibility = View.VISIBLE
+        } else {
+            binding.tvSoarResolverPill.visibility = View.GONE
+        }
 
         when (state.phase) {
             SoarPhase.STOPPED -> {
@@ -755,6 +1075,37 @@ class SoarTabController(
         sheetBinding.etSoarSendBufferKiB.setText(defaults.sendBufferKiB.toString())
         sheetBinding.etSoarSessionIdleSeconds.setText(defaults.sessionIdleSeconds.toString())
         sheetBinding.etSoarDialTimeoutSeconds.setText(defaults.dialTimeoutSeconds.toString())
+
+        var isBindingSheetPreset = true
+        val matchedSheetChip = when (defaults.matchingPreset()) {
+            SoarPreset.BALANCED -> R.id.chipSoarSheetBalanced
+            SoarPreset.TURBO -> R.id.chipSoarSheetTurbo
+            SoarPreset.STABLE -> R.id.chipSoarSheetStable
+            SoarPreset.STRICT -> R.id.chipSoarSheetStrict
+            null -> View.NO_ID
+        }
+        if (matchedSheetChip != View.NO_ID) {
+            sheetBinding.chipGroupSoarSheetPresets.check(matchedSheetChip)
+        }
+        isBindingSheetPreset = false
+
+        sheetBinding.chipGroupSoarSheetPresets.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (isBindingSheetPreset) return@setOnCheckedStateChangeListener
+            val chipId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val preset = when (chipId) {
+                R.id.chipSoarSheetBalanced -> SoarPreset.BALANCED
+                R.id.chipSoarSheetTurbo -> SoarPreset.TURBO
+                R.id.chipSoarSheetStable -> SoarPreset.STABLE
+                R.id.chipSoarSheetStrict -> SoarPreset.STRICT
+                else -> return@setOnCheckedStateChangeListener
+            }
+            sheetBinding.actSoarTransport.setText(preset.transport, false)
+            sheetBinding.etSoarMaxAnswer.setText(preset.maxAnswer.toString())
+            sheetBinding.etSoarMaxInflight.setText(preset.maxInflight.toString())
+            sheetBinding.etSoarMaxPathWindow.setText(preset.maxPathWindow.toString())
+            sheetBinding.etSoarHoldMs.setText(preset.holdMs.toString())
+            sheetBinding.etSoarSessionIdleSeconds.setText(preset.sessionIdleSeconds.toString())
+        }
 
         var advancedVisible = false
         sheetBinding.btnSoarToggleAdvanced.setOnClickListener {
@@ -917,6 +1268,7 @@ class SoarTabController(
                 val isActive = pack.id == packState.activePackId
                 b.tvPackName.text = pack.name
                 b.tvPackCountBadge.text = "${pack.resolvers.size} DNS"
+                b.tvPackActivePill.visibility = if (isActive) View.VISIBLE else View.GONE
                 b.tvPackPreview.text = pack.previewSummary()
 
                 b.cardResolverPack.strokeColor = ContextCompat.getColor(
@@ -925,20 +1277,24 @@ class SoarTabController(
                 )
 
                 b.root.setOnClickListener {
-                    val nextId = if (isActive) null else pack.id
-                    packState = SoarResolverPackStore.setActivePack(activity.filesDir, nextId)
-                    reloadStore()
+                    showResolverPackViewerSheet(pack)
                 }
 
                 b.btnPackMore.setOnClickListener { anchor ->
                     val popup = PopupMenu(activity, anchor)
-                    popup.menu.add(0, 1, 0, "View / Edit")
-                    popup.menu.add(0, 2, 1, "Rename")
-                    popup.menu.add(0, 3, 2, "Export .txt")
-                    popup.menu.add(0, 4, 3, "Delete")
+                    popup.menu.add(0, 1, 0, "Inspect & Benchmark")
+                    popup.menu.add(0, 5, 1, if (isActive) "Deactivate Pack" else "Set as Active Pack")
+                    popup.menu.add(0, 2, 2, "Rename")
+                    popup.menu.add(0, 3, 3, "Export .txt")
+                    popup.menu.add(0, 4, 4, "Delete")
                     popup.setOnMenuItemClickListener { item ->
                         when (item.itemId) {
-                            1 -> showResolverPackEditorDialog(pack)
+                            1 -> showResolverPackViewerSheet(pack)
+                            5 -> {
+                                val nextId = if (isActive) null else pack.id
+                                packState = SoarResolverPackStore.setActivePack(activity.filesDir, nextId)
+                                reloadStore()
+                            }
                             2 -> showPromptPackNameDialog(
                                 title = "Rename Resolver Pack",
                                 defaultName = pack.name
@@ -964,7 +1320,88 @@ class SoarTabController(
         }
     }
 
+    private data class ResolverIpRow(
+        val index: Int,
+        val ip: String,
+        val metrics: ResolverBenchmarkMetrics?
+    )
+
+    private inner class ResolverIpAdapter(
+        private val onCopy: (String) -> Unit,
+        private val onDelete: (String) -> Unit
+    ) : ListAdapter<ResolverIpRow, ResolverIpAdapter.VH>(RESOLVER_IP_DIFF) {
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val itemBinding = ItemSoarResolverIpBinding.inflate(
+                LayoutInflater.from(parent.context),
+                parent,
+                false
+            )
+            return VH(itemBinding)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            holder.bind(getItem(position))
+        }
+
+        inner class VH(private val b: ItemSoarResolverIpBinding) : RecyclerView.ViewHolder(b.root) {
+            fun bind(row: ResolverIpRow) {
+                b.tvResolverIndex.text = "#${row.index}"
+                b.tvResolverIp.text = row.ip
+
+                val m = row.metrics
+                if (m == null) {
+                    b.layoutResolverMetrics.visibility = View.GONE
+                } else {
+                    b.layoutResolverMetrics.visibility = View.VISIBLE
+                    if (m.isUnreachable) {
+                        b.tvResolverPing.text = "Timeout"
+                        b.tvResolverJitter.text = "--"
+                        b.tvResolverLoss.text = "100% loss"
+                        val red = ContextCompat.getColor(activity, R.color.error_text)
+                        b.tvResolverPing.setTextColor(red)
+                        b.tvResolverJitter.setTextColor(red)
+                        b.tvResolverLoss.setTextColor(red)
+                    } else {
+                        b.tvResolverPing.text = "${m.avgPingMs}ms"
+                        b.tvResolverJitter.text = "±${m.jitterMs}ms"
+                        b.tvResolverLoss.text = "${m.lossPercent}% loss"
+
+                        val pingColor = when {
+                            m.avgPingMs <= 120 -> R.color.log_success
+                            m.avgPingMs <= 300 -> R.color.warning_text
+                            else -> R.color.error_text
+                        }
+                        val jitterColor = when {
+                            m.jitterMs <= 15 -> R.color.log_success
+                            m.jitterMs <= 50 -> R.color.warning_text
+                            else -> R.color.error_text
+                        }
+                        val lossColor = when {
+                            m.lossPercent == 0 -> R.color.log_success
+                            m.lossPercent <= 20 -> R.color.warning_text
+                            else -> R.color.error_text
+                        }
+                        b.tvResolverPing.setTextColor(ContextCompat.getColor(activity, pingColor))
+                        b.tvResolverJitter.setTextColor(ContextCompat.getColor(activity, jitterColor))
+                        b.tvResolverLoss.setTextColor(ContextCompat.getColor(activity, lossColor))
+                    }
+                }
+
+                b.btnCopyResolverIp.setOnClickListener { onCopy(row.ip) }
+                b.btnDeleteResolverIp.setOnClickListener { onDelete(row.ip) }
+            }
+        }
+    }
+
     companion object {
+        private val RESOLVER_IP_DIFF = object : DiffUtil.ItemCallback<ResolverIpRow>() {
+            override fun areItemsTheSame(oldItem: ResolverIpRow, newItem: ResolverIpRow): Boolean =
+                oldItem.ip == newItem.ip
+
+            override fun areContentsTheSame(oldItem: ResolverIpRow, newItem: ResolverIpRow): Boolean =
+                oldItem == newItem
+        }
         private val PROFILE_DIFF = object : DiffUtil.ItemCallback<SoarProfile>() {
             override fun areItemsTheSame(oldItem: SoarProfile, newItem: SoarProfile): Boolean =
                 oldItem.id == newItem.id

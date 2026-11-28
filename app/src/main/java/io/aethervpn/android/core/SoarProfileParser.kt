@@ -32,6 +32,53 @@ enum class SoarConnectionMode(val label: String) {
     }
 }
 
+enum class SoarPreset(
+    val label: String,
+    val transport: String,
+    val maxAnswer: Int,
+    val maxInflight: Int,
+    val maxPathWindow: Int,
+    val holdMs: Int,
+    val sessionIdleSeconds: Int
+) {
+    BALANCED(
+        label = "Balanced",
+        transport = "auto",
+        maxAnswer = 1232,
+        maxInflight = 64,
+        maxPathWindow = 24,
+        holdMs = 300,
+        sessionIdleSeconds = 120
+    ),
+    TURBO(
+        label = "Turbo",
+        transport = "udp",
+        maxAnswer = 1232,
+        maxInflight = 128,
+        maxPathWindow = 40,
+        holdMs = 150,
+        sessionIdleSeconds = 90
+    ),
+    STABLE(
+        label = "Stable",
+        transport = "auto",
+        maxAnswer = 512,
+        maxInflight = 32,
+        maxPathWindow = 12,
+        holdMs = 400,
+        sessionIdleSeconds = 180
+    ),
+    STRICT(
+        label = "Strict",
+        transport = "tcp",
+        maxAnswer = 512,
+        maxInflight = 32,
+        maxPathWindow = 12,
+        holdMs = 500,
+        sessionIdleSeconds = 240
+    )
+}
+
 data class SoarSettings(
     val transport: String = "auto",
     val discovery: Boolean = true,
@@ -83,6 +130,24 @@ data class SoarSettings(
         } else {
             "$t • Static Resolvers"
         }
+    }
+
+    fun withPreset(preset: SoarPreset): SoarSettings = copy(
+        transport = preset.transport,
+        maxAnswer = preset.maxAnswer,
+        maxInflight = preset.maxInflight,
+        maxPathWindow = preset.maxPathWindow,
+        holdMs = preset.holdMs,
+        sessionIdleSeconds = preset.sessionIdleSeconds
+    ).normalized()
+
+    fun matchingPreset(): SoarPreset? = SoarPreset.entries.firstOrNull { p ->
+        transport.equals(p.transport, ignoreCase = true) &&
+            maxAnswer == p.maxAnswer &&
+            maxInflight == p.maxInflight &&
+            maxPathWindow == p.maxPathWindow &&
+            holdMs == p.holdMs &&
+            sessionIdleSeconds == p.sessionIdleSeconds
     }
 }
 

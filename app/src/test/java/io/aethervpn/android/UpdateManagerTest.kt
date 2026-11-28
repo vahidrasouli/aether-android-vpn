@@ -974,4 +974,121 @@ class UpdateManagerTest {
 
         store.reset()
     }
+
+    @Test
+    fun discardAllPartialDownloadsDeletesAllPartPatchAndMetaFiles() {
+        val tempCacheDir = java.nio.file.Files.createTempDirectory("aether-upd-discard-").toFile()
+        try {
+            val updatesDir = java.io.File(tempCacheDir, "updates").apply { mkdirs() }
+            val release = io.aethervpn.android.core.ReleaseInfo(
+                tagName = "debug-latest",
+                versionName = "1.1.0-debug-b99",
+                releaseNotes = "",
+                apkDownloadUrl = "https://example.com/app.apk",
+                apkFileName = "aether-android-arm64-v1.1.0-debug-b99.apk",
+                htmlUrl = "https://example.com",
+                deltaManifest = io.aethervpn.android.core.DeltaManifest(
+                    toVersionCode = 99,
+                    toVersionName = "1.1.0-debug-b99",
+                    fullAssetName = "aether-android-arm64-v1.1.0-debug-b99.apk",
+                    fullSize = 10_000_000L,
+                    targetApkSha256 = "abc",
+                    matchedPatch = io.aethervpn.android.core.DeltaPatchEntry(
+                        fromVersionCode = 98,
+                        patchAssetName = "delta-98-to-99.patch",
+                        patchSize = 2_000_000L,
+                        patchSha256 = "def",
+                        patchDownloadUrl = "https://example.com/delta.patch"
+                    )
+                )
+            )
+            java.io.File(updatesDir, "vc99.delta-98-to-99.patch.part").writeText("partial-patch")
+            java.io.File(updatesDir, "vc99.delta-98-to-99.patch.part.chunks.json").writeText("{}")
+            java.io.File(updatesDir, "stale.tmp").writeText("tmp")
+            java.io.File(updatesDir, "stale.apk").writeText("apk")
+
+            assertTrue(UpdateManager.getPartialDownloadSize(release, tempCacheDir) > 0L)
+
+            UpdateManager.discardAllPartialDownloads(release, tempCacheDir)
+
+            assertEquals(0L, UpdateManager.getPartialDownloadSize(release, tempCacheDir))
+            assertTrue("All partial and temp files must be deleted", updatesDir.listFiles().isNullOrEmpty())
+        } finally {
+            tempCacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun gitHubActionsStatusCheckerParsesAllStatesAndHandles304NotModified(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val inProgJson = """
+            {"workflow_runs":[{"id":101,"status":"in_progress","conclusion":null,"display_title":"feat(soar): upgrade","run_started_at":"2026-11-28T10:00:00Z","html_url":"https://github.com/run/101"}]}
+        """.trimIndent()
+        val inProg = io.aethervpn.android.core.GitHubActionsStatusChecker.parseWorkflowRunsJson(inProgJson)
+        assertTrue(inProg is io.aethervpn.android.core.CiBuildState.InProgress)
+        assertEquals(101L, (inProg as io.aethervpn.android.core.CiBuildState.InProgress).runId)
+
+        val successJson = """
+            {"workflow_runs":[{"id":101,"status":"completed","conclusion":"success","display_title":"feat(soar): upgrade","html_url":"https://github.com/run/101"}]}
+        """.trimIndent()
+        val succeeded = io.aethervpn.android.core.GitHubActionsStatusChecker.parseWorkflowRunsJson(successJson)
+        assertTrue(succeeded is io.aethervpn.android.core.CiBuildState.Succeeded)
+
+        val failedJson = """
+            {"workflow_runs":[{"id":102,"status":"completed","conclusion":"failure","display_title":"broken","html_url":"https://github.com/run/102"}]}
+        """.trimIndent()
+        val failed = io.aethervpn.android.core.GitHubActionsStatusChecker.parseWorkflowRunsJson(failedJson)
+        assertTrue(failed is io.aethervpn.android.core.CiBuildState.Failed)
+        assertEquals("failure", (failed as io.aethervpn.android.core.CiBuildState.Failed).conclusion)
+
+        val server = java.net.ServerSocket(0, 2, java.net.InetAddress.getByName("127.0.0.1"))
+        val receivedIfNoneMatch = java.util.concurrent.atomic.AtomicReference<String?>()
+        val thread = Thread {
+            try {
+                // Request 1: 200 OK with ETag
+                server.accept().use { sock ->
+                    val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                    while (!inp.readLine().isNullOrEmpty()) { }
+                    val body = successJson.toByteArray()
+                    val out = sock.getOutputStream()
+                    out.write("HTTP/1.1 200 OK\r\nETag: \"etag-101\"\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                    out.write(body)
+                    out.flush()
+                }
+                // Request 2: 304 Not Modified
+                server.accept().use { sock ->
+                    val inp = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream()))
+                    var line = inp.readLine()
+                    while (!line.isNullOrEmpty()) {
+                        if (line.startsWith("If-None-Match:", ignoreCase = true)) {
+                            receivedIfNoneMatch.set(line.substringAfter(":").trim())
+                        }
+                        line = inp.readLine()
+                    }
+                    val out = sock.getOutputStream()
+                    out.write("HTTP/1.1 304 Not Modified\r\nETag: \"etag-101\"\r\nConnection: close\r\n\r\n".toByteArray())
+                    out.flush()
+                }
+            } catch (_: Exception) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+
+        try {
+            val url = "http://127.0.0.1:${server.localPort}/actions/runs?per_page=1"
+            val first = io.aethervpn.android.core.GitHubActionsStatusChecker.fetchLatestRunStatus(null, url).getOrThrow()
+            assertFalse(first.notModified)
+            assertEquals("\"etag-101\"", first.etag)
+            assertTrue(first.state is io.aethervpn.android.core.CiBuildState.Succeeded)
+
+            val second = io.aethervpn.android.core.GitHubActionsStatusChecker.fetchLatestRunStatus(first.etag, url).getOrThrow()
+            assertTrue(second.notModified)
+            assertNull(second.state)
+            assertEquals("\"etag-101\"", receivedIfNoneMatch.get())
+        } finally {
+            runCatching { server.close() }
+        }
+    }
 }

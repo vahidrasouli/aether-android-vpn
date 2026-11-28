@@ -1733,6 +1733,21 @@
                     </LinearLayout>
 
                     <TextView
+                        android:id="@+id/tvSoarResolverPill"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_pill_chain"
+                        android:fontFamily="monospace"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="4dp"
+                        android:text="0 / 0 DNS"
+                        android:textColor="@color/accent_primary"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+
+                    <TextView
                         android:id="@+id/tvSoarStatusPill"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -1805,6 +1820,71 @@
                                 android:textSize="13sp" />
                         </com.google.android.material.textfield.TextInputLayout>
 
+                        <HorizontalScrollView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:scrollbars="none">
+
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/chipGroupSoarQuickPresets"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                app:chipSpacingHorizontal="6dp"
+                                app:selectionRequired="false"
+                                app:singleLine="true"
+                                app:singleSelection="true">
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarQuickBalanced"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="32dp"
+                                    android:text="Balanced"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="11sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarQuickTurbo"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="32dp"
+                                    android:text="Turbo"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="11sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarQuickStable"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="32dp"
+                                    android:text="Stable"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="11sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarQuickStrict"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="32dp"
+                                    android:text="Strict"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="11sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+                            </com.google.android.material.chip.ChipGroup>
+                        </HorizontalScrollView>
+
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnSoarConnect"
                             style="@style/Widget.Aether.Button"
@@ -1860,6 +1940,124 @@
                             android:textColor="@color/error_text"
                             android:textSize="11.5sp"
                             android:visibility="gone" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- SPEED TEST CARD (Cloudflare Zero-Disk Probe) -->
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/Widget.Aether.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    app:cardCornerRadius="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="14dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Speed Test"
+                                android:textColor="@color/text_primary"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/chipGroupSoarSpeedSize"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                app:checkedChip="@+id/chipSoarSpeed200k"
+                                app:chipSpacingHorizontal="4dp"
+                                app:selectionRequired="true"
+                                app:singleLine="true"
+                                app:singleSelection="true">
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarSpeed100k"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="28dp"
+                                    android:text="100 KB"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="10.5sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarSpeed200k"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="28dp"
+                                    android:text="200 KB"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="10.5sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipSoarSpeed500k"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="28dp"
+                                    android:text="500 KB"
+                                    android:textColor="@color/selector_chip_text"
+                                    android:textSize="10.5sp"
+                                    app:chipBackgroundColor="@color/selector_chip_bg"
+                                    app:chipStrokeColor="@color/selector_chip_stroke"
+                                    app:chipStrokeWidth="1dp" />
+                            </com.google.android.material.chip.ChipGroup>
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/tvSoarSpeedResult"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="10dp"
+                                android:layout_weight="1"
+                                android:fontFamily="monospace"
+                                android:text="TTFB: -- ms  •  Speed: -- KB/s"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11.5sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnSoarSpeedTest"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="34dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:minHeight="34dp"
+                                android:paddingHorizontal="12dp"
+                                android:text="Test Speed"
+                                android:textColor="@color/accent_primary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                app:backgroundTint="@color/accent_primary_container"
+                                app:cornerRadius="10dp"
+                                app:icon="@drawable/ic_speed_24"
+                                app:iconPadding="4dp"
+                                app:iconSize="15dp"
+                                app:iconTint="@color/accent_primary" />
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
