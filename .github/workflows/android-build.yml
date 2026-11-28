@@ -121,7 +121,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/jniLibs/arm64-v8a/libsing-box.so
-          key: sing-box-${{ env.SINGBOX_VERSION }}-go-1.26.3-arm64-v4
+          key: sing-box-${{ env.SINGBOX_VERSION }}-go-1.26.3-arm64-v5
 
       - name: Build ARM64 sing-box core (Go layer)
         if: steps.cache-singbox.outputs.cache-hit != 'true'
@@ -458,6 +458,63 @@ jobs:
           rm -f "$PATCH_RECORDS_FILE"
           echo "Generated delta-manifest.json:"
           cat "$MANIFEST_PATH"
+
+          python3 - "$APK_PATH" "$MANIFEST_PATH" <<'EOF'
+          import json
+          import os
+          import sys
+          import zipfile
+
+          apk_path = sys.argv[1]
+          manifest_path = sys.argv[2]
+
+          full_size = os.path.getsize(apk_path)
+          dex_size = 0
+          arsc_size = 0
+          with zipfile.ZipFile(apk_path, "r") as zf:
+              for info in zf.infolist():
+                  if info.filename.startswith("classes") and info.filename.endswith(".dex"):
+                      dex_size += info.file_size
+                  elif info.filename == "resources.arsc":
+                      arsc_size += info.file_size
+
+          with open(manifest_path, "r", encoding="utf-8") as mf:
+              manifest = json.load(mf)
+          patches = manifest.get("patches", [])
+
+          def fmt_size(b):
+              if b >= 1024 * 1024:
+                  return f"{b / (1024 * 1024):.2f} MB ({b:,} B)"
+              return f"{b / 1024:.1f} KB ({b:,} B)"
+
+          lines = [
+              "### Delta Patch Size Breakdown",
+              "",
+              "| Metric | Size | Notes |",
+              "| --- | --- | --- |",
+              f"| Total new APK | {fmt_size(full_size)} | `{os.path.basename(apk_path)}` |",
+              f"| `classes*.dex` total | {fmt_size(dex_size)} | Uncompressed (`noCompress`) |",
+              f"| `resources.arsc` | {fmt_size(arsc_size)} | Uncompressed (`noCompress`) |",
+          ]
+          if patches:
+              for p in patches:
+                  psize = p["patchSize"]
+                  reduction = (1.0 - (psize / full_size)) * 100.0 if full_size > 0 else 0.0
+                  lines.append(
+                      f"| Patch `b{p['fromVersionCode']} -> b{manifest['toVersionCode']}` | {fmt_size(psize)} | **{reduction:.2f}% reduction** vs full APK |"
+                  )
+          else:
+              lines.append("| Generated `.patch` | N/A | No prior APK in cache or >= 65% threshold |")
+
+          table = "\n".join(lines)
+          print("")
+          print(table)
+          print("")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as sf:
+                  sf.write(table + "\n")
+          EOF
 
           # Store current APK in .apk-history and prune to last 10 builds
           cp "$APK_PATH" ".apk-history/b${CURR_VERSION_CODE}.apk"

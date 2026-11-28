@@ -34,7 +34,7 @@ fi
 
 pushd "${SINGBOX_SRC_DIR}" >/dev/null
 
-LDFLAGS="-s -w -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION#v} -X runtime.godebugDefault=multipathtcp=0,tlssha1=1"
+LDFLAGS="-s -w -buildid= -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION#v} -X runtime.godebugDefault=multipathtcp=0,tlssha1=1"
 if go version | grep -qE "go1\.(2[3-9]|[3-9][0-9])"; then
   LDFLAGS="${LDFLAGS} -checklinkname=0"
 fi

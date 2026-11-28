@@ -62,8 +62,12 @@ android {
         debug {
             signingConfig = signingConfigs.getByName("debug")
             versionNameSuffix = debugVersionSuffix
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
         release {
             isMinifyEnabled = true
@@ -76,6 +80,17 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+
+    androidResources {
+        // Keep DEX bytecode and compiled resources uncompressed so bsdiff diffs raw bytes
+        // instead of hitting ZIP DEFLATE avalanche, and for faster mmap startup.
+        noCompress += listOf("dex", "arsc")
+    }
+
+    vcsInfo {
+        // Omit git SHA metadata from APK for deterministic packaging across commits
+        include = false
     }
 
     compileOptions {
@@ -97,6 +112,17 @@ android {
             // Extract libpsiphon-tunnel-core.so to nativeLibraryDir with +x permissions (required for execve() on Android 10+)
             // and compress .so files inside the APK.
             useLegacyPackaging = true
+        }
+        resources {
+            excludes += listOf(
+                "META-INF/*.version",
+                "META-INF/CHANGES",
+                "META-INF/README.md",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "DebugProbesKt.bin"
+            )
         }
     }
 

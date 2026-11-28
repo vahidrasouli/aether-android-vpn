@@ -23,7 +23,7 @@ export CGO_ENABLED=0
 export GOTOOLCHAIN=local
 
 go mod tidy
-go build -v -trimpath -ldflags="-s -w" -o "${OUTPUT_SO}" .
+go build -v -trimpath -ldflags="-s -w -buildid=" -o "${OUTPUT_SO}" .
 
 chmod 755 "${OUTPUT_SO}"
 
