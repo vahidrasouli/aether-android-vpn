@@ -88,11 +88,6 @@ android {
         noCompress += listOf("dex", "arsc")
     }
 
-    vcsInfo {
-        // Omit git SHA metadata from APK for deterministic packaging across commits
-        include = false
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
