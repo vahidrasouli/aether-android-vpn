@@ -180,11 +180,7 @@ object DiagnosticsLog {
                     if (ring.size >= MAX_ENTRIES) ring.removeFirst()
                     ring.addLast("$ts [Soar] $clean")
                 }
-                if (ring.none { it.contains("[Soar] Resolvers:") }) {
-                lastSoarTelemetryBody = null
-                soarTelemetryRepeatCount = 0
-            }
-            _logsFlow.value = ring.toList()
+                _logsFlow.value = ring.toList()
                 lastUiEmitMs = nowMs
                 shouldNotifyListeners = soarTelemetryRepeatCount <= 2
             } else if (ring.isNotEmpty() && lastPattern == pattern && lastTag == tag) {
@@ -195,11 +191,7 @@ object DiagnosticsLog {
                 // Rate-limit high-frequency burst emissions to keep UI CPU low,
                 // while always emitting the initial collapse (x2) immediately.
                 if (repeatCount <= 2 || nowMs - lastUiEmitMs >= UI_BURST_EMIT_INTERVAL_MS) {
-                    if (ring.none { it.contains("[Soar] Resolvers:") }) {
-                lastSoarTelemetryBody = null
-                soarTelemetryRepeatCount = 0
-            }
-            _logsFlow.value = ring.toList()
+                    _logsFlow.value = ring.toList()
                     lastUiEmitMs = nowMs
                 }
                 shouldNotifyListeners = repeatCount <= 5 || repeatCount % 5 == 0
@@ -211,11 +203,7 @@ object DiagnosticsLog {
                 val line = "$ts [$tag] $clean"
                 if (ring.size >= MAX_ENTRIES) ring.removeFirst()
                 ring.addLast(line)
-                if (ring.none { it.contains("[Soar] Resolvers:") }) {
-                lastSoarTelemetryBody = null
-                soarTelemetryRepeatCount = 0
-            }
-            _logsFlow.value = ring.toList()
+                _logsFlow.value = ring.toList()
                 lastUiEmitMs = nowMs
             }
         }

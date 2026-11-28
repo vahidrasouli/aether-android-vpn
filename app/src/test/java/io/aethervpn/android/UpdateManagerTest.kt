@@ -1002,8 +1002,8 @@ class UpdateManagerTest {
                     )
                 )
             )
-            java.io.File(updatesDir, "vc99.delta-98-to-99.patch.part").writeText("partial-patch")
-            java.io.File(updatesDir, "vc99.delta-98-to-99.patch.part.chunks.json").writeText("{}")
+            java.io.File(updatesDir, "b99.patch.part").writeText("partial-patch")
+            java.io.File(updatesDir, "b99.patch.part.chunks.json").writeText("{}")
             java.io.File(updatesDir, "stale.tmp").writeText("tmp")
             java.io.File(updatesDir, "stale.apk").writeText("apk")
 
